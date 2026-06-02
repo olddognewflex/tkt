@@ -1,0 +1,69 @@
+# Example tkt config for Linear. Copy to .sdlc/config.toml and adjust.
+# Auth: set LINEAR_API_KEY (a personal API key) in your environment.
+
+[ticketing]
+provider = "linear"
+auth_env = ["LINEAR_API_KEY"]
+
+[linear]
+team_key          = "ENG"        # the team whose board this is (identifier prefix)
+type_label_prefix = ""           # "" = match labels against [issue_types] names; else e.g. "Type: "
+list_limit        = 100          # working set fetched before client-side query filtering
+
+[board.roles]            # role -> Linear workflow-state NAME (must match a state on the team)
+backlog      = "Backlog"
+todo         = "Todo"
+in_progress  = "In Progress"
+review       = "In Review"
+qa_ready     = "Ready for QA"
+qa           = "QA"
+deploy_ready = "Ready for Deploy"
+done         = "Done"
+blocked      = "Blocked"
+cancelled    = "Canceled"
+
+[board.ownership]
+"todo->in_progress"   = "agent"
+"in_progress->review" = "agent"
+"review->qa_ready"    = "agent"
+"qa_ready->qa"        = "human"
+"deploy_ready->done"  = "human"
+
+[issue_types]            # Linear has no native type — derived from labels
+full_sdlc   = ["Story", "Bug"]
+deliverable = ["Task", "Chore", "Spike"]
+
+# Queries use the tiny JQL subset (evaluated client-side over the fetched working
+# set), same as the markdown backend. Priority values match Linear's priorityLabel:
+# "Urgent" / "High" / "Medium" / "Low" / "No priority".
+[queries]
+tier1 = 'status = "Todo" AND priority = "Urgent" AND assignee = currentUser() ORDER BY priority DESC'
+tier2 = 'status = "Todo" AND assignee = currentUser() ORDER BY priority DESC'
+tier3 = 'status = "Todo" AND priority = "Urgent" AND assignee IS EMPTY'
+tier4 = 'status = "Todo" AND assignee IS EMPTY ORDER BY priority DESC'
+blocked = 'status = "Blocked" AND assignee = currentUser()'
+blocked_team = 'status = "Blocked"'
+deploy_ready = 'status = "Ready for Deploy"'
+
+[vcs]
+provider       = "github"
+repo           = "your-org/your-repo"
+default_branch = "main"
+branch_fmt     = "feature/{key-lower}-{slug}"
+hotfix_fmt     = "hotfix/{key-lower}-{slug}"
+reviewers      = []
+merge          = "squash"
+
+[deploy]
+preview_workflow    = "deploy-preview.yml"
+staging_workflow    = "deploy-staging.yml"
+production_workflow = "deploy-production.yml"
+
+[build]
+build     = "make build"
+test      = "make test"
+typecheck = "true"
+lint      = "true"
+
+[timetracking]
+provider = "none"        # Linear has no time tracking; worklog/lane-time are no-ops

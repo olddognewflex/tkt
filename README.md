@@ -9,10 +9,10 @@ This is a **standalone, portable package** — clone it once and point any proje
 it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
 (uses stdlib `tomllib`); no third-party deps.
 
-Status: core + `jira`, `markdown`, and `github` adapters, plus the **full** ported
-SDLC skill pack — 13 skills + the ticket-researcher agent (see "Skill pack").
-`linear`/`qi` adapters are the remaining Phase 3 work (just implement the same verb
-contract; no skill changes).
+Status: core + `jira`, `markdown`, `github`, and `linear` adapters, plus the
+**full** ported SDLC skill pack — 13 skills + the ticket-researcher agent (see
+"Skill pack"). The `qi` adapter is the remaining Phase 3 work (same verb contract,
+no skill changes).
 
 ## Install
 
@@ -124,6 +124,25 @@ scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode
 Validation status: labels mode is validated live (reads); projectv2 mode is built
 against the documented `gh project` JSON and validate-after-scope-refresh.
 
+### linear
+GraphQL API (`https://api.linear.app/graphql`), no CLI. Auth via a personal API
+key in env (`[ticketing].auth_env`, default `LINEAR_API_KEY`).
+
+- **Key** = issue identifier (`ENG-123`); the team key is parsed from it.
+- **Board lanes** = Linear workflow states (`[board.roles]` map role → state name);
+  transition updates the issue's `stateId`.
+- **blocked_by/blocks** use Linear's **native issue relations** (`blocks` direction);
+  `resolved` = related issue in a completed/canceled state.
+- **priority** = Linear's `priorityLabel` (`Urgent`/`High`/`Medium`/`Low`); **type**
+  from label convention (`type_label_prefix` or labels matching `[issue_types]`).
+- **Queries** use the shared tiny JQL subset (`core/query.py`), evaluated
+  client-side over a bounded working-set fetch (`[linear].list_limit`, default 100).
+- **No time tracking** — worklog/lane-time are no-ops.
+
+Validation status: built against the Linear GraphQL schema; normalization (relations,
+priority, state→role, acceptance) is unit-checked. Live verbs validate once
+`LINEAR_API_KEY` is set (`tkt doctor`).
+
 ### markdown
 Zero-dependency local board. One `<KEY>.md` per ticket under `[markdown].board_dir`;
 status transitions + worklogs recorded in JSONL sidecars under `[markdown].state_dir`
@@ -204,10 +223,12 @@ core/
   errors.py    typed errors -> exit codes
 adapters/
   base.py      the verb contract (ABC) — what a new provider must implement
+  query.py     shared JQL-subset evaluator (markdown + linear)
   jira.py      jira adapter
   markdown.py  markdown adapter
   github.py    github adapter (Issues + Projects v2 / labels)
-examples/      config.jira.toml, config.markdown.toml, config.github.toml
+  linear.py    linear adapter (GraphQL)
+examples/      config.{jira,markdown,github,linear}.toml
 ```
 
 To add a provider: implement `adapters/base.Adapter`, register it in

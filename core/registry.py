@@ -8,8 +8,8 @@ _PROVIDERS = {
     "jira": ("adapters.jira", "JiraAdapter"),
     "markdown": ("adapters.markdown", "MarkdownAdapter"),
     "github": ("adapters.github", "GithubAdapter"),
+    "linear": ("adapters.linear", "LinearAdapter"),
     # Phase 3 (remaining):
-    # "linear": ("adapters.linear", "LinearAdapter"),
     # "qi": ("adapters.qi", "QiAdapter"),
 }
 
