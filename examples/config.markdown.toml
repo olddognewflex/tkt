@@ -33,10 +33,12 @@ tier2 = 'status = "To Do" AND assignee = currentUser() ORDER BY priority DESC'
 
 [vcs]
 provider   = "github"
-repo       = "your-org/your-repo"
-branch_fmt = "feature/{key-lower}-{slug}"
-reviewers  = []
-merge      = "squash"
+repo           = "your-org/your-repo"
+default_branch = "main"
+branch_fmt     = "feature/{key-lower}-{slug}"
+hotfix_fmt     = "hotfix/{key-lower}-{slug}"
+reviewers      = []
+merge          = "squash"
 
 [build]
 build     = "make build"

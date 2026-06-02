@@ -244,6 +244,41 @@ class JiraAdapter(Adapter):
         issue = self._acli_json("jira", "workitem", "view", key, "--fields", "*all")
         return self._to_ticket(issue, transitions=[])
 
+    def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
+        proj = project or self.project
+        if not proj:
+            raise ProviderError("create needs a project (config [ticketing].project or --project)")
+        args = ["jira", "workitem", "create", "--project", proj,
+                "--type", issue_type, "--summary", summary]
+        if assignee:
+            args += ["--assignee", assignee]
+        if body:
+            args += ["--description", body]
+        # acli `create` has no --priority flag (nor does `edit`); set it via REST
+        # post-create when a token is available, otherwise warn.
+        created = self._acli_json(*args)
+        key = created.get("key") if isinstance(created, dict) else None
+        if not key:
+            # some acli versions return a list or wrap the result
+            key = (created[0].get("key") if isinstance(created, list) and created else None)
+        if not key:
+            raise ProviderError(f"acli create returned no key: {created}")
+        if priority:
+            if self.have_rest:
+                self._jira("PUT", f"/rest/api/3/issue/{key}",
+                           {"fields": {"priority": {"name": priority}}})
+            else:
+                print(f"tkt: priority '{priority}' not set on {key} — acli can't set "
+                      f"priority and no REST token is configured. Set it manually.",
+                      flush=True)
+        return self.view(key)
+
+    def link(self, key, to, link_type):
+        # `tkt link KEY --to OTHER --type T` == "KEY <T> OTHER"; acli's --type
+        # takes the OUTWARD description, with --out = subject, --in = object.
+        self._acli("jira", "workitem", "link", "create",
+                   "--out", key, "--in", to, "--type", link_type, "--yes")
+
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
         self._acli("jira", "workitem", "transition", "--key", key,

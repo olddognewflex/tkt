@@ -9,9 +9,9 @@ This is a **standalone, portable package** — clone it once and point any proje
 it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
 (uses stdlib `tomllib`); no third-party deps.
 
-Status: core + `jira` and `markdown` adapters, plus the ported SDLC skill pack
-(see "Skill pack"). `github`/`linear`/`qi` adapters land in Phase 3 (just implement
-the same verb contract; no skill changes).
+Status: core + `jira` and `markdown` adapters, plus the **full** ported SDLC skill
+pack — 13 skills + the ticket-researcher agent (see "Skill pack"). `github`/`linear`/
+`qi` adapters land in Phase 3 (just implement the same verb contract; no skill changes).
 
 ## Install
 
@@ -53,8 +53,14 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt blockers KEY` | unresolved blockers only | list / `--json` |
 | `tkt worklog KEY --from-role ROLE [--note T] [--billable]` | log time since entry into ROLE's lane → now | worklog / `--json`; no-op if `[timetracking].provider="none"` |
 | `tkt lane-time KEY --role ROLE` | log time for an already-exited lane (entry→exit) | worklog / `--json` |
+| `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
+| `tkt link KEY --to OTHER --type T` | link KEY → OTHER (`T` = outward description: `blocks`, `is blocked by`, `Fixes`, …) | confirmation |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
+| `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
+
+`create`/`link` are optional verbs — adapters opt in (jira + markdown support them);
+a backend without them returns a clear "not supported" error rather than failing to load.
 
 Errors always go to stderr with a non-zero exit (2 config, 3 provider, 4 not-found,
 64 usage) — skills can branch on exit code and never get a silent failure.
@@ -142,19 +148,31 @@ originals — every ticketing/board call now goes through `tkt`):
 | `triage-ticket` | read + move to `in_progress` |
 | `plan-ticket` | structured implementation plan |
 | `open-pr` | commit/push/PR/reviewers + `→ review` with lane-time |
+| `ci-fix` | watch CI, diagnose, fix, loop until green |
+| `self-review` | adversarial pre-PR review loop |
+| `respond-to-review` | address review comments, `revise ↔ review` loop |
+| `deploy-preview` | confirm preview env, post URL to ticket + PR |
 | `complete-deliverable` | short-circuit `→ done` for deliverable types |
+| `deploy-ready` | merge, watch staging, gate prod, QA lane-times |
+| `resume-from-revise` | re-enter the loop after a human revise fix |
+| `check-blockers` | classify blocked tickets, recommend unblocks |
+| `hotfix-revert` | fast-track prod revert (uses `tkt create`/`link`) |
 | `automated-sdlc` | orchestrator across all of the above |
 
-To activate in a project, copy these into the project's `.claude/skills/` (or
-symlink). They depend only on `tkt` + `.sdlc/config.toml`, so the same skill set
-runs against any configured backend. Skills speak in **roles** (`in_progress`,
-`review`, `done`, ...) and read toolchain/VCS settings via `tkt cfg`
-(e.g. `tkt cfg build.test --pkg X`, `tkt cfg vcs.branch_fmt --ticket K --slug s`),
-so nothing about Jira/pnpm/GitHub is baked into skill text.
+`agents/ticket-researcher.md` is the read-only lookup subagent (provider-agnostic
+port of the old `jira-researcher`).
 
-Still on the Jira-coupled originals (Phase 2 port): `ci-fix`, `self-review`,
-`respond-to-review`, `deploy-preview`, `deploy-ready`, `resume-from-revise`,
-`check-blockers`, `hotfix-revert`.
+To activate in a project, copy these into the project's `.claude/skills/` (and
+`agents/`) — or symlink. They depend only on `tkt` + `.sdlc/config.toml`, so the
+same skill set runs against any configured backend. Skills speak in **roles**
+(`in_progress`, `review`, `done`, ...) and read toolchain/VCS/deploy settings via
+`tkt cfg` (e.g. `tkt cfg build.test --pkg X`, `tkt cfg vcs.branch_fmt --ticket K
+--slug s`), so nothing about Jira/pnpm/GitHub is baked into skill text.
+
+VCS (PR/CI/merge via `gh`) and infra (preview/deploy) remain GitHub/cloud-shaped;
+repo, branch formats, reviewers, and workflow names are all config-driven, and
+genuinely infra-specific steps (e.g. preview-URL extraction) are clearly marked
+PROJECT-SPECIFIC in the skill text.
 
 ## Architecture
 

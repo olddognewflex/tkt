@@ -83,6 +83,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("key")
     sp.add_argument("--role", required=True)
 
+    sp = add("create")
+    sp.add_argument("--type", required=True, dest="issue_type")
+    sp.add_argument("--summary", required=True)
+    sp.add_argument("--priority", default="")
+    sp.add_argument("--assignee", default="")
+    sp.add_argument("--body", default="")
+    sp.add_argument("--project", default="")
+
+    sp = add("link")
+    sp.add_argument("key")
+    sp.add_argument("--to", required=True, dest="to")
+    sp.add_argument("--type", required=True, dest="link_type")
+
     sp = add("lane")
     sp.add_argument("role")
 
@@ -177,6 +190,20 @@ def main(argv: list[str]) -> int:
             else:
                 where = wl.worklog_id or "(no time tracking)"
                 print(f"{wl.key}  {wl.role}: {wl.human}  worklog={where}")
+
+        elif args.verb == "create":
+            t = adapter.create(
+                args.issue_type, args.summary, priority=args.priority,
+                assignee=args.assignee, body=args.body, project=args.project,
+            )
+            if args.json:
+                print(json.dumps(t.to_dict(), indent=2))
+            else:
+                print(t.key)
+
+        elif args.verb == "link":
+            adapter.link(args.key, args.to, args.link_type)
+            print(f"{args.key} {args.link_type} {args.to}")
 
         elif args.verb == "doctor":
             checks = adapter.doctor()

@@ -250,6 +250,60 @@ class MarkdownAdapter(Adapter):
     def blockers(self, key):
         return self.view(key).unresolved_blockers()
 
+    def _next_key(self, project: str) -> str:
+        prefix = project or self.config.project or "TKT"
+        n = 0
+        if self.board_dir.is_dir():
+            for path in self.board_dir.glob(f"{prefix}-*.md"):
+                suffix = path.stem[len(prefix) + 1:]
+                if suffix.isdigit():
+                    n = max(n, int(suffix))
+        return f"{prefix}-{n + 1}"
+
+    def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
+        self.board_dir.mkdir(parents=True, exist_ok=True)
+        key = self._next_key(project)
+        todo_lane = self.config.roles.get("todo") or self.config.roles.get("backlog", "To Do")
+        fm = {
+            "type": issue_type,
+            "status": todo_lane,
+            "priority": priority,
+            "assignee": assignee or self.me,
+            "blocked_by": [],
+            "blocks": [],
+        }
+        doc = f"# {summary}\n"
+        if body:
+            doc += f"\n{body}\n"
+        self._write_raw(key, fm, doc)
+        self._append_history(key, "", todo_lane)
+        return self.view(key)
+
+    def link(self, key, to, link_type):
+        fm, body = self._read_raw(key)
+        lt = link_type.strip().lower()
+        if lt == "is blocked by":
+            cur = fm.get("blocked_by", []) or []
+            if isinstance(cur, str):
+                cur = [cur]
+            if to not in cur:
+                cur.append(to)
+            fm["blocked_by"] = cur
+        elif lt == "blocks":
+            cur = fm.get("blocks", []) or []
+            if isinstance(cur, str):
+                cur = [cur]
+            if to not in cur:
+                cur.append(to)
+            fm["blocks"] = cur
+        else:
+            cur = fm.get("links", []) or []
+            if isinstance(cur, str):
+                cur = [cur]
+            cur.append(f"{link_type}:{to}")
+            fm["links"] = cur
+        self._write_raw(key, fm, body)
+
     def worklog(self, key, from_role, note="", billable=False):
         lane = self.config.role_to_lane(from_role)
         if self.config.timetracking.get("provider", "none") == "none":

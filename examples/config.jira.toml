@@ -40,14 +40,23 @@ tier2 = 'status = "To Do" AND assignee = currentUser() ORDER BY priority DESC, c
 tier3 = 'status = "To Do" AND priority = Highest AND assignee is EMPTY ORDER BY created ASC'
 tier4 = 'status = "To Do" AND assignee is EMPTY ORDER BY priority DESC, created ASC'
 tier5 = 'status = "Backlog" ORDER BY priority DESC, created ASC'
-blocked = 'status = "Blocked" ORDER BY priority DESC, updated ASC'
+blocked = 'status = "Blocked" AND assignee = currentUser() ORDER BY priority DESC, updated ASC'
+blocked_team = 'status = "Blocked" ORDER BY priority DESC, updated ASC'
+deploy_ready = 'status = "Ready for Deploy" ORDER BY priority DESC, updated ASC'
 
 [vcs]
-provider   = "github"
-repo       = "auctionedge/edge-dev-platform"
-branch_fmt = "feature/{key-lower}-{slug}"
-reviewers  = ["copilot-pull-request-reviewer[bot]"]
-merge      = "squash"
+provider       = "github"
+repo           = "auctionedge/edge-dev-platform"
+default_branch = "main"
+branch_fmt     = "feature/{key-lower}-{slug}"
+hotfix_fmt     = "hotfix/{key-lower}-{slug}"
+reviewers      = ["copilot-pull-request-reviewer[bot]"]
+merge          = "squash"
+
+[deploy]
+preview_workflow    = "deploy-preview.yml"
+staging_workflow    = "deploy-staging.yml"
+production_workflow = "deploy-production.yml"
 
 [build]
 build     = "pnpm turbo build --filter={pkg}"
