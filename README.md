@@ -9,9 +9,10 @@ This is a **standalone, portable package** — clone it once and point any proje
 it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
 (uses stdlib `tomllib`); no third-party deps.
 
-Status: core + `jira` and `markdown` adapters, plus the **full** ported SDLC skill
-pack — 13 skills + the ticket-researcher agent (see "Skill pack"). `github`/`linear`/
-`qi` adapters land in Phase 3 (just implement the same verb contract; no skill changes).
+Status: core + `jira`, `markdown`, and `github` adapters, plus the **full** ported
+SDLC skill pack — 13 skills + the ticket-researcher agent (see "Skill pack").
+`linear`/`qi` adapters are the remaining Phase 3 work (just implement the same verb
+contract; no skill changes).
 
 ## Install
 
@@ -105,6 +106,24 @@ Ports the original acli + Jira REST + Tempo logic. Auth via env named in
 for non-billable worklogs). `worklog`/`lane-time` page the full changelog and patch
 Tempo exactly as the old `annotate_lane_time` helper did.
 
+### github
+Issues = tickets; board status from **Projects v2** (`board="projectv2"`, default) or
+a `Status:` **label** convention (`board="labels"`). All access via the `gh` CLI:
+`gh issue` (needs `repo` scope) and `gh project` (needs `project`/`read:project`
+scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode).
+
+- **Key** = issue number. **type**/**priority** from label conventions
+  (`type_label_prefix` / `priority_label_prefix`, or labels matching `[issue_types]`).
+- **blocked_by/blocks** parsed from the body (`Blocked by #N` / `Blocks #N`);
+  `resolved` = referenced issue closed.
+- **Queries are GitHub-native**, not JQL: projectv2 → Projects filter syntax
+  (`gh project item-list --query`); labels → issue search (`gh issue list --search`).
+- **No time tracking** — `worklog`/`lane-time` are no-ops; set
+  `[timetracking].provider = "none"`.
+
+Validation status: labels mode is validated live (reads); projectv2 mode is built
+against the documented `gh project` JSON and validate-after-scope-refresh.
+
 ### markdown
 Zero-dependency local board. One `<KEY>.md` per ticket under `[markdown].board_dir`;
 status transitions + worklogs recorded in JSONL sidecars under `[markdown].state_dir`
@@ -187,7 +206,8 @@ adapters/
   base.py      the verb contract (ABC) — what a new provider must implement
   jira.py      jira adapter
   markdown.py  markdown adapter
-examples/      config.jira.toml, config.markdown.toml
+  github.py    github adapter (Issues + Projects v2 / labels)
+examples/      config.jira.toml, config.markdown.toml, config.github.toml
 ```
 
 To add a provider: implement `adapters/base.Adapter`, register it in

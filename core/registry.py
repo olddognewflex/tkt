@@ -7,8 +7,8 @@ from .errors import ConfigError
 _PROVIDERS = {
     "jira": ("adapters.jira", "JiraAdapter"),
     "markdown": ("adapters.markdown", "MarkdownAdapter"),
-    # Phase 3:
-    # "github": ("adapters.github", "GithubAdapter"),
+    "github": ("adapters.github", "GithubAdapter"),
+    # Phase 3 (remaining):
     # "linear": ("adapters.linear", "LinearAdapter"),
     # "qi": ("adapters.qi", "QiAdapter"),
 }

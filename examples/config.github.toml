@@ -1,0 +1,87 @@
+# Example tkt config for GitHub Issues + Projects v2.
+# Copy to .sdlc/config.toml and adjust. Two board models are supported via
+# [github].board — see the two query blocks below.
+
+[ticketing]
+provider = "github"
+project  = ""          # unused for github (repo identifies the issues)
+
+[github]
+board          = "projectv2"        # "projectv2" (needs `project` gh scope) | "labels" (repo scope only)
+repo           = "your-org/your-repo"
+# --- projectv2 mode ---
+project_owner  = "@me"              # login or org, or "@me"
+project_number = 1                  # the Projects v2 number
+status_field   = "Status"           # single-select field that drives the board
+# --- both modes ---
+priority_label_prefix = "Priority: "   # label "Priority: Highest" -> priority "Highest"
+type_label_prefix     = ""             # "" = match labels against [issue_types] names; else e.g. "Type: "
+# --- labels mode only ---
+status_label_prefix   = "Status: "     # label "Status: In Progress" -> the board lane
+
+[board.roles]            # role -> the Projects v2 status option name (or the Status: label suffix)
+backlog      = "Backlog"
+todo         = "Todo"
+in_progress  = "In Progress"
+review       = "In Review"
+qa_ready     = "Ready for QA"
+qa           = "QA"
+deploy_ready = "Ready for Deploy"
+done         = "Done"
+# Side roles below have no board column on GitHub by default; represent them as
+# labels or extra status options if you want them on the board.
+blocked      = "Blocked"
+revise       = "Revise"
+cancelled    = "Cancelled"
+
+[board.ownership]
+"todo->in_progress"   = "agent"
+"in_progress->review" = "agent"
+"review->qa_ready"    = "agent"
+"qa_ready->qa"        = "human"
+"deploy_ready->done"  = "human"
+
+[issue_types]
+full_sdlc   = ["Story", "Bug"]
+deliverable = ["Task", "Chore", "Spike", "Epic"]
+
+# Queries are GITHUB-NATIVE, not JQL.
+#  - projectv2 mode: Projects filter syntax, passed to `gh project item-list --query`
+#    (e.g. `assignee:@me status:"Todo"`). Note: no ORDER BY; first match wins.
+#  - labels mode: GitHub issue search syntax, passed to `gh issue list --search`
+#    (e.g. `is:open assignee:@me label:"Status: Todo"`).
+[queries]
+# projectv2 examples:
+tier1 = 'assignee:@me status:"Todo" priority:Highest'
+tier2 = 'assignee:@me status:"Todo"'
+tier3 = 'no:assignee status:"Todo" priority:Highest'
+tier4 = 'no:assignee status:"Todo"'
+blocked = 'status:"Blocked" assignee:@me'
+blocked_team = 'status:"Blocked"'
+deploy_ready = 'status:"Ready for Deploy"'
+# labels-mode equivalents (swap in when board="labels"):
+# tier1 = 'is:open is:issue assignee:@me label:"Status: Todo" label:"Priority: Highest"'
+# tier2 = 'is:open is:issue assignee:@me label:"Status: Todo"'
+
+[vcs]
+provider       = "github"
+repo           = "your-org/your-repo"
+default_branch = "main"
+branch_fmt     = "feature/{key-lower}-{slug}"
+hotfix_fmt     = "hotfix/{key-lower}-{slug}"
+reviewers      = ["copilot-pull-request-reviewer[bot]"]
+merge          = "squash"
+
+[deploy]
+preview_workflow    = "deploy-preview.yml"
+staging_workflow    = "deploy-staging.yml"
+production_workflow = "deploy-production.yml"
+
+[build]
+build     = "make build"
+test      = "make test"
+typecheck = "true"
+lint      = "true"
+
+[timetracking]
+provider = "none"        # GitHub has no time tracking; worklog/lane-time are no-ops
