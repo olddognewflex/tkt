@@ -172,7 +172,7 @@ A new project = drop in skill pack + `tkt`, write this file, set env. Done.
 | **jira** | acli + REST (port existing code verbatim) | status field | Tempo/worklog (existing) | regression baseline — behavior must stay identical |
 | **github** | Issues via `gh`/REST | **Projects v2 = GraphQL**, status = single-select field option ids | none → `worklog` becomes a comment | board mapping is the main effort; needs project node id + field/option ids in config |
 | **linear** | GraphQL API | workflow states (native role-like model) | none (or estimate field) | cleanest lane model; states have types (started/completed) that map to roles well |
-| **qi** | `qi task`/`qi ai` against this repo's vault | markdown task lines / projection files | local log | offline; reuses qi's own CLI |
+| ~~**qi**~~ | _dropped — qi has no issue system to adapt; use the `markdown` backend for a local board instead_ | | | |
 | **markdown** | a `BOARD.md` kanban file | `## Lane` headings, tasks move between them | local `.sdlc/worklog.jsonl` | zero deps; the portable default + abstraction proof |
 
 Cross-cutting:
@@ -207,8 +207,9 @@ Per skill: swap provider calls for `tkt`, lane literals for roles, build cmds fo
 `ticket-researcher`. Fold deploy-ready's retro changelog loop into `tkt lane-time`.
 
 ### Phase 3 — Remaining adapters
-`github` (Issues + Projects v2 GraphQL), `linear` (GraphQL), `qi`. No skill changes —
-they only implement the verb contract. Validate each with `tkt doctor` + a dry run.
+`github` (Issues + Projects v2 / labels) and `linear` (GraphQL) — done. No skill
+changes; each only implements the verb contract. (`qi` dropped — no issue system.)
+Validate each with `tkt doctor` + a dry run.
 
 ### Phase 4 — Distribution + validation
 - `sdlc init` scaffolder: interactive → writes config, picks provider, maps lanes.

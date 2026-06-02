@@ -9,8 +9,6 @@ _PROVIDERS = {
     "markdown": ("adapters.markdown", "MarkdownAdapter"),
     "github": ("adapters.github", "GithubAdapter"),
     "linear": ("adapters.linear", "LinearAdapter"),
-    # Phase 3 (remaining):
-    # "qi": ("adapters.qi", "QiAdapter"),
 }
 
 

@@ -11,8 +11,9 @@ it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
 
 Status: core + `jira`, `markdown`, `github`, and `linear` adapters, plus the
 **full** ported SDLC skill pack — 13 skills + the ticket-researcher agent (see
-"Skill pack"). The `qi` adapter is the remaining Phase 3 work (same verb contract,
-no skill changes).
+"Skill pack"). (A `qi` adapter was considered but dropped — qi has no issue system
+to adapt.) Adding another backend is just a new `adapters/*.py` implementing the
+verb contract; no skill changes.
 
 ## Install
 
