@@ -1,0 +1,48 @@
+# Example tkt config for a dependency-free local markdown board.
+# Copy to .sdlc/config.toml. Tickets live as <KEY>.md files under board_dir.
+
+[ticketing]
+provider = "markdown"
+project  = "TKT"
+
+[markdown]
+board_dir = ".sdlc/board"     # one <KEY>.md per ticket (human-canonical)
+state_dir = ".sdlc/state"     # history + worklog JSONL sidecars (machine-local)
+me        = "raymond"         # value substituted for currentUser() in queries
+
+[board.roles]
+backlog     = "Backlog"
+todo        = "To Do"
+in_progress = "In Progress"
+review      = "In Review"
+done        = "Done"
+blocked     = "Blocked"
+
+[board.ownership]
+"todo->in_progress"   = "agent"
+"in_progress->review" = "agent"
+"review->done"        = "agent"
+
+[issue_types]
+full_sdlc   = ["Story", "Bug"]
+deliverable = ["Task", "Chore", "Spike"]
+
+[queries]                     # tiny JQL subset: field = "v" [AND ...] [ORDER BY field DIR]
+tier1 = 'status = "To Do" AND priority = Highest AND assignee = currentUser() ORDER BY priority DESC'
+tier2 = 'status = "To Do" AND assignee = currentUser() ORDER BY priority DESC'
+
+[vcs]
+provider   = "github"
+repo       = "your-org/your-repo"
+branch_fmt = "feature/{key-lower}-{slug}"
+reviewers  = []
+merge      = "squash"
+
+[build]
+build     = "make build"
+test      = "make test"
+typecheck = "true"
+lint      = "true"
+
+[timetracking]
+provider = "local"            # none disables worklog; anything else -> local JSONL

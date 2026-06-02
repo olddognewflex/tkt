@@ -1,0 +1,65 @@
+# Example tkt config for the DTB / edge-dev-platform Jira board.
+# Copy to .sdlc/config.toml at your repo root and adjust.
+
+[ticketing]
+provider = "jira"
+project  = "DTB"
+board_id = "999"
+auth_env = ["CONFLUENCE_SITE", "CONFLUENCE_EMAIL", "CONFLUENCE_API_TOKEN"]
+
+[board.roles]            # canonical role -> Jira lane name (verbatim, case-sensitive)
+backlog      = "Backlog"
+todo         = "To Do"
+in_progress  = "In Progress"
+review       = "PR Needs Review"
+qa_ready     = "Ready for QA"
+qa           = "QA"
+deploy_ready = "Ready for Deploy"
+done         = "Done"
+revise       = "Revise"
+blocked      = "Blocked"
+cancelled    = "Cancelled"
+
+[board.ownership]        # which role transitions the agent may perform vs human gates
+"todo->in_progress"        = "agent"
+"in_progress->review"      = "agent"
+"review->qa_ready"         = "agent"
+"qa_ready->qa"             = "human"
+"qa->deploy_ready"         = "human"
+"qa->revise"               = "human"
+"deploy_ready->done"       = "human"
+"revise->in_progress"      = "agent"
+
+[issue_types]
+full_sdlc   = ["Story", "Bug"]
+deliverable = ["Task", "Sub-task", "Sub-Task", "Chore", "Epic", "Spike"]
+
+[queries]                # JQL; `project = DTB AND` is prepended automatically
+tier1 = 'status = "To Do" AND priority = Highest AND assignee = currentUser() ORDER BY created ASC'
+tier2 = 'status = "To Do" AND assignee = currentUser() ORDER BY priority DESC, created ASC'
+tier3 = 'status = "To Do" AND priority = Highest AND assignee is EMPTY ORDER BY created ASC'
+tier4 = 'status = "To Do" AND assignee is EMPTY ORDER BY priority DESC, created ASC'
+tier5 = 'status = "Backlog" ORDER BY priority DESC, created ASC'
+blocked = 'status = "Blocked" ORDER BY priority DESC, updated ASC'
+
+[vcs]
+provider   = "github"
+repo       = "auctionedge/edge-dev-platform"
+branch_fmt = "feature/{key-lower}-{slug}"
+reviewers  = ["copilot-pull-request-reviewer[bot]"]
+merge      = "squash"
+
+[build]
+build     = "pnpm turbo build --filter={pkg}"
+test      = "pnpm --filter {pkg} test -- --run"
+typecheck = "pnpm turbo typecheck"
+lint      = "pnpm turbo lint"
+
+[timetracking]
+provider = "tempo"        # none | jira-worklog | tempo
+billable = false
+auth_env = ["TEMPO_API_TOKEN"]
+
+[docs]
+provider = "confluence"
+space    = ""

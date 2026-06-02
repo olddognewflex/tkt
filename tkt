@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""tkt — provider-agnostic ticketing/board CLI for the portable SDLC skill pack.
+
+Skills call semantic verbs (view/transition/comment/worklog/...); this shim
+dispatches to the configured provider adapter, which normalizes every backend
+into one JSON shape. See README.md for the verb contract.
+"""
+import os
+import sys
+
+# Make `core` and `adapters` importable regardless of cwd.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from core.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
