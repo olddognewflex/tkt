@@ -211,10 +211,14 @@ Per skill: swap provider calls for `tkt`, lane literals for roles, build cmds fo
 changes; each only implements the verb contract. (`qi` dropped — no issue system.)
 Validate each with `tkt doctor` + a dry run.
 
-### Phase 4 — Distribution + validation
-- `sdlc init` scaffolder: interactive → writes config, picks provider, maps lanes.
-- Run the full pipeline end-to-end on a **markdown** and a **github** test project.
-- Docs: README for the skill pack + per-provider setup.
+### Phase 4 — Distribution + validation  ✅
+- `tkt init` scaffolder: `--provider` (prompts on a TTY), writes `.sdlc/config.toml`
+  from the matching example, `--link-skills` symlinks the pack into `.claude/`,
+  `--sample` drops a markdown starter ticket. Refuses to clobber without `--force`.
+- End-to-end validated on a freshly-scaffolded **markdown** project: init → doctor →
+  select → triage → route → open-pr (worklog) → done. (github labels mode reads are
+  live-validated; projectv2 + mutations need scope/consent.)
+- Docs: README Install / Use-in-a-project / verb contract / per-provider notes.
 
 ---
 

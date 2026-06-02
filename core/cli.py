@@ -99,6 +99,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("lane")
     sp.add_argument("role")
 
+    sp = add("init")
+    sp.add_argument("--provider", help="ticketing backend (jira|markdown|github|linear)")
+    sp.add_argument("--dir", default=".", help="project dir to scaffold (default cwd)")
+    sp.add_argument("--force", action="store_true", help="overwrite existing config")
+    sp.add_argument("--link-skills", action="store_true",
+                    help="symlink skills/ + agents/ into .claude/")
+    sp.add_argument("--sample", action="store_true",
+                    help="markdown: also write a starter ticket")
+
     sp = add("cfg")
     sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo")
     sp.add_argument("--pkg", default="", help="substitute {pkg} in the value")
@@ -123,6 +132,12 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     try:
+        # `init` runs before any config exists — handle it before Config.load().
+        if args.verb == "init":
+            from .scaffold import init as scaffold_init
+            return scaffold_init(args.provider, args.dir, args.force,
+                                 args.link_skills, args.sample, interactive=True)
+
         config = Config.load(args.config)
 
         # `lane` and `cfg` are pure config resolution — no adapter/backend needed.

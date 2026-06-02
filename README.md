@@ -27,14 +27,26 @@ script, so the symlink target must resolve back to the repo (a symlink is fine).
 
 ## Use in a project
 
+Fastest path — scaffold with `tkt init`:
+
 ```sh
 cd my-project
-mkdir -p .sdlc
-cp ~/Development/tkt/examples/config.markdown.toml .sdlc/config.toml   # or config.jira.toml
-$EDITOR .sdlc/config.toml
-tkt doctor
+tkt init --provider markdown --link-skills --sample
+#   writes .sdlc/config.toml, symlinks skills/ + agents/ into .claude/,
+#   and (markdown) drops a starter ticket. --provider: jira|markdown|github|linear.
+$EDITOR .sdlc/config.toml         # adjust roles/queries/repo to taste
+tkt doctor                        # validate auth + board model
+```
 
-# Activate the skills (copy or symlink into the project's .claude/skills):
+`tkt init` flags: `--provider` (required non-interactively; prompts on a TTY),
+`--dir` (target, default cwd), `--force` (overwrite existing config),
+`--link-skills` (symlink the pack into `.claude/`), `--sample` (markdown starter
+ticket). It refuses to clobber an existing `.sdlc/config.toml` without `--force`.
+
+Manual equivalent, if you prefer:
+
+```sh
+mkdir -p .sdlc && cp ~/Development/tkt/examples/config.markdown.toml .sdlc/config.toml
 ln -s ~/Development/tkt/skills/* .claude/skills/
 ```
 
@@ -57,6 +69,7 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt lane-time KEY --role ROLE` | log time for an already-exited lane (entry→exit) | worklog / `--json` |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
 | `tkt link KEY --to OTHER --type T` | link KEY → OTHER (`T` = outward description: `blocks`, `is blocked by`, `Fixes`, …) | confirmation |
+| `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
