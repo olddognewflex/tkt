@@ -9,6 +9,7 @@ _PROVIDERS = {
     "markdown": ("adapters.markdown", "MarkdownAdapter"),
     "github": ("adapters.github", "GithubAdapter"),
     "linear": ("adapters.linear", "LinearAdapter"),
+    "openkanban": ("adapters.openkanban", "OpenKanbanAdapter"),
 }
 
 

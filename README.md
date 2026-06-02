@@ -9,11 +9,10 @@ This is a **standalone, portable package** — clone it once and point any proje
 it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
 (uses stdlib `tomllib`); no third-party deps.
 
-Status: core + `jira`, `markdown`, `github`, and `linear` adapters, plus the
-**full** ported SDLC skill pack — 13 skills + the ticket-researcher agent (see
-"Skill pack"). (A `qi` adapter was considered but dropped — qi has no issue system
-to adapt.) Adding another backend is just a new `adapters/*.py` implementing the
-verb contract; no skill changes.
+Status: core + `jira`, `markdown`, `github`, `linear`, and `openkanban` adapters,
+plus the **full** ported SDLC skill pack — 13 skills + the ticket-researcher agent
+(see "Skill pack"). Adding another backend is just a new `adapters/*.py`
+implementing the verb contract; no skill changes.
 
 ## Install
 
@@ -157,6 +156,26 @@ Validation status: built against the Linear GraphQL schema; normalization (relat
 priority, state→role, acceptance) is unit-checked. Live verbs validate once
 `LINEAR_API_KEY` is set (`tkt doctor`).
 
+### openkanban
+Local board for [OpenKanban](https://github.com/TechDufus/openkanban) (a TUI for
+orchestrating AI agents). OpenKanban's CLI only manages projects — no ticket CLI —
+so this adapter reads/writes its JSON store directly (format verified against the
+repo's store source). Fully local, no network.
+
+- **Config dir** resolved exactly like openkanban: `[openkanban].config_dir` →
+  `$OPENKANBAN_CONFIG_DIR` → `$XDG_CONFIG_HOME/openkanban` → `~/.config/openkanban`.
+  `[openkanban].project` = project name or id (from `openkanban list`).
+- **Key** = ticket UUID. **Statuses** are a fixed enum (`backlog`/`in_progress`/
+  `done`/`archived`) → a 3-lane board; map roles to those (best for the short
+  todo→in_progress→done flow). **priority** = int 1..5 ↔ Highest…Lowest.
+- **No assignee** (single-user) → blank; don't filter queries by assignee.
+  **Comments** append to the description under `## Activity`. **Relations** live in
+  the ticket `meta` map. **No time tracking** (worklog/lane-time no-op).
+- **Queries** use the shared JQL subset (client-side over the JSON store).
+
+Validation status: fully validated live against the real on-disk format (doctor,
+list, view, create, transition, comment, link, blockers, worklog).
+
 ### markdown
 Zero-dependency local board. One `<KEY>.md` per ticket under `[markdown].board_dir`;
 status transitions + worklogs recorded in JSONL sidecars under `[markdown].state_dir`
@@ -242,7 +261,8 @@ adapters/
   markdown.py  markdown adapter
   github.py    github adapter (Issues + Projects v2 / labels)
   linear.py    linear adapter (GraphQL)
-examples/      config.{jira,markdown,github,linear}.toml
+  openkanban.py  openkanban adapter (local JSON store)
+examples/      config.{jira,markdown,github,linear,openkanban}.toml
 ```
 
 To add a provider: implement `adapters/base.Adapter`, register it in
