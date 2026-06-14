@@ -253,10 +253,11 @@ core/
   config.py    .sdlc/config.toml loader; role<->lane, type routing, queries
   registry.py  provider name -> adapter (lazy import)
   schema.py    Ticket / Worklog / Check dataclasses + to_dict()
+  query.py     shared JQL-subset evaluator (markdown + linear + openkanban)
+  scaffold.py  `tkt init` scaffolder
   errors.py    typed errors -> exit codes
 adapters/
   base.py      the verb contract (ABC) — what a new provider must implement
-  query.py     shared JQL-subset evaluator (markdown + linear)
   jira.py      jira adapter
   markdown.py  markdown adapter
   github.py    github adapter (Issues + Projects v2 / labels)
