@@ -21,8 +21,12 @@ Pure stdlib, Python 3.11+ (uses `tomllib`). No third-party deps, no build step.
 ./tkt <verb> ...              # run the CLI from the repo (or symlink ./tkt onto PATH)
 ./tkt doctor                  # validate a project's auth + reachability + board model
 ./tkt view KEY --json         # normalized ticket shape skills parse
-./tkt init --provider markdown --link-skills --sample   # scaffold a project's .sdlc/
+./tkt init --provider markdown --link-harness claude --sample   # scaffold a project's .sdlc/
 ```
+
+Use `--link-harness opencode` for OpenCode, `--link-harness all` for every known
+harness, or `--global` to install into user harness config instead of the project.
+`--link-skills` is deprecated and now means `--link-harness claude`.
 
 There is **no test suite, linter config, or Makefile** in this repo. "Validation"
 of an adapter means running `tkt doctor` / the read verbs live against a real backend
@@ -78,7 +82,7 @@ string. This is the core abstraction that lets one skill drive an 8-lane Jira bo
 
 No skill changes are ever required — that's the point of the split.
 
-## Skill pack (`skills/`, `agents/`)
+## Skill pack (`skills/`, `agents/`, `commands/`)
 
 The `skills/*/SKILL.md` files are the provider-agnostic SDLC pipeline (select → triage →
 plan → open-pr → ci-fix → self-review → respond-to-review → deploy, orchestrated by
