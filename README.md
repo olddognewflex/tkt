@@ -68,13 +68,15 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt lane-time KEY --role ROLE` | log time for an already-exited lane (entry→exit) | worklog / `--json` |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
 | `tkt link KEY --to OTHER --type T` | link KEY → OTHER (`T` = outward description: `blocks`, `is blocked by`, `Fixes`, …) | confirmation |
+| `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L]` | edit content/fields in place (only flags passed change; status excluded — use `transition`) | normalized ticket / `--json` |
 | `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
 
-`create`/`link` are optional verbs — adapters opt in (jira + markdown support them);
-a backend without them returns a clear "not supported" error rather than failing to load.
+`create`/`link`/`edit` are optional verbs — adapters opt in (markdown supports all
+three; jira supports create/link); a backend without them returns a clear "not
+supported" error rather than failing to load.
 
 Errors always go to stderr with a non-zero exit (2 config, 3 provider, 4 not-found,
 64 usage) — skills can branch on exit code and never get a silent failure.
