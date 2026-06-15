@@ -78,3 +78,21 @@ class Adapter(ABC):
         """Link `key` to `to` with a provider link type (e.g. 'is blocked by',
         'blocks', 'relates to', 'Fixes', 'duplicates')."""
         raise ProviderError(f"link not supported by provider '{self.config.provider}'")
+
+    def edit(
+        self,
+        key: str,
+        summary: str | None = None,
+        body: str | None = None,
+        priority: str | None = None,
+        assignee: str | None = None,
+        add_labels: list[str] | None = None,
+        remove_labels: list[str] | None = None,
+    ) -> Ticket:
+        """Edit a ticket's content/fields in place; return it normalized.
+
+        Only the arguments that are not None are changed (an empty string is a
+        valid value, e.g. clearing the assignee). Status is intentionally NOT
+        editable here — lane moves go through `transition` so history/worklog
+        stay correct."""
+        raise ProviderError(f"edit not supported by provider '{self.config.provider}'")

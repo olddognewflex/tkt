@@ -305,6 +305,70 @@ class MarkdownAdapter(Adapter):
             fm["links"] = cur
         self._write_raw(key, fm, body)
 
+    @staticmethod
+    def _split_body(doc: str) -> tuple[str, str, str]:
+        """Split a ticket body into (summary, description, rest).
+
+        summary = the first `# ` heading; description = the prose between it and
+        the first `## ` section; rest = that first `## ` section onward
+        (Acceptance, Comments, ...), preserved verbatim so an edit doesn't drop
+        acceptance criteria or the comment log."""
+        summary = ""
+        desc_lines: list[str] = []
+        rest_lines: list[str] = []
+        seen_summary = False
+        in_rest = False
+        for line in doc.splitlines():
+            s = line.strip()
+            if in_rest:
+                rest_lines.append(line)
+            elif not seen_summary and s.startswith("# "):
+                summary = s[2:].strip()
+                seen_summary = True
+            elif s.startswith("## "):
+                in_rest = True
+                rest_lines.append(line)
+            else:
+                desc_lines.append(line)
+        return summary, "\n".join(desc_lines).strip(), "\n".join(rest_lines).strip()
+
+    def edit(self, key, summary=None, body=None, priority=None, assignee=None,
+             add_labels=None, remove_labels=None):
+        fm, doc = self._read_raw(key)
+
+        if priority is not None:
+            fm["priority"] = priority
+        if assignee is not None:
+            fm["assignee"] = assignee
+
+        if add_labels or remove_labels:
+            cur = fm.get("labels", []) or []
+            if isinstance(cur, str):
+                cur = [cur]
+            cur = list(cur)
+            for lbl in (add_labels or []):
+                if lbl not in cur:
+                    cur.append(lbl)
+            for lbl in (remove_labels or []):
+                if lbl in cur:
+                    cur.remove(lbl)
+            fm["labels"] = cur
+
+        # Only rebuild the body when summary/description actually change, so a
+        # pure frontmatter edit leaves the markdown (and its Comments) untouched.
+        if summary is not None or body is not None:
+            cur_summary, cur_desc, rest = self._split_body(doc)
+            new_summary = cur_summary if summary is None else summary
+            new_desc = cur_desc if body is None else body
+            doc = f"# {new_summary}\n"
+            if new_desc:
+                doc += f"\n{new_desc}\n"
+            if rest:
+                doc += f"\n{rest}\n"
+
+        self._write_raw(key, fm, doc)
+        return self.view(key)
+
     def worklog(self, key, from_role, note="", billable=False):
         lane = self.config.role_to_lane(from_role)
         if self.config.timetracking.get("provider", "none") == "none":

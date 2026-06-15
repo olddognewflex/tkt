@@ -107,6 +107,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--to", required=True, dest="to")
     sp.add_argument("--type", required=True, dest="link_type")
 
+    sp = add("edit")
+    sp.add_argument("key")
+    # default=None means "field not supplied" → leave unchanged (an empty string
+    # is still a valid value, e.g. --assignee "" to clear it).
+    sp.add_argument("--summary", default=None)
+    sp.add_argument("--body", default=None)
+    sp.add_argument("--priority", default=None)
+    sp.add_argument("--assignee", default=None)
+    sp.add_argument("--add-label", action="append", default=[], dest="add_label")
+    sp.add_argument("--remove-label", action="append", default=[], dest="remove_label")
+
     sp = add("lane")
     sp.add_argument("role")
 
@@ -237,6 +248,17 @@ def main(argv: list[str]) -> int:
         elif args.verb == "link":
             adapter.link(args.key, args.to, args.link_type)
             print(f"{args.key} {args.link_type} {args.to}")
+
+        elif args.verb == "edit":
+            t = adapter.edit(
+                args.key, summary=args.summary, body=args.body,
+                priority=args.priority, assignee=args.assignee,
+                add_labels=args.add_label, remove_labels=args.remove_label,
+            )
+            if args.json:
+                print(json.dumps(t.to_dict(), indent=2))
+            else:
+                _print_ticket_human(t)
 
         elif args.verb == "doctor":
             checks = adapter.doctor()
