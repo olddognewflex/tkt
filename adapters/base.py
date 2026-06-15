@@ -60,6 +60,30 @@ class Adapter(ABC):
         in that mode the timetracking provider is ignored so the duration is
         available even when no time is being tracked."""
 
+    def lane_time_batch(
+        self,
+        keys_roles: list[tuple[str, str]],
+        read_only: bool = False,
+    ) -> list[Worklog]:
+        """Batch form of `lane_time`. Default implementation loops over single
+        calls; adapters for local/remote backends should override for efficiency.
+
+        Per-key failures (e.g. no history in the requested lane) degrade to a
+        Worklog with seconds=0 and human="" rather than aborting the whole batch.
+        Other failures propagate."""
+        out = []
+        for key, role in keys_roles:
+            try:
+                out.append(self.lane_time(key, role, read_only=read_only))
+            except ProviderError as e:
+                msg = str(e).lower()
+                if "no entry" in msg or "no transition" in msg:
+                    out.append(Worklog(key=key, role=role,
+                                     lane=self.config.role_to_lane(role)))
+                else:
+                    raise
+        return out
+
     @abstractmethod
     def doctor(self) -> list[Check]:
         """Validate auth + reachability + board model. Read-only."""

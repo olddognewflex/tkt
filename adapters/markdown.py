@@ -416,6 +416,38 @@ class MarkdownAdapter(Adapter):
         return Worklog(key=key, role=role, lane=lane, seconds=secs,
                        human=human_duration(secs), worklog_id=wl_id, note="retroactive")
 
+    def lane_time_batch(self, keys_roles, read_only=False):
+        out = []
+        for key, role in keys_roles:
+            lane = self.config.role_to_lane(role)
+            if not read_only and self.config.timetracking.get("provider", "none") == "none":
+                out.append(Worklog(key=key, role=role, lane=lane))
+                continue
+            history = sorted(self._read_history(key), key=lambda h: h["ts"])
+            last_in = None
+            for h in history:
+                if h["to"] == lane:
+                    last_in = _parse_iso(h["ts"])
+            if last_in is None:
+                out.append(Worklog(key=key, role=role, lane=lane))
+                continue
+            exit_dt = _now()
+            for h in history:
+                ts = _parse_iso(h["ts"])
+                if h["from"] == lane and ts > last_in:
+                    exit_dt = ts
+                    break
+            secs = max(int((exit_dt - last_in).total_seconds()), 60)
+            if read_only:
+                out.append(Worklog(key=key, role=role, lane=lane, seconds=secs,
+                                   human=human_duration(secs)))
+            else:
+                wl_id = self._append_worklog(key, role, lane, secs, "retroactive")
+                out.append(Worklog(key=key, role=role, lane=lane, seconds=secs,
+                                   human=human_duration(secs), worklog_id=wl_id,
+                                   note="retroactive"))
+        return out
+
     def doctor(self):
         checks = [
             Check("board_dir exists", self.board_dir.is_dir(), str(self.board_dir)),

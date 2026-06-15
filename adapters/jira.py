@@ -366,10 +366,8 @@ class JiraAdapter(Adapter):
         return Worklog(key=key, role=from_role, lane=lane, seconds=secs,
                        human=human_duration(secs), worklog_id=wl_id, note=note)
 
-    def lane_time(self, key, role, read_only=False):
+    def _lane_time_for(self, key, role, read_only=False):
         lane = self.config.role_to_lane(role)
-        # read_only computes for display regardless of time tracking; the
-        # recording path stays a no-op when the provider tracks no time.
         if not read_only and not self._provider_tracks_time():
             return Worklog(key=key, role=role, lane=lane)
         entries = sorted(self._changelog_entries(key), key=lambda e: e[0])
@@ -393,6 +391,9 @@ class JiraAdapter(Adapter):
         self._mark_non_billable(wl_id, secs, body)
         return Worklog(key=key, role=role, lane=lane, seconds=secs,
                        human=human_duration(secs), worklog_id=wl_id, note="retroactive")
+
+    def lane_time(self, key, role, read_only=False):
+        return self._lane_time_for(key, role, read_only=read_only)
 
     def doctor(self):
         checks = []
