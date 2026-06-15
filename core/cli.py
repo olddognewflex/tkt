@@ -40,13 +40,24 @@ def _print_ticket_list(tickets: list[Ticket], as_json: bool) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     # Shared flags usable on either side of the verb (tkt --json view X == tkt view X --json).
+    # SUPPRESS defaults are load-bearing: --config/--json live on both the top-level
+    # parser and every subparser (via parents). With an ordinary default, the
+    # subparser copy re-applies its default and clobbers a value the top-level
+    # parser already set, so `tkt --config X view K` silently loses --config.
+    # SUPPRESS means an absent copy writes nothing; whichever side supplied the flag
+    # wins. Real defaults are seeded once on the top-level parser below.
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--config", help="path to .sdlc/config.toml (else auto-discover)")
-    common.add_argument("--json", action="store_true", help="emit JSON where supported")
+    common.add_argument("--config", default=argparse.SUPPRESS,
+                        help="path to .sdlc/config.toml (else auto-discover)")
+    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                        help="emit JSON where supported")
 
     p = argparse.ArgumentParser(
         prog="tkt", description="Provider-agnostic ticketing CLI", parents=[common]
     )
+    # NB: do NOT seed these with parser.set_defaults() — that mutates the shared
+    # action's .default (parents= copies actions by reference), undoing SUPPRESS
+    # and reviving the clobber. Baseline defaults are applied post-parse in main().
     sub = p.add_subparsers(dest="verb", required=True)
 
     def add(name):
@@ -130,6 +141,13 @@ def _subst(value: str, pkg: str, ticket: str, slug: str) -> str:
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # --config/--json use SUPPRESS defaults so a flag given before the verb isn't
+    # clobbered by the subparser's copy. Apply their baseline defaults here, only
+    # when neither side supplied the flag.
+    if not hasattr(args, "config"):
+        args.config = None
+    if not hasattr(args, "json"):
+        args.json = False
 
     try:
         # `init` runs before any config exists — handle it before Config.load().
