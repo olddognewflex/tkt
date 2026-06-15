@@ -128,11 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dir", default=".", help="project dir to scaffold (default cwd)")
     sp.add_argument("--force", action="store_true", help="overwrite existing config")
     sp.add_argument("--link-skills", action="store_true",
-                    help="deprecated: use --link-harness claude")
-    sp.add_argument("--link-harness", default="",
-                    help="install skills/agents/commands for a harness (claude|opencode|all)")
-    sp.add_argument("--global", action="store_true", dest="global_",
-                    help="install into user harness config instead of project dir")
+                    help="symlink skills/ + agents/ into .claude/")
     sp.add_argument("--sample", action="store_true",
                     help="markdown: also write a starter ticket")
 
@@ -171,8 +167,7 @@ def main(argv: list[str]) -> int:
         if args.verb == "init":
             from .scaffold import init as scaffold_init
             return scaffold_init(args.provider, args.dir, args.force,
-                                 args.link_skills, args.link_harness,
-                                 args.global_, args.sample, interactive=True)
+                                 args.link_skills, args.sample, interactive=True)
 
         config = Config.load(args.config)
 

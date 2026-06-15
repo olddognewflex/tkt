@@ -1,9 +1,7 @@
 ---
 name: triage-ticket
 description: 'Read a ticket, extract requirements, move it to In Progress, and start time tracking. Provider-agnostic via tkt.'
-compatibility:
-  - claude
-  - opencode
+allowed-tools: [Bash, Read, Edit]
 ---
 
 # Triage Ticket

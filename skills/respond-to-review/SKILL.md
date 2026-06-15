@@ -1,9 +1,6 @@
 ---
 name: respond-to-review
 description: 'Read PR review comments, address each with code changes or replies, push fixes, loop until approved. VCS via gh; ticketing (revise/review transitions + lane time) via tkt.'
-compatibility:
-  - claude
-  - opencode
 ---
 
 # Respond to Review
