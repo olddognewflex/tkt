@@ -1,6 +1,9 @@
 ---
 name: self-review
 description: 'Adversarial self-review of changes before PR. Reviews diff, finds issues, fixes them, loops until clean. Build commands via tkt config; no ticketing.'
+compatibility:
+  - claude
+  - opencode
 ---
 
 # Self-Review

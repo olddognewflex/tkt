@@ -1,6 +1,9 @@
 ---
 name: resume-from-revise
 description: 'Resume the SDLC after a human dev fixed a revise-state ticket. Annotates revise time, re-runs CI/review automation, promotes back to qa_ready. Provider-agnostic via tkt.'
+compatibility:
+  - claude
+  - opencode
 ---
 
 # Resume From Revise
