@@ -1,9 +1,6 @@
 ---
 name: automated-sdlc
 description: 'Automated SDLC pipeline: ticket selection, intake, plan, implement, self-review, PR, review, CI, preview, human QA gate, deploy. Provider-agnostic via tkt — configure ticketing + board in .sdlc/config.toml. Orchestrates sub-skills with explicit human gates and lane-time annotation.'
-compatibility:
-  - claude
-  - opencode
 ---
 
 # Automated SDLC

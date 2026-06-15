@@ -220,27 +220,15 @@ Validate each with `tkt doctor` + a dry run.
   live-validated; projectv2 + mutations need scope/consent.)
 - Docs: README Install / Use-in-a-project / verb contract / per-provider notes.
 
-### Phase 5 — Harness-agnostic packaging ✅
-- Refactored `tkt init` to support multiple agent harnesses.
-- Added `--link-harness <claude|opencode|all>` and `--global`.
-- Deprecated `--link-skills` (now an alias for `--link-harness claude`).
-- Added `harnesses/<name>/manifest.toml` so new harnesses need only a manifest.
-- Added OpenCode slash commands under `commands/` as thin skill wrappers.
-- Marked all skills with `compatibility: [claude, opencode]` frontmatter.
-- Updated README, CLAUDE.md, and this plan.
-
 ---
 
 ## 5. Plug-into-a-new-project flow (end state)
 
-1. Copy `skills/` pack + `tkt` adapter into the project's `.claude/`, `.opencode/`,
-   or a shared plugin.
-2. `tkt init --provider <name> --link-harness <claude|opencode|all>` → writes
-   `.sdlc/config.toml` and symlinks the pack into the harness directories.
+1. Copy `skills/` pack + `tkt` adapter into the project's `.claude/` (or a shared plugin).
+2. `sdlc init` → choose provider, answer prompts → writes `.sdlc/config.toml`.
 3. Export auth env vars named in `config.ticketing.auth_env`.
 4. `tkt doctor` → green.
-5. Invoke `automated-sdlc` (Claude skill) or `/automated-sdlc` (OpenCode command).
-   Same skills, new backend.
+5. Invoke `automated-sdlc`. Same skills, new backend.
 
 ---
 
@@ -255,6 +243,5 @@ Validate each with `tkt doctor` + a dry run.
   `[board.ownership]`) lets the orchestrator stay generic — confirm that's wanted vs
   keeping gates in skill prose.
 - **Where the pack lives**: per-repo `.claude/` copy (drifts) vs a shared OMC-style
-  plugin (single source, versioned). Recommend plugin. Now also supports
-  `.opencode/` and global harness installs via `tkt init --link-harness --global`.
+  plugin (single source, versioned). Recommend plugin.
 ```

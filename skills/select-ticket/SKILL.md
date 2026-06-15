@@ -1,9 +1,7 @@
 ---
 name: select-ticket
 description: 'Discover and select the next ticket to work on, respecting priority, assignee, and blockers. Provider-agnostic via tkt. Auto-selects when the candidate is unambiguous; otherwise returns recommendations for human pick.'
-compatibility:
-  - claude
-  - opencode
+allowed-tools: [Bash, Read]
 ---
 
 # Select Ticket
