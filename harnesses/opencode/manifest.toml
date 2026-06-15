@@ -1,0 +1,21 @@
+[harness]
+name = "opencode"
+description = "OpenCode agent harness"
+
+[[harness.mappings]]
+kind = "skills"
+source = "skills"
+target = ".opencode/skills"
+global_target = "~/.config/opencode/skills"
+
+[[harness.mappings]]
+kind = "agents"
+source = "agents"
+target = ".opencode/agents"
+global_target = "~/.config/opencode/agents"
+
+[[harness.mappings]]
+kind = "commands"
+source = "commands"
+target = ".opencode/commands"
+global_target = "~/.config/opencode/commands"

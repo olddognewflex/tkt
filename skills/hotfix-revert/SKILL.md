@@ -2,6 +2,9 @@
 name: hotfix-revert
 description: 'Revert a bad change in production, create a highest-priority hotfix ticket, and fast-track through PR → staging → prod with a single human signoff. Skips most automation gates. Provider-agnostic ticketing via tkt.'
 disable-model-invocation: true
+compatibility:
+  - claude
+  - opencode
 ---
 
 # Hotfix Revert

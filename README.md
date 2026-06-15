@@ -30,23 +30,33 @@ Fastest path — scaffold with `tkt init`:
 
 ```sh
 cd my-project
-tkt init --provider markdown --link-skills --sample
-#   writes .sdlc/config.toml, symlinks skills/ + agents/ into .claude/,
-#   and (markdown) drops a starter ticket. --provider: jira|markdown|github|linear.
+tkt init --provider markdown --link-harness opencode --sample
+#   writes .sdlc/config.toml, installs skills/agents/commands into .opencode/,
+#   and (markdown) drops a starter ticket.
+#   --provider: jira|markdown|github|linear
+#   --link-harness: claude|opencode|all
+#   --global: install into user harness config instead of the project
 $EDITOR .sdlc/config.toml         # adjust roles/queries/repo to taste
 tkt doctor                        # validate auth + board model
 ```
 
 `tkt init` flags: `--provider` (required non-interactively; prompts on a TTY),
 `--dir` (target, default cwd), `--force` (overwrite existing config),
-`--link-skills` (symlink the pack into `.claude/`), `--sample` (markdown starter
-ticket). It refuses to clobber an existing `.sdlc/config.toml` without `--force`.
+`--link-harness` (install the pack for a harness; `all` installs every known
+harness), `--global` (install into user config instead of project dir),
+`--sample` (markdown starter ticket). It refuses to clobber an existing
+`.sdlc/config.toml` without `--force`.
+
+The legacy `--link-skills` flag is deprecated; it is now an alias for
+`--link-harness claude` and prints a deprecation warning.
 
 Manual equivalent, if you prefer:
 
 ```sh
 mkdir -p .sdlc && cp ~/Development/tkt/examples/config.markdown.toml .sdlc/config.toml
-ln -s ~/Development/tkt/skills/* .claude/skills/
+ln -s ~/Development/tkt/skills/* .opencode/skills/
+ln -s ~/Development/tkt/agents/* .opencode/agents/
+ln -s ~/Development/tkt/commands/* .opencode/commands/
 ```
 
 Config discovery order: `--config <path>` → `$TKT_CONFIG` → nearest `.sdlc/config.toml`
@@ -235,12 +245,17 @@ originals — every ticketing/board call now goes through `tkt`):
 `agents/ticket-researcher.md` is the read-only lookup subagent (provider-agnostic
 port of the old `jira-researcher`).
 
-To activate in a project, copy these into the project's `.claude/skills/` (and
-`agents/`) — or symlink. They depend only on `tkt` + `.sdlc/config.toml`, so the
-same skill set runs against any configured backend. Skills speak in **roles**
+To activate in a project, copy these into the project's `.claude/skills/`,
+`.opencode/skills/`, and corresponding `commands/` (or symlink via `tkt init
+--link-harness`). They depend only on `tkt` + `.sdlc/config.toml`, so the same
+skill set runs against any configured backend. Skills speak in **roles**
 (`in_progress`, `review`, `done`, ...) and read toolchain/VCS/deploy settings via
 `tkt cfg` (e.g. `tkt cfg build.test --pkg X`, `tkt cfg vcs.branch_fmt --ticket K
 --slug s`), so nothing about Jira/pnpm/GitHub is baked into skill text.
+
+OpenCode users additionally get slash commands (`.opencode/commands/`) that load
+the matching skill, e.g. `/triage-ticket ABC-123` or `/automated-sdlc`. Commands
+are thin wrappers — the skill remains the source of truth.
 
 VCS (PR/CI/merge via `gh`) and infra (preview/deploy) remain GitHub/cloud-shaped;
 repo, branch formats, reviewers, and workflow names are all config-driven, and

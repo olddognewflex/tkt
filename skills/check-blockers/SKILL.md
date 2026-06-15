@@ -2,7 +2,9 @@
 name: check-blockers
 description: 'Review tickets in the blocked lane, classify each blocker, and recommend unblock actions. Ad-hoc or standup-driven. Provider-agnostic via tkt.'
 model: claude-haiku-4-5
-allowed-tools: [Bash, Read]
+compatibility:
+  - claude
+  - opencode
 ---
 
 # Check Blockers
