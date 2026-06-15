@@ -93,6 +93,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("lane-time")
     sp.add_argument("key")
     sp.add_argument("--role", required=True)
+    sp.add_argument("--read-only", action="store_true", dest="read_only",
+                    help="compute and print the duration without recording a worklog")
 
     sp = add("create")
     sp.add_argument("--type", required=True, dest="issue_type")
@@ -228,9 +230,11 @@ def main(argv: list[str]) -> int:
                 print(f"{wl.key}  {wl.role}: {wl.human}  worklog={where}")
 
         elif args.verb == "lane-time":
-            wl = adapter.lane_time(args.key, args.role)
+            wl = adapter.lane_time(args.key, args.role, read_only=args.read_only)
             if args.json:
                 print(json.dumps(wl.to_dict(), indent=2))
+            elif args.read_only:
+                print(f"{wl.key}  {wl.role}: {wl.human}")
             else:
                 where = wl.worklog_id or "(no time tracking)"
                 print(f"{wl.key}  {wl.role}: {wl.human}  worklog={where}")

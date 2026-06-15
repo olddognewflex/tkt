@@ -366,9 +366,11 @@ class JiraAdapter(Adapter):
         return Worklog(key=key, role=from_role, lane=lane, seconds=secs,
                        human=human_duration(secs), worklog_id=wl_id, note=note)
 
-    def lane_time(self, key, role):
+    def lane_time(self, key, role, read_only=False):
         lane = self.config.role_to_lane(role)
-        if not self._provider_tracks_time():
+        # read_only computes for display regardless of time tracking; the
+        # recording path stays a no-op when the provider tracks no time.
+        if not read_only and not self._provider_tracks_time():
             return Worklog(key=key, role=role, lane=lane)
         entries = sorted(self._changelog_entries(key), key=lambda e: e[0])
         last_in = None
@@ -383,6 +385,9 @@ class JiraAdapter(Adapter):
                 exit_dt = _parse_iso(ts)
                 break
         secs = max(int((exit_dt - _parse_iso(last_in)).total_seconds()), 60)
+        if read_only:
+            return Worklog(key=key, role=role, lane=lane, seconds=secs,
+                           human=human_duration(secs))
         body = f"Lane: {lane}. Recorded retroactively by tkt."
         wl_id = self._post_worklog(key, secs, last_in, body)
         self._mark_non_billable(wl_id, secs, body)

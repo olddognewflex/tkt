@@ -389,9 +389,11 @@ class MarkdownAdapter(Adapter):
         return Worklog(key=key, role=from_role, lane=lane, seconds=secs,
                        human=human_duration(secs), worklog_id=wl_id, note=note)
 
-    def lane_time(self, key, role):
+    def lane_time(self, key, role, read_only=False):
         lane = self.config.role_to_lane(role)
-        if self.config.timetracking.get("provider", "none") == "none":
+        # read_only computes for display regardless of time tracking; the
+        # recording path stays a no-op when no provider is configured.
+        if not read_only and self.config.timetracking.get("provider", "none") == "none":
             return Worklog(key=key, role=role, lane=lane)
         history = sorted(self._read_history(key), key=lambda h: h["ts"])
         last_in = None
@@ -407,6 +409,9 @@ class MarkdownAdapter(Adapter):
                 exit_dt = ts
                 break
         secs = max(int((exit_dt - last_in).total_seconds()), 60)
+        if read_only:
+            return Worklog(key=key, role=role, lane=lane, seconds=secs,
+                           human=human_duration(secs))
         wl_id = self._append_worklog(key, role, lane, secs, "retroactive")
         return Worklog(key=key, role=role, lane=lane, seconds=secs,
                        human=human_duration(secs), worklog_id=wl_id, note="retroactive")

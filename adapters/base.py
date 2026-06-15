@@ -50,9 +50,15 @@ class Adapter(ABC):
         with worklog_id="") when timetracking provider is 'none'."""
 
     @abstractmethod
-    def lane_time(self, key: str, role: str) -> Worklog:
-        """Record time for an ALREADY-EXITED lane (entry -> next exit), for
-        retroactive accounting (e.g. deploy-ready over QA lanes)."""
+    def lane_time(self, key: str, role: str, read_only: bool = False) -> Worklog:
+        """Time in the lane mapped from `role`, measured from the most recent
+        entry into that lane until its next exit (or until now if still there).
+
+        By default this RECORDS a retroactive worklog (e.g. deploy-ready over QA
+        lanes). With read_only=True it computes and returns the same duration but
+        records nothing (worklog_id=""), for display surfaces such as a board UI;
+        in that mode the timetracking provider is ignored so the duration is
+        available even when no time is being tracked."""
 
     @abstractmethod
     def doctor(self) -> list[Check]:
