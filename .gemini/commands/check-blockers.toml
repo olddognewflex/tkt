@@ -1,0 +1,22 @@
+description = "Review blocked tickets, classify blockers, and recommend unblock actions via tkt."
+
+prompt = """
+Scan blocked tickets, summarize why each is stuck, and recommend next steps. All access via `tkt`.
+
+Steps:
+1. `tkt list --query blocked --json` (or `blocked_team` for --team)
+2. For each ticket, read `tkt view "$K" --json` to classify blocker type:
+   - internal dep, external dep, spec gap, access gap, stale, undocumented
+3. For internal deps, check blocker recursively with `tkt blockers` + `tkt view`
+4. Build a report grouped by recommended action
+5. List auto-unblock candidates but do NOT transition without confirmation
+6. Optionally nudge stale blockers with `tkt comment`
+
+Output:
+Markdown report grouped by action type: ready to unblock / needs ping / external / stale
+
+Rules:
+- Default scope: current user's blocked tickets
+- Never auto-transition
+- All ticketing access goes through `tkt`
+"""

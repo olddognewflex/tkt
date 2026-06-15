@@ -1,0 +1,18 @@
+---
+name: triage-ticket
+description: Read a ticket, move it to in_progress, and start work via tkt.
+invokable: true
+---
+
+# Triage Ticket
+
+Read a ticket, extract requirements, transition to `in_progress`, and start tracking. All access via `tkt`.
+
+1. `tkt view "$KEY" --json` — extract key, type + type_class, summary, acceptance, labels, components, blocked_by.
+2. Identify affected packages from ticket content.
+3. `tkt transition "$KEY" in_progress`.
+4. `tkt comment "$KEY" "Starting work. Affected packages: <pkg1>, <pkg2>"`.
+
+Output: key, type + type_class, summary, acceptance, affected packages, blockers/unknowns.
+
+Never transition a blocked ticket.

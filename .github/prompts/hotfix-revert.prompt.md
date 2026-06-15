@@ -1,0 +1,38 @@
+---
+mode: agent
+description: 'Revert a bad production change and fast-track a hotfix ticket via tkt.'
+tools: ['terminal']
+---
+
+# Hotfix Revert
+
+Fast lane for production regressions. Reverts a problematic change, creates a highest-priority hotfix ticket, and runs an accelerated PR → staging → prod pipeline. Ticketing via `tkt`; Git host via `gh`.
+
+## Steps
+
+1. Identify the merged PR to revert; resolve to `TARGET_SHA` and `TARGET_TICKET`.
+2. Create hotfix ticket:
+   ```shell
+   HOTFIX_KEY=$(tkt create --type Bug --summary "HOTFIX: revert ..." --priority Highest ...)
+   tkt link "$HOTFIX_KEY" --to "$TARGET_TICKET" --type "Fixes"
+   tkt transition "$HOTFIX_KEY" in_progress
+   ```
+3. Create revert branch from `origin/$(tkt cfg vcs.default_branch)`; `git revert --no-edit "$TARGET_SHA"`.
+4. Run `self-review` once (mechanical revert).
+5. Open hotfix PR, label hotfix, transition to `review`.
+6. Request one human signoff; do not loop on feedback.
+7. Watch required CI checks.
+8. Merge and poll until `MERGED`.
+9. Watch staging workflow matched by merge commit SHA.
+10. Present manual production deploy gate; watch once triggered.
+11. Comment on both tickets; transition to `done` only if prod workflow truly deploys.
+
+## Output
+
+- Hotfix ticket key, PR URL, prod deploy URL, elapsed time.
+
+## Rules
+
+- Single signoff; skip QA loop.
+- Production deploy is manual.
+- All ticketing via `tkt`.
