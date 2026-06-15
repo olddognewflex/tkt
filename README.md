@@ -66,6 +66,7 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt blockers KEY` | unresolved blockers only | list / `--json` |
 | `tkt worklog KEY --from-role ROLE [--note T] [--billable]` | log time since entry into ROLE's lane → now | worklog / `--json`; no-op if `[timetracking].provider="none"` |
 | `tkt lane-time KEY --role ROLE` | log time for an already-exited lane (entry→exit) | worklog / `--json` |
+| `tkt lane-time --keys K1:ROLE[,K2:ROLE,...] [--read-only]` | batch lane-time (one call, N keys) | JSON array of worklogs |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
 | `tkt link KEY --to OTHER --type T` | link KEY → OTHER (`T` = outward description: `blocks`, `is blocked by`, `Fixes`, …) | confirmation |
 | `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L]` | edit content/fields in place (only flags passed change; status excluded — use `transition`) | normalized ticket / `--json` |

@@ -91,8 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--billable", action="store_true")
 
     sp = add("lane-time")
-    sp.add_argument("key")
-    sp.add_argument("--role", required=True)
+    sp.add_argument("key", nargs="?")
+    sp.add_argument("--role", default=None)
+    sp.add_argument("--keys", default=None,
+                    help="comma-separated key:role pairs for batch mode "
+                         "(e.g. K1:todo,K2:in_progress); role defaults to --role")
     sp.add_argument("--read-only", action="store_true", dest="read_only",
                     help="compute and print the duration without recording a worklog")
 
@@ -149,6 +152,24 @@ def _subst(value: str, pkg: str, ticket: str, slug: str) -> str:
             .replace("{key-lower}", ticket.lower())
             .replace("{key}", ticket)
             .replace("{slug}", slug))
+
+
+def _parse_lane_time_keys(keys_arg: str, default_role: str | None) -> list[tuple[str, str]]:
+    pairs = []
+    for token in keys_arg.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if ":" in token:
+            key, role = token.split(":", 1)
+            pairs.append((key.strip(), role.strip()))
+        elif default_role:
+            pairs.append((token, default_role))
+        else:
+            raise UsageError(f"batch entry '{token}' has no role; use KEY:ROLE or pass --role")
+    if not pairs:
+        raise UsageError("--keys produced no key:role pairs")
+    return pairs
 
 
 def main(argv: list[str]) -> int:
@@ -230,14 +251,27 @@ def main(argv: list[str]) -> int:
                 print(f"{wl.key}  {wl.role}: {wl.human}  worklog={where}")
 
         elif args.verb == "lane-time":
-            wl = adapter.lane_time(args.key, args.role, read_only=args.read_only)
-            if args.json:
-                print(json.dumps(wl.to_dict(), indent=2))
-            elif args.read_only:
-                print(f"{wl.key}  {wl.role}: {wl.human}")
+            if args.keys:
+                pairs = _parse_lane_time_keys(args.keys, args.role)
+            elif args.key:
+                if not args.role:
+                    raise UsageError("--role is required when a single KEY is given")
+                pairs = [(args.key, args.role)]
             else:
-                where = wl.worklog_id or "(no time tracking)"
-                print(f"{wl.key}  {wl.role}: {wl.human}  worklog={where}")
+                raise UsageError("provide either KEY or --keys")
+            results = adapter.lane_time_batch(pairs, read_only=args.read_only)
+            if args.json:
+                if args.keys:
+                    print(json.dumps([wl.to_dict() for wl in results], indent=2))
+                else:
+                    print(json.dumps(results[0].to_dict(), indent=2))
+            else:
+                for wl in results:
+                    if args.read_only:
+                        print(f"{wl.key}  {wl.role}: {wl.human}")
+                    else:
+                        where = wl.worklog_id or "(no time tracking)"
+                        print(f"{wl.key}  {wl.role}: {wl.human}  worklog={where}")
 
         elif args.verb == "create":
             t = adapter.create(
