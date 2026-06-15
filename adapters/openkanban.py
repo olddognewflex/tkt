@@ -241,7 +241,7 @@ class OpenKanbanAdapter(Adapter):
         return Worklog(key=key, role=from_role,
                        lane=self.config.role_to_lane(from_role), note=note)
 
-    def lane_time(self, key, role):
+    def lane_time(self, key, role, read_only=False):
         return Worklog(key=key, role=role, lane=self.config.role_to_lane(role))
 
     def doctor(self):
