@@ -162,7 +162,11 @@ class MarkdownAdapter(Adapter):
                 section = "acceptance"
                 continue
             if stripped.startswith("## "):
-                section = None
+                # Any other section (Comments, etc.) — mark it distinctly, not
+                # None, so its body isn't folded into the description. None is
+                # reserved for the preamble between the summary and the first
+                # `## ` heading, which is the actual description.
+                section = "other"
                 continue
             if section == "acceptance" and stripped.startswith(("-", "*")):
                 acceptance.append(stripped[1:].strip())
