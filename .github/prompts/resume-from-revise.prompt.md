@@ -1,0 +1,33 @@
+---
+mode: agent
+description: 'Resume the SDLC after a human fixes a revise-state ticket via tkt.'
+tools: ['terminal']
+---
+
+# Resume From Revise
+
+Picks up tickets in `revise` after a failed QA round and a human dev fix. Re-enters the automation loop. Ticketing via `tkt`.
+
+## Steps
+
+1. Resolve ticket key (arg or infer from branch). Confirm `status_role == revise`.
+2. Annotate revise time:
+   ```shell
+   WL=$(tkt worklog "$KEY" --from-role revise --note "Resuming from revise" --json)
+   tkt comment "$KEY" "Resuming from revise. Time in Revise: $(echo "$WL" | jq -r .human)"
+   ```
+3. Transition to `in_progress`.
+4. Verify local state: `git status`, build/test via `tkt cfg build.*`.
+5. `git push`.
+6. Re-run: `ci-fix` → `respond-to-review` → `deploy-preview`.
+7. Verify approval; annotate in_progress and review lane times; transition to `qa_ready`.
+
+## Output
+
+- PR URL, preview URL, total time added by the revise cycle.
+
+## Rules
+
+- Stop if local tests fail; don't push broken code.
+- All ticketing via `tkt`.
+- `tkt worklog` is a no-op when time tracking is disabled.

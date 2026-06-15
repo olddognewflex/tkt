@@ -1,0 +1,29 @@
+description = "Commit, push, open a PR, request reviewers, and move the ticket to review via tkt."
+
+prompt = """
+Open a PR for ticket {{args}}. Ticketing via `tkt`; Git host via `gh`.
+
+Steps:
+1. Stage and commit: `git add -A && git commit -m "<type>(<scope>): <description>"`
+2. Rebase on default branch:
+   ```shell
+   git fetch origin
+   git rebase origin/!{tkt cfg vcs.default_branch}
+   ```
+3. Push: `git push -u origin HEAD`
+4. Create PR:
+   ```shell
+   REPO=$(tkt cfg vcs.repo)
+   gh pr create --repo "$REPO" --title "<type>(<scope>): <description>" --body "..."
+   ```
+5. Request reviewers from `tkt cfg vcs.reviewers --json`
+6. Branch on `type_class`:
+   - `full_sdlc`: `tkt worklog "{{args}}" --from-role in_progress --note "PR opened: $PR_URL"` then `tkt transition "{{args}}" review`
+   - `deliverable`: comment and stay in `in_progress`
+
+Rules:
+- Repo/reviewers/branch format from `tkt cfg`
+- Conventional Commits
+- `tkt worklog` is a no-op when `[timetracking].provider = "none"`
+- All ticketing access goes through `tkt`
+"""

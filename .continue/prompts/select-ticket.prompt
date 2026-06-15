@@ -1,0 +1,19 @@
+---
+name: select-ticket
+description: Discover and select the next ticket to work on via tkt.
+invokable: true
+---
+
+# Select Ticket
+
+Find the right ticket to work next. All ticketing access goes through `tkt`.
+
+1. Verify `tkt doctor` passes.
+2. Identify current user: `tkt whoami`.
+3. Run tiers 1–5 from `.sdlc/config.toml [queries]` until one returns selectable tickets.
+4. Filter out blocked tickets with `tkt blockers KEY --json`.
+5. Auto-select Tier 1/2 assigned work; recommend Tier 3/4/5 and wait for human pick.
+
+Recommendation columns: Key, Type, type_class, Priority, Summary, Effort (S/M/L), Est. tokens, Est. wall time, Blockers?, Why this one.
+
+Never auto-select unassigned work.

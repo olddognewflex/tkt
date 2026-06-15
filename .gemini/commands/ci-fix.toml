@@ -1,0 +1,21 @@
+description = "Monitor CI on a PR, diagnose failures, fix, and loop until green via tkt."
+
+prompt = """
+Monitor CI on a PR. When checks fail, diagnose from logs, fix, push again, loop until green. Git host via `gh`; build + ticketing via `tkt`.
+
+Steps:
+1. Wait for CI to settle (no pending checks) using `gh pr checks "$PR" --json bucket`
+2. Identify failed checks: `gh pr checks "$PR" --json name,state,link | jq '... select(.state == "FAILURE")'`
+3. Get logs: `gh run view <run-id> --log-failed | head -200`
+4. Diagnose pattern: type error, test failure, ECONNREFUSED, module not found, lint, stale branch
+5. Apply the minimal fix only
+6. Rebuild/re-test via `tkt cfg build.*`
+7. Commit and push: `git commit -m "fix(<scope>): resolve CI failure — <brief>" && git push`
+8. Loop. Max 3 iterations; escalate if still failing
+
+Rules:
+- Toolchain from `tkt cfg`
+- Rerun flaky failures once; second failure is real
+- `tkt worklog` is a no-op when `[timetracking].provider = "none"`
+- All ticketing access goes through `tkt`
+"""

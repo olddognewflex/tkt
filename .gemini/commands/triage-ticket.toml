@@ -1,0 +1,24 @@
+description = "Read a ticket, move it to in_progress, and start work via tkt."
+
+prompt = """
+Read ticket {{args}}, extract requirements, transition to `in_progress`, and start tracking. All access via `tkt`.
+
+Steps:
+1. `tkt view "{{args}}" --json` — extract key, type + type_class, summary, description, acceptance, labels, components, blocked_by
+2. Identify affected packages from ticket content
+3. `tkt transition "{{args}}" in_progress`
+4. `tkt comment "{{args}}" "Starting work. Affected packages: <pkg1>, <pkg2>"`
+
+Output to next skill:
+- Ticket key
+- type + type_class (full_sdlc vs deliverable)
+- Summary
+- Acceptance criteria
+- Affected packages
+- Blockers/unknowns
+
+Rules:
+- Speak in roles, not literal lane names
+- Never transition a blocked ticket
+- All ticketing access goes through `tkt`
+"""

@@ -1,0 +1,32 @@
+description = "Discover and select the next ticket to work on via tkt."
+
+prompt = """
+Find the right ticket to work next using `tkt`.
+
+Current user: !{tkt whoami}
+
+Run tiers 1-5 from `.sdlc/config.toml [queries]` in order until one returns selectable tickets:
+1. `tkt list --tier N --json`
+2. For each candidate, filter out tickets with unresolved blockers using `tkt blockers KEY --json`
+3. If any selectable tickets remain, stop and process that tier
+
+If Tier 1 or 2 (assigned to current user):
+- Auto-select the first candidate
+- Emit `SELECTED: <KEY>`
+- Hand off to triage-ticket
+
+If Tier 3, 4, or 5 (unassigned or backlog):
+- Print up to 5 ranked recommendations
+- Wait for a human pick
+- Include columns: Key, Type, type_class, Priority, Summary, Effort (S/M/L), Est. tokens, Est. wall time, Blockers?, Why this one
+
+Estimate guidance:
+- Effort: S <= 100 LOC, M 100-400, L > 400
+- Tokens: S ~50k, M ~150k, L ~400k
+- Wall time: S ~30 min, M ~2 h, L ~half-day
+
+Rules:
+- Never auto-select unassigned work
+- All ticketing access goes through `tkt`
+- `type_class` (`full_sdlc` or `deliverable`) determines downstream routing
+"""
