@@ -1,6 +1,9 @@
 ---
 name: deploy-preview
 description: 'Confirm the preview environment for a PR, extract its URL, and post it back to the ticket and PR. Provider-agnostic ticketing via tkt; VCS via gh. URL extraction is project-specific.'
+compatibility:
+  - claude
+  - opencode
 ---
 
 # Deploy Preview
