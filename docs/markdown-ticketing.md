@@ -241,25 +241,27 @@ Scaffold a fresh one: `./tkt init --provider markdown --link-skills --sample`.
 
 ---
 
-## 7. The ODNF shared-board setup (how *your* repos do it)
+## 7. A shared-board setup (one board, many repos)
 
-All repos under `/Users/raymonddoran/Development/odnf` use a **hybrid**: one
-shared board, per-repo VCS. The trick is absolute paths in `[markdown]`:
+A common layout is a **hybrid**: one shared board across many repos, with
+per-repo VCS. The trick is absolute paths in `[markdown]`:
 
-- One shared board at `/Users/raymonddoran/Development/odnf/.sdlc/board` + `.../state`.
-- Each repo has its *own* `.sdlc/config.toml` with repo-specific `project`
+- One shared board at an absolute path, e.g.
+  `/path/to/workspace/.sdlc/board` + `.../state`.
+- Each repo has its *own* `.sdlc/config.toml` with a repo-specific `project`
   prefix and `[vcs]`/`[build]`, but `board_dir`/`state_dir` point at the shared
   absolute paths.
 - Walk-up discovery (cwd → parents for `.sdlc/config.toml`) means running `tkt`
   inside a repo finds that repo's config (→ correct VCS/prefix) while all configs
   write to the one board.
-- Root view config at `odnf/.sdlc/config.toml` (`project="INBOX"`) so `tkt list`
-  from the dev root shows every repo's tickets.
-- Regenerate / add repos via `/Users/raymonddoran/Development/odnf/.sdlc/_gen_configs.py`
-  (edit the REPOS table, rerun). It rewrites configs; never touches board contents.
+- An optional root view config at the workspace root (e.g. `project = "INBOX"`)
+  lets `tkt list` from there show every repo's tickets.
+- With many repos, a small generator script that rewrites each repo's config
+  from a single table keeps them in sync — it should rewrite configs only and
+  never touch board contents.
 
-Key prefixes in use: AILAB, AIMRP, AIMW, AIMAP, CFX, EMAIL, ERS, GQLD, GQLAT,
-GQLPK, ODNF, TKT, TUI, QI.
+Each repo's `project` prefix becomes the `PREFIX-` in its ticket keys, so the
+prefix doubles as the natural per-repo identifier on the shared board.
 
 **Implication for any Kanban viewer:** point it at the one shared `board/`
 directory and it shows every repo's tickets in one board. The `PREFIX-` in each
@@ -325,7 +327,11 @@ and transition history stay a `tkt` concern. That's fine — Obsidian moves card
 `tkt`/the skills do the bookkeeping. If you want the move *timestamped in
 history*, you'd transition via `tkt transition` rather than dragging — see §9.
 
-### Option B — Custom TUI (most control, fits the ODNF tooling style)
+### Option B — `tktban` / a custom TUI (most control)
+
+`tktban` is a terminal Kanban board built directly on this verb contract — the
+ready-made option here. The architecture below is exactly what it does, and what
+any custom TUI would replicate.
 
 A read-mostly TUI is small because all the parsing already exists in the adapter.
 Architecture:
@@ -336,9 +342,8 @@ Architecture:
    across boards) into columns; sort each column by `priority` then `key`.
 2. **Render:** one column per role in `[board.roles]` order, cards show
    `key`, `summary`, `assignee`, `priority`, blocker count. Textual or
-   Rich (Python, stdlib-adjacent, matches the repo's no-deps-if-possible ethos)
-   is the natural pick; you already have a `TUI` key prefix, so this may be a
-   planned repo.
+   Rich (Python, stdlib-adjacent, matches `tkt`'s no-deps-if-possible ethos)
+   is the natural pick — this is the approach `tktban` takes.
 3. **Write path (the important rule):** never write the markdown directly from
    the TUI. Call the verbs:
    - move a card → `tkt transition KEY <role>` (rewrites status **and** logs
@@ -353,19 +358,6 @@ Architecture:
 Minimum viable TUI = a read-only `tkt list --json` grouped into columns. Add the
 three write actions above and you have a full board. Everything else (filters by
 prefix/assignee, time-in-lane from the history sidecar) is incremental.
-
-### Which to pick
-
-- **Want it today, mostly to *see* the board and occasionally drag a card?**
-  → Obsidian + the Projects plugin. Zero code. Just mind the frontmatter format
-  contract and that history isn't captured on drag.
-- **Want timestamped transitions, time tracking, multi-repo prefix swimlanes,
-  and a tool that also works against Jira/Linear later?**
-  → Custom TUI over `tkt … --json`. More work, but it's the backend-agnostic,
-  history-correct path and matches the rest of your tooling.
-
-A sensible hybrid: **Obsidian for browsing/editing prose, the TUI (or plain
-`tkt`) for moves** so history and worklog stay honest.
 
 ---
 
