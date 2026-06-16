@@ -35,6 +35,8 @@ list literals. No nested structures. Status transitions and time tracking are
 recorded in JSONL sidecars under state_dir, never the markdown (markdown stays
 the human-canonical source; sidecars are derived/machine-local).
 """
+from __future__ import annotations
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path

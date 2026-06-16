@@ -28,6 +28,8 @@ Config [openkanban]:
   config_dir    optional — overrides the resolved config dir
   me            optional — for whoami (openkanban has no users)
 """
+from __future__ import annotations
+
 import json
 import os
 import uuid

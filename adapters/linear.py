@@ -19,6 +19,8 @@ Board roles map to Linear workflow-state NAMES:
 Time tracking: Linear has none — worklog/lane-time are no-ops; set
 [timetracking].provider = "none".
 """
+from __future__ import annotations
+
 import json
 import os
 import re
