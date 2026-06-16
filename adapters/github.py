@@ -21,6 +21,8 @@ Config ([github] block):
 Time tracking: GitHub has none — worklog/lane-time are always no-ops here. Set
 [timetracking].provider = "none" (doctor warns otherwise).
 """
+from __future__ import annotations
+
 import json
 import re
 import subprocess

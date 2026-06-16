@@ -8,6 +8,8 @@ Auth (env names declared in config [ticketing].auth_env, defaults shown):
     CONFLUENCE_API_TOKEN
     TEMPO_API_TOKEN       optional; required to mark worklogs non-billable
 """
+from __future__ import annotations
+
 import base64
 import json
 import os

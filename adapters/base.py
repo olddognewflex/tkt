@@ -2,6 +2,8 @@
 each verb. Skills depend ONLY on these signatures and the schema shapes they
 return — never on a concrete provider.
 """
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 from core.config import Config
