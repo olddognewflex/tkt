@@ -1,6 +1,10 @@
 # Example tkt config for Linear. Copy to .sdlc/config.toml and adjust.
 # Auth: set LINEAR_API_KEY (a personal API key) in your environment.
 
+# Optional: ordered priority set (highest-first) exposed via `tkt cfg priorities`.
+# Defaults to ["Highest", "High", "Medium", "Low", "Lowest"] when omitted.
+# priorities = ["Urgent", "High", "Medium", "Low", "No priority"]
+
 [ticketing]
 provider = "linear"
 auth_env = ["LINEAR_API_KEY"]

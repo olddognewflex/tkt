@@ -8,6 +8,10 @@ from typing import Any
 
 from .errors import ConfigError, NotFoundError
 
+# Backend-agnostic priority ordering, highest-first. Used when a project does
+# not define its own `priorities = [...]` in .sdlc/config.toml.
+DEFAULT_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"]
+
 
 class Config:
     def __init__(self, data: dict[str, Any], path: Path):
@@ -79,6 +83,17 @@ class Config:
                 f"{', '.join(sorted(self.queries)) or '(none)'}"
             )
         return self.queries[name]
+
+    # ---- priorities --------------------------------------------------------
+
+    def priorities(self) -> list[str]:
+        """The configured ordered priority list (highest-first), or the default
+        when `priorities` is absent or not a non-empty list. Adapters may map
+        this to a backend's own scheme; see Adapter.priorities()."""
+        val = self._d.get("priorities")
+        if isinstance(val, list) and val:
+            return [str(p) for p in val]
+        return list(DEFAULT_PRIORITIES)
 
     # ---- arbitrary lookups (for skills reading build/vcs settings) ---------
 

@@ -2,6 +2,10 @@
 # Copy to .sdlc/config.toml and adjust. Two board models are supported via
 # [github].board — see the two query blocks below.
 
+# Optional: ordered priority set (highest-first) exposed via `tkt cfg priorities`.
+# Defaults to ["Highest", "High", "Medium", "Low", "Lowest"] when omitted.
+# priorities = ["Highest", "High", "Medium", "Low", "Lowest"]
+
 [ticketing]
 provider = "github"
 project  = ""          # unused for github (repo identifies the issues)

@@ -1,6 +1,11 @@
 # Example tkt config for the DTB / edge-dev-platform Jira board.
 # Copy to .sdlc/config.toml at your repo root and adjust.
 
+# `tkt cfg priorities` returns Jira's live priority scheme in REST mode; this
+# list is the fallback used in acli-only mode (and when the REST call fails).
+# Defaults to ["Highest", "High", "Medium", "Low", "Lowest"] when omitted.
+# priorities = ["Highest", "High", "Medium", "Low", "Lowest"]
+
 [ticketing]
 provider = "jira"
 project  = "DTB"

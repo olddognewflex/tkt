@@ -90,6 +90,16 @@ class Adapter(ABC):
     def doctor(self) -> list[Check]:
         """Validate auth + reachability + board model. Read-only."""
 
+    # ---- config-backed, optionally backend-mapped --------------------------
+
+    def priorities(self) -> list[str]:
+        """The ordered priority list (highest-first) this backend understands.
+
+        Defaults to the project's configured list (Config.priorities()); a
+        backend with its own priority scheme (e.g. Jira) overrides this to
+        reconcile the configured names with what the backend actually accepts."""
+        return self.config.priorities()
+
     # ---- optional verbs ----------------------------------------------------
     # Not every backend supports these; default to a clear error so adapters
     # can opt in without breaking instantiation (unlike the @abstractmethods).

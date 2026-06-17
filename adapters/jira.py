@@ -211,6 +211,20 @@ class JiraAdapter(Adapter):
                 return line.split("Email:", 1)[1].strip()
         return "(acli authenticated; identity unknown)"
 
+    def priorities(self) -> list[str]:
+        """Jira's own priority scheme. In REST mode we return Jira's live
+        priority names (the values its API actually accepts, highest-first);
+        in acli-only mode we can't enumerate them, so fall back to the
+        configured/default list."""
+        if not self.have_rest:
+            return self.config.priorities()
+        try:
+            data = self._jira("GET", "/rest/api/3/priority")
+        except ProviderError:
+            return self.config.priorities()
+        names = [p.get("name", "") for p in (data or []) if p.get("name")]
+        return names or self.config.priorities()
+
     def _full_jql(self, jql: str) -> str:
         if self.project and "project" not in jql.lower():
             return f"project = {self.project} AND {jql}"
