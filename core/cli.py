@@ -198,6 +198,12 @@ def main(argv: list[str]) -> int:
             return 0
 
         if args.verb == "cfg":
+            # `priorities` is backend-aware (jira maps to its own scheme), so it
+            # resolves through the adapter rather than a raw config lookup.
+            if args.key == "priorities":
+                vals = get_adapter(config).priorities()
+                print(json.dumps(vals) if args.json else "\n".join(vals))
+                return 0
             val = config.get(args.key)
             if isinstance(val, str):
                 print(_subst(val, args.pkg, args.ticket, args.slug))

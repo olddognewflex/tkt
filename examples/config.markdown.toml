@@ -1,6 +1,10 @@
 # Example tkt config for a dependency-free local markdown board.
 # Copy to .sdlc/config.toml. Tickets live as <KEY>.md files under board_dir.
 
+# Optional: ordered priority set (highest-first) exposed via `tkt cfg priorities`.
+# Defaults to ["Highest", "High", "Medium", "Low", "Lowest"] when omitted.
+# priorities = ["Highest", "High", "Medium", "Low", "Lowest"]
+
 [ticketing]
 provider = "markdown"
 project  = "TKT"

@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Local SDLC/agent state (dogfooding tkt against the shared ODNF board)
+.sdlc/
+.omo/
