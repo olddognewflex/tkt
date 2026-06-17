@@ -70,14 +70,16 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
 | `tkt link KEY --to OTHER --type T` | link KEY → OTHER (`T` = outward description: `blocks`, `is blocked by`, `Fixes`, …) | confirmation |
 | `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L]` | edit content/fields in place (only flags passed change; status excluded — use `transition`) | normalized ticket / `--json` |
+| `tkt apply --new --file F` / `tkt apply KEY --file F` | create / update a ticket from a full markdown doc (frontmatter + body; `-` = stdin). Owns the doc except `status` (use `transition`) and backend-managed sections (Comments), preserved verbatim. | new/updated key / `--json` ticket |
+| `tkt apply --template` | print the create-document template the editor opens with | markdown doc |
 | `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
 
-`create`/`link`/`edit` are optional verbs — adapters opt in (markdown supports all
-three; jira supports create/link); a backend without them returns a clear "not
-supported" error rather than failing to load.
+`create`/`link`/`edit`/`apply` are optional verbs — adapters opt in (markdown
+supports all four; jira supports create/link/apply); a backend without them
+returns a clear "not supported" error rather than failing to load.
 
 Errors always go to stderr with a non-zero exit (2 config, 3 provider, 4 not-found,
 64 usage) — skills can branch on exit code and never get a silent failure.
@@ -257,6 +259,7 @@ core/
   registry.py  provider name -> adapter (lazy import)
   schema.py    Ticket / Worklog / Check dataclasses + to_dict()
   query.py     shared JQL-subset evaluator (markdown + linear + openkanban)
+  ticketdoc.py canonical full-ticket markdown doc parser (for `tkt apply`)
   scaffold.py  `tkt init` scaffolder
   errors.py    typed errors -> exit codes
 adapters/

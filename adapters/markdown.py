@@ -41,6 +41,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import ticketdoc
 from core.errors import NotFoundError, ProviderError
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog, human_duration
@@ -284,6 +285,60 @@ class MarkdownAdapter(Adapter):
             doc += f"\n{body}\n"
         self._write_raw(key, fm, doc)
         self._append_history(key, "", todo_lane)
+        return self.view(key)
+
+    def apply_template(self):
+        return ticketdoc.template()
+
+    def apply(self, doc, key=None):
+        fm_in, body_in = ticketdoc.split_frontmatter(doc)
+        summary = ticketdoc.summary_of(body_in)
+        if not summary:
+            raise ProviderError("apply: document needs a '# summary' heading")
+
+        if key is None:
+            # create
+            issue_type = str(fm_in.get("type", "")).strip()
+            if not issue_type:
+                raise ProviderError("apply --new: frontmatter must set 'type'")
+            self.board_dir.mkdir(parents=True, exist_ok=True)
+            new_key = self._next_key(self.config.project)
+            todo_lane = (self.config.roles.get("todo")
+                         or self.config.roles.get("backlog", "To Do"))
+            fm = {
+                "type": issue_type,
+                "status": todo_lane,
+                "priority": str(fm_in.get("priority", "")),
+                "assignee": str(fm_in.get("assignee", "")) or self.me,
+                "blocked_by": list(fm_in.get("blocked_by", []) or []),
+                "blocks": list(fm_in.get("blocks", []) or []),
+            }
+            labels = list(fm_in.get("labels", []) or [])
+            if labels:
+                fm["labels"] = labels
+            self._write_raw(new_key, fm, body_in)
+            self._append_history(new_key, "", todo_lane)
+            return self.view(new_key)
+
+        # update — NotFoundError here means no partial write happened.
+        cur_fm, cur_body = self._read_raw(key)
+        fm = dict(cur_fm)
+        # `status` stays under transition's control; everything else the doc
+        # carries is owned by apply.
+        for field in ("type", "priority", "assignee", "labels",
+                      "blocked_by", "blocks", "components"):
+            if field in fm_in:
+                fm[field] = fm_in[field]
+        # The buffer body wins, but backend-managed sections (Comments) are
+        # restored verbatim from the stored ticket so the editor can't corrupt
+        # the timestamped log.
+        body = body_in
+        for name in ticketdoc.MANAGED_SECTIONS:
+            canon = ticketdoc.extract_section(cur_body, name)
+            body = ticketdoc.strip_section(body, name)
+            if canon:
+                body = body.rstrip() + "\n\n" + canon + "\n"
+        self._write_raw(key, fm, body)
         return self.view(key)
 
     def link(self, key, to, link_type):

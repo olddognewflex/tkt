@@ -52,6 +52,19 @@ def _adf_to_text(node) -> str:
     return "".join(out)
 
 
+def _text_to_adf(text: str) -> dict:
+    """Wrap plaintext as a minimal ADF document — one paragraph per line."""
+    content = []
+    for line in text.split("\n"):
+        para: dict = {"type": "paragraph", "content": []}
+        if line:
+            para["content"] = [{"type": "text", "text": line}]
+        content.append(para)
+    if not content:
+        content = [{"type": "paragraph", "content": []}]
+    return {"type": "doc", "version": 1, "content": content}
+
+
 class JiraAdapter(Adapter):
     def __init__(self, config):
         super().__init__(config)
@@ -287,6 +300,52 @@ class JiraAdapter(Adapter):
                 print(f"tkt: priority '{priority}' not set on {key} — acli can't set "
                       f"priority and no REST token is configured. Set it manually.",
                       flush=True)
+        return self.view(key)
+
+    def apply_template(self):
+        from core import ticketdoc
+        return ticketdoc.template()
+
+    def apply(self, doc, key=None):
+        from core import ticketdoc
+        fm_in, body_in = ticketdoc.split_frontmatter(doc)
+        summary = ticketdoc.summary_of(body_in)
+        if not summary:
+            raise ProviderError("apply: document needs a '# summary' heading")
+        # Jira stores the summary as a field and comments out-of-band, so the
+        # description is the body minus the summary line and managed sections.
+        desc = ticketdoc.body_without_summary(body_in)
+        for name in ticketdoc.MANAGED_SECTIONS:
+            desc = ticketdoc.strip_section(desc, name)
+        desc = desc.strip()
+
+        if key is None:
+            issue_type = str(fm_in.get("type", "")).strip()
+            if not issue_type:
+                raise ProviderError("apply --new: frontmatter must set 'type'")
+            created = self.create(issue_type, summary,
+                                  priority=str(fm_in.get("priority", "")),
+                                  assignee=str(fm_in.get("assignee", "")),
+                                  body=desc)
+            labels = list(fm_in.get("labels", []) or [])
+            if labels and self.have_rest:
+                self._jira("PUT", f"/rest/api/3/issue/{created.key}",
+                           {"fields": {"labels": labels}})
+                return self.view(created.key)
+            return created
+
+        # update — patch fields via REST (acli can't set description/priority).
+        if not self.have_rest:
+            raise ProviderError(
+                "apply update needs a REST token (set CONFLUENCE_SITE/EMAIL/"
+                "API_TOKEN); acli cannot patch issue fields")
+        fields: dict = {"summary": summary, "description": _text_to_adf(desc)}
+        if "priority" in fm_in:
+            fields["priority"] = {"name": str(fm_in["priority"])}
+        if "labels" in fm_in:
+            fields["labels"] = list(fm_in.get("labels") or [])
+        # assignee needs an accountId lookup; left unchanged here on purpose.
+        self._jira("PUT", f"/rest/api/3/issue/{key}", {"fields": fields})
         return self.view(key)
 
     def link(self, key, to, link_type):
