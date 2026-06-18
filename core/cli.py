@@ -3,6 +3,7 @@ on read verbs emits the normalized shape for skills to parse."""
 import argparse
 import json
 import sys
+from datetime import datetime
 
 from .config import Config
 from .errors import TktError, UsageError
@@ -17,6 +18,10 @@ def _print_ticket_human(t: Ticket) -> None:
     print(f"  summary:  {t.summary}")
     if t.labels:
         print(f"  labels:   {', '.join(t.labels)}")
+    dates = [f"{n}={v}" for n, v in
+             (("due", t.due), ("scheduled", t.scheduled), ("completed", t.completed)) if v]
+    if dates:
+        print(f"  dates:    {', '.join(dates)}")
     unresolved = t.unresolved_blockers()
     if unresolved:
         print(f"  BLOCKED BY: {', '.join(b['key'] for b in unresolved)}")
@@ -131,6 +136,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--assignee", default=None)
     sp.add_argument("--add-label", action="append", default=[], dest="add_label")
     sp.add_argument("--remove-label", action="append", default=[], dest="remove_label")
+    # Dates: omit = unchanged, pass "" to clear, else YYYY-MM-DD.
+    sp.add_argument("--due", default=None)
+    sp.add_argument("--scheduled", default=None)
+    sp.add_argument("--completed", default=None)
 
     sp = add("lane")
     sp.add_argument("role")
@@ -153,6 +162,17 @@ def build_parser() -> argparse.ArgumentParser:
     add("doctor")
 
     return p
+
+
+def _validate_date(flag: str, value: str | None) -> str | None:
+    """None = leave unchanged, "" = clear, else require ISO YYYY-MM-DD."""
+    if value is None or value == "":
+        return value
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise UsageError(f"{flag}: invalid date '{value}', expected YYYY-MM-DD")
+    return value
 
 
 def _subst(value: str, pkg: str, ticket: str, slug: str) -> str:
@@ -330,6 +350,9 @@ def main(argv: list[str]) -> int:
                 args.key, summary=args.summary, body=args.body,
                 priority=args.priority, assignee=args.assignee,
                 add_labels=args.add_label, remove_labels=args.remove_label,
+                due=_validate_date("--due", args.due),
+                scheduled=_validate_date("--scheduled", args.scheduled),
+                completed=_validate_date("--completed", args.completed),
             )
             if args.json:
                 print(json.dumps(t.to_dict(), indent=2))

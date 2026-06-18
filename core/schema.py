@@ -18,6 +18,10 @@ class Ticket:
     type_class: str = ""             # "full_sdlc" | "deliverable" | "unknown"
     assignee: str = ""
     priority: str = ""
+    # Optional dates, ISO YYYY-MM-DD; None when unset (rendered as null in JSON).
+    due: str | None = None
+    scheduled: str | None = None
+    completed: str | None = None
     url: str = ""
     acceptance: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)

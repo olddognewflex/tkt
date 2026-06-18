@@ -143,11 +143,14 @@ class Adapter(ABC):
         assignee: str | None = None,
         add_labels: list[str] | None = None,
         remove_labels: list[str] | None = None,
+        due: str | None = None,
+        scheduled: str | None = None,
+        completed: str | None = None,
     ) -> Ticket:
         """Edit a ticket's content/fields in place; return it normalized.
 
         Only the arguments that are not None are changed (an empty string is a
-        valid value, e.g. clearing the assignee). Status is intentionally NOT
-        editable here — lane moves go through `transition` so history/worklog
-        stay correct."""
+        valid value, e.g. clearing the assignee or a date). Status is
+        intentionally NOT editable here — lane moves go through `transition` so
+        history/worklog stay correct."""
         raise ProviderError(f"edit not supported by provider '{self.config.provider}'")

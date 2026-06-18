@@ -185,6 +185,12 @@ class JiraAdapter(Adapter):
             assignee=((f.get("assignee") or {}).get("displayName")
                       or (f.get("assignee") or {}).get("emailAddress") or ""),
             priority=(f.get("priority") or {}).get("name", ""),
+            # Native Jira dates: duedate is YYYY-MM-DD; resolutiondate is a
+            # datetime we trim to its date. Jira has no native "scheduled"
+            # field, so it stays unset here.
+            due=(f.get("duedate") or None),
+            scheduled=None,
+            completed=((f.get("resolutiondate") or "")[:10] or None),
             url=f"https://{self._site_for_url()}/browse/{key}",
             acceptance=self._extract_acceptance(desc),
             labels=list(f.get("labels", []) or []),

@@ -69,7 +69,7 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt lane-time --keys K1:ROLE[,K2:ROLE,...] [--read-only]` | batch lane-time (one call, N keys) | JSON array of worklogs |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
 | `tkt link KEY --to OTHER --type T` | link KEY → OTHER (`T` = outward description: `blocks`, `is blocked by`, `Fixes`, …) | confirmation |
-| `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L]` | edit content/fields in place (only flags passed change; status excluded — use `transition`) | normalized ticket / `--json` |
+| `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L] [--due D] [--scheduled D] [--completed D]` | edit content/fields in place (only flags passed change; status excluded — use `transition`). Dates are ISO `YYYY-MM-DD`; pass `""` to clear. | normalized ticket / `--json` |
 | `tkt apply --new --file F` / `tkt apply KEY --file F` | create / update a ticket from a full markdown doc (frontmatter + body; `-` = stdin). Owns the doc except `status` (use `transition`) and backend-managed sections (Comments), preserved verbatim. | new/updated key / `--json` ticket |
 | `tkt apply --template` | print the create-document template the editor opens with | markdown doc |
 | `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
@@ -107,6 +107,7 @@ name, and `tkt transition KEY review` to move.
   "summary": "...", "description": "...", "acceptance": ["..."],
   "status": "In Progress", "status_role": "in_progress",
   "assignee": "raymond", "priority": "Highest",
+  "due": null, "scheduled": null, "completed": null,
   "labels": ["..."], "components": ["..."],
   "blocked_by": [{"key": "TKT-2", "resolved": false}],
   "blocks": [], "transitions": ["..."], "url": "..."
