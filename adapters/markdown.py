@@ -186,6 +186,10 @@ class MarkdownAdapter(Adapter):
         if isinstance(blocks, str):
             blocks = [blocks]
 
+        def _date(name: str) -> str | None:
+            v = fm.get(name)
+            return str(v) if v not in (None, "", []) else None
+
         return Ticket(
             key=key,
             type=issue_type,
@@ -196,6 +200,9 @@ class MarkdownAdapter(Adapter):
             type_class=self.config.type_class(issue_type),
             assignee=str(fm.get("assignee", "")),
             priority=str(fm.get("priority", "")),
+            due=_date("due"),
+            scheduled=_date("scheduled"),
+            completed=_date("completed"),
             url=str(self._ticket_path(key)),
             acceptance=acceptance,
             labels=list(fm.get("labels", []) or []),
@@ -316,6 +323,9 @@ class MarkdownAdapter(Adapter):
             labels = list(fm_in.get("labels", []) or [])
             if labels:
                 fm["labels"] = labels
+            for name in ("due", "scheduled", "completed"):
+                if name in fm_in and fm_in[name] not in (None, ""):
+                    fm[name] = fm_in[name]
             self._write_raw(new_key, fm, body_in)
             self._append_history(new_key, "", todo_lane)
             return self.view(new_key)
@@ -326,7 +336,8 @@ class MarkdownAdapter(Adapter):
         # `status` stays under transition's control; everything else the doc
         # carries is owned by apply.
         for field in ("type", "priority", "assignee", "labels",
-                      "blocked_by", "blocks", "components"):
+                      "blocked_by", "blocks", "components",
+                      "due", "scheduled", "completed"):
             if field in fm_in:
                 fm[field] = fm_in[field]
         # The buffer body wins, but backend-managed sections (Comments) are
@@ -394,13 +405,24 @@ class MarkdownAdapter(Adapter):
         return summary, "\n".join(desc_lines).strip(), "\n".join(rest_lines).strip()
 
     def edit(self, key, summary=None, body=None, priority=None, assignee=None,
-             add_labels=None, remove_labels=None):
+             add_labels=None, remove_labels=None,
+             due=None, scheduled=None, completed=None):
         fm, doc = self._read_raw(key)
 
         if priority is not None:
             fm["priority"] = priority
         if assignee is not None:
             fm["assignee"] = assignee
+
+        # Dates: None = leave as-is, "" = clear (drop the key), else set.
+        for name, val in (("due", due), ("scheduled", scheduled),
+                          ("completed", completed)):
+            if val is None:
+                continue
+            if val == "":
+                fm.pop(name, None)
+            else:
+                fm[name] = val
 
         if add_labels or remove_labels:
             cur = fm.get("labels", []) or []
