@@ -116,6 +116,19 @@ class Adapter(ABC):
         """Create a new ticket; return it normalized (with its new key)."""
         raise ProviderError(f"create not supported by provider '{self.config.provider}'")
 
+    def apply(self, doc: str, key: str | None = None) -> Ticket:
+        """Create (key=None) or update a ticket from a full canonical ticket
+        document (frontmatter + body; see core.ticketdoc). Owns the frontmatter
+        (except `status`, which only `transition` changes) and the body, while
+        preserving backend-managed sections (Comments) verbatim. Returns the
+        ticket normalized. Validation failures raise before any write."""
+        raise ProviderError(f"apply not supported by provider '{self.config.provider}'")
+
+    def apply_template(self) -> str:
+        """The canonical create-document template the editor opens for
+        `apply --new`."""
+        raise ProviderError(f"apply not supported by provider '{self.config.provider}'")
+
     def link(self, key: str, to: str, link_type: str) -> None:
         """Link `key` to `to` with a provider link type (e.g. 'is blocked by',
         'blocks', 'relates to', 'Fixes', 'duplicates')."""

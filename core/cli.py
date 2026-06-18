@@ -107,6 +107,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--body", default="")
     sp.add_argument("--project", default="")
 
+    sp = add("apply")
+    sp.add_argument("key", nargs="?", default=None,
+                    help="ticket to update; omit and pass --new to create")
+    sp.add_argument("--new", action="store_true", help="create a new ticket")
+    sp.add_argument("--file", default=None,
+                    help="full ticket markdown to apply; '-' reads stdin")
+    sp.add_argument("--template", action="store_true",
+                    help="print the create-document template and exit")
+
     sp = add("link")
     sp.add_argument("key")
     sp.add_argument("--to", required=True, dest="to")
@@ -288,6 +297,29 @@ def main(argv: list[str]) -> int:
                 print(json.dumps(t.to_dict(), indent=2))
             else:
                 print(t.key)
+
+        elif args.verb == "apply":
+            if args.template:
+                print(adapter.apply_template())
+            else:
+                if args.new and args.key:
+                    raise UsageError("apply: pass a KEY to update OR --new to create, not both")
+                if not args.new and not args.key:
+                    raise UsageError("apply: need a KEY (update) or --new (create), or --template")
+                if not args.file:
+                    raise UsageError("apply: --file PATH required ('-' for stdin)")
+                if args.file == "-":
+                    doc = sys.stdin.read()
+                else:
+                    try:
+                        doc = open(args.file, encoding="utf-8").read()
+                    except OSError as e:
+                        raise UsageError(f"apply: cannot read {args.file}: {e}") from e
+                t = adapter.apply(doc, key=None if args.new else args.key)
+                if args.json:
+                    print(json.dumps(t.to_dict(), indent=2))
+                else:
+                    print(t.key)
 
         elif args.verb == "link":
             adapter.link(args.key, args.to, args.link_type)
