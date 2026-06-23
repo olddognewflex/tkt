@@ -200,6 +200,7 @@ class MarkdownAdapter(Adapter):
             type_class=self.config.type_class(issue_type),
             assignee=str(fm.get("assignee", "")),
             priority=str(fm.get("priority", "")),
+            agent_status=str(fm.get("agent_status", "")),
             due=_date("due"),
             scheduled=_date("scheduled"),
             completed=_date("completed"),
@@ -406,13 +407,20 @@ class MarkdownAdapter(Adapter):
 
     def edit(self, key, summary=None, body=None, priority=None, assignee=None,
              add_labels=None, remove_labels=None,
-             due=None, scheduled=None, completed=None):
+             due=None, scheduled=None, completed=None, agent_status=None):
         fm, doc = self._read_raw(key)
 
         if priority is not None:
             fm["priority"] = priority
         if assignee is not None:
             fm["assignee"] = assignee
+
+        # Agent state: None = leave as-is, "" = clear (drop the key), else set.
+        if agent_status is not None:
+            if agent_status == "":
+                fm.pop("agent_status", None)
+            else:
+                fm["agent_status"] = agent_status
 
         # Dates: None = leave as-is, "" = clear (drop the key), else set.
         for name, val in (("due", due), ("scheduled", scheduled),

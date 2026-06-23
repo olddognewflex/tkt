@@ -140,6 +140,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--due", default=None)
     sp.add_argument("--scheduled", default=None)
     sp.add_argument("--completed", default=None)
+    # Agent state: omit = unchanged, "" to clear, else one of AGENT_STATES.
+    sp.add_argument("--agent-status", default=None, dest="agent_status")
 
     sp = add("lane")
     sp.add_argument("role")
@@ -172,6 +174,22 @@ def _validate_date(flag: str, value: str | None) -> str | None:
         datetime.strptime(value, "%Y-%m-%d")
     except ValueError:
         raise UsageError(f"{flag}: invalid date '{value}', expected YYYY-MM-DD")
+    return value
+
+
+# Recognized agent execution states. Validated up front so a typo can't write a
+# value the board's badge mapping won't recognize. "" clears the field.
+AGENT_STATES = ("idle", "processing", "waiting", "done", "blocked")
+
+
+def _validate_agent_status(value: str | None) -> str | None:
+    """None = leave unchanged, "" = clear, else one of AGENT_STATES."""
+    if value is None or value == "":
+        return value
+    if value not in AGENT_STATES:
+        raise UsageError(
+            f"--agent-status: invalid state '{value}', "
+            f"expected one of {', '.join(AGENT_STATES)} (or \"\" to clear)")
     return value
 
 
@@ -353,6 +371,7 @@ def main(argv: list[str]) -> int:
                 due=_validate_date("--due", args.due),
                 scheduled=_validate_date("--scheduled", args.scheduled),
                 completed=_validate_date("--completed", args.completed),
+                agent_status=_validate_agent_status(args.agent_status),
             )
             if args.json:
                 print(json.dumps(t.to_dict(), indent=2))

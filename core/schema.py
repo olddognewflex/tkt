@@ -18,6 +18,11 @@ class Ticket:
     type_class: str = ""             # "full_sdlc" | "deliverable" | "unknown"
     assignee: str = ""
     priority: str = ""
+    # Agent execution state, for boards that surface "is an agent working this,
+    # and what is it doing": "" (none) | idle | processing | waiting | done |
+    # blocked. Set by `tkt edit --agent-status`; only the markdown backend
+    # persists it today. "" when unset.
+    agent_status: str = ""
     # Optional dates, ISO YYYY-MM-DD; None when unset (rendered as null in JSON).
     due: str | None = None
     scheduled: str | None = None

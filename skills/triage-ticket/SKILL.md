@@ -61,6 +61,7 @@ or `CLAUDE.md`; this skill stays generic. Example shape:
 
 ```shell
 tkt transition "$KEY" in_progress
+tkt edit "$KEY" --agent-status processing
 ```
 
 ### 4. Start time tracking

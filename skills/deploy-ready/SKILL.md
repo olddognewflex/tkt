@@ -123,7 +123,7 @@ SHIPPED=$(git log <prev-prod-tag>..origin/"$DEFAULT_BRANCH" --format='%s %b' \
 If your prod workflow truly deploys → transition each to `done`:
 
 ```shell
-# for K in $SHIPPED; do tkt transition "$K" done; done
+# for K in $SHIPPED; do tkt transition "$K" done; tkt edit "$K" --agent-status done; done
 ```
 
 If it's a build/auth stub → comment and leave in `deploy_ready` for human Done:
