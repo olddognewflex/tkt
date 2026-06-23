@@ -146,6 +146,7 @@ class Adapter(ABC):
         due: str | None = None,
         scheduled: str | None = None,
         completed: str | None = None,
+        agent_status: str | None = None,
     ) -> Ticket:
         """Edit a ticket's content/fields in place; return it normalized.
 
