@@ -50,6 +50,7 @@ HOTFIX_KEY=$(tkt create --type Bug \
 # Link hotfix → original. "Fixes" is the outward description (HOTFIX Fixes TARGET).
 tkt link "$HOTFIX_KEY" --to "$TARGET_TICKET" --type "Fixes"
 tkt transition "$HOTFIX_KEY" in_progress
+tkt edit "$HOTFIX_KEY" --agent-status processing
 ```
 
 ### 3. Create the revert branch
@@ -80,6 +81,7 @@ gh pr create --repo "$REPO" --title "hotfix($HOTFIX_KEY): revert $TARGET_TICKET"
 Reverts $TARGET_SHA (from $TARGET_TICKET). Ticket: $HOTFIX_URL
 Production incident — bypassing standard QA per hotfix policy. Single signoff."
 tkt transition "$HOTFIX_KEY" review
+tkt edit "$HOTFIX_KEY" --agent-status waiting
 ```
 
 ### 6. Request human signoff (skip the bot loop)
@@ -142,7 +144,7 @@ WL=$(tkt worklog "$HOTFIX_KEY" --from-role in_progress --note "Hotfix run comple
 tkt comment "$HOTFIX_KEY" "Production workflow completed. Verify the revert serves prod traffic, then transition to Done. \
 Agent lane time: $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 tkt comment "$TARGET_TICKET" "Reverted by $HOTFIX_KEY due to a production regression. Redo the work with the regression addressed before re-attempting."
-# If your prod workflow truly deploys: tkt transition "$HOTFIX_KEY" done
+# If your prod workflow truly deploys: tkt transition "$HOTFIX_KEY" done; tkt edit "$HOTFIX_KEY" --agent-status done
 ```
 
 ## Output

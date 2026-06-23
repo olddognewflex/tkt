@@ -41,6 +41,7 @@ tkt comment "$KEY" "Deliverable complete: <summary>.
 Link: <url>
 Time in In Progress: $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 tkt transition "$KEY" done
+tkt edit "$KEY" --agent-status done
 ```
 
 ## Edge cases
@@ -55,8 +56,8 @@ tkt transition "$KEY" done
 - **Spike with no concrete next step**: comment findings + a recommended follow-up
   ticket, mark `done`. The follow-up is a separate Story.
 - **Blocked deliverable**: `tkt worklog "$KEY" --from-role in_progress` then
-  `tkt transition "$KEY" blocked` with a blocker comment (see `automated-sdlc` →
-  External blocker handling).
+  `tkt transition "$KEY" blocked` followed by `tkt edit "$KEY" --agent-status blocked`
+  with a blocker comment (see `automated-sdlc` → External blocker handling).
 
 ## Output
 

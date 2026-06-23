@@ -29,6 +29,7 @@ with `tkt worklog`:
 # Exiting revise → in_progress:
 WL=$(tkt worklog "$KEY" --from-role revise --note "Addressing review feedback" --json)
 tkt transition "$KEY" in_progress
+tkt edit "$KEY" --agent-status processing
 tkt comment "$KEY" "Addressing review feedback. Time in Revise: \
 $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 ```
@@ -107,6 +108,7 @@ done
 
 WL=$(tkt worklog "$KEY" --from-role in_progress --note "Revise cycle — fixes pushed, re-review requested" --json)
 tkt transition "$KEY" review
+tkt edit "$KEY" --agent-status waiting
 tkt comment "$KEY" "Pushed fixes, re-requested review. Time in In Progress (revise cycle): \
 $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 ```

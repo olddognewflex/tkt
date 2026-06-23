@@ -34,6 +34,7 @@ $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 
 ```shell
 tkt transition "$KEY" in_progress
+tkt edit "$KEY" --agent-status processing
 ```
 
 The agent owns the work again while it pushes/re-reviews.
@@ -74,9 +75,11 @@ WL1=$(tkt worklog "$KEY" --from-role in_progress --note "Revise cycle — in_pro
 # respond-to-review may already have moved it to review; only transition if not.
 CUR=$(tkt view "$KEY" --json | jq -r .status_role)
 [ "$CUR" != "review" ] && tkt transition "$KEY" review
+tkt edit "$KEY" --agent-status waiting
 WL2=$(tkt worklog "$KEY" --from-role review --note "Revise cycle — re-review portion" --json)
 
 tkt transition "$KEY" qa_ready
+tkt edit "$KEY" --agent-status waiting
 tkt comment "$KEY" "Re-review complete and approved. Back in qa_ready — preview updated: <url>. \
 In Progress (revise): $(echo "$WL1" | jq -r .human) (worklog $(echo "$WL1" | jq -r .worklog_id)) | \
 review (re-review): $(echo "$WL2" | jq -r .human) (worklog $(echo "$WL2" | jq -r .worklog_id))."
