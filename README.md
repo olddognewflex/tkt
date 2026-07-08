@@ -10,7 +10,7 @@ it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
 (uses stdlib `tomllib`); no third-party deps.
 
 Status: core + `jira`, `markdown`, `github`, `linear`, and `openkanban` adapters,
-plus the **full** ported SDLC skill pack — 13 skills + the ticket-researcher agent
+plus the **full** ported SDLC skill pack — 14 skills + the ticket-researcher agent
 (see "Skill pack"). Adding another backend is just a new `adapters/*.py`
 implementing the verb contract; no skill changes.
 
@@ -51,6 +51,25 @@ ln -s ~/Development/tkt/skills/* .claude/skills/
 
 Config discovery order: `--config <path>` → `$TKT_CONFIG` → nearest `.sdlc/config.toml`
 walking up from cwd. So `tkt` invoked anywhere inside `my-project` finds its config.
+
+## Use across an organization
+
+For shared repos and CI, install the pack as **committed copies** with
+`tkt sync-pack` instead of symlinks — see [docs/install.md](docs/install.md) for
+the full guide.
+
+- `tkt sync-pack` writes real, tracked files into the repo (`.claude/skills`,
+  `.github/prompts`, `.kiro/skills`, an `AGENTS.md` managed block, and a
+  `.sdlc/pack-manifest.json`). Cloud harnesses, CI, and teammates only see tracked
+  files, so this is the option that works off your machine. Add `--all-harnesses`
+  for the curated long tail (Gemini, Cursor, Windsurf, Cline, Continue, Augment,
+  OpenCode, Antigravity).
+- `tkt init --link-skills` symlinks the pack into `.claude/` — fine for solo local
+  work, invisible to git/CI. Use committed copies for anything shared.
+- Updating: `git pull` the pack clone, re-run `tkt sync-pack` per consumer repo;
+  `tkt sync-pack --check` reports drift. Re-runs are idempotent, and locally
+  modified pack files are overwritten with a warning — customize upstream in the
+  pack, not in consumers.
 
 ## Verb contract
 
@@ -239,9 +258,12 @@ originals — every ticketing/board call now goes through `tkt`):
 `agents/ticket-researcher.md` is the read-only lookup subagent (provider-agnostic
 port of the old `jira-researcher`).
 
-To activate in a project, copy these into the project's `.claude/skills/` (and
-`agents/`) — or symlink. They depend only on `tkt` + `.sdlc/config.toml`, so the
-same skill set runs against any configured backend. Skills speak in **roles**
+To activate in a project, run `tkt sync-pack` to install committed copies into
+`.claude/` (and the other harness dirs) — see [docs/install.md](docs/install.md)
+and the "Use across an organization" section above. For solo local work you can
+instead symlink via `tkt init --link-skills`. Either way they depend only on `tkt`
++ `.sdlc/config.toml`, so the same skill set runs against any configured backend.
+Skills speak in **roles**
 (`in_progress`, `review`, `done`, ...) and read toolchain/VCS/deploy settings via
 `tkt cfg` (e.g. `tkt cfg build.test --pkg X`, `tkt cfg vcs.branch_fmt --ticket K
 --slug s`), so nothing about Jira/pnpm/GitHub is baked into skill text.
