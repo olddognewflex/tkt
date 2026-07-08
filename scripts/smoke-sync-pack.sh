@@ -19,7 +19,7 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 "$TKT" sync-pack --dir "$C" >/dev/null
@@ -89,6 +89,23 @@ if grep -q "CUSTOM LINE ONE" "$C3/AGENTS.md" && grep -q "tkt-pack:begin" "$C3/AG
 else
   fail "case6 custom AGENTS.md content lost"
   sed 's/^/    /' "$C3/AGENTS.md"
+fi
+
+# ---- case 7: pre-existing differing file at a pack path warns on first sync --
+# A consumer that already ships its own copy at a pack destination (never synced
+# by us, so no manifest entry) must be warned before its content is replaced.
+C4="$(mktemp -d)"
+pre="$C4/.github/prompts/select-ticket.prompt.md"
+mkdir -p "$(dirname "$pre")"
+printf 'CONSUMER-OWNED CONTENT\n' > "$pre"
+out7="$("$TKT" sync-pack --dir "$C4" 2>&1)"
+replaced=1
+cmp -s "$pre" "$PACK/.github/prompts/select-ticket.prompt.md" || replaced=0
+if echo "$out7" | grep -q "pre-existing file overwritten" && [ "$replaced" = "1" ]; then
+  pass "case7 pre-existing differing file warned and replaced on first sync"
+else
+  fail "case7 pre-existing file (warned? / replaced=$replaced)"
+  echo "$out7" | sed 's/^/    /'
 fi
 
 echo

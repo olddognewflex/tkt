@@ -235,7 +235,9 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
     missing: list[str] = []
     locally_mod: list[str] = []
     outdated: list[str] = []
-    warnings: list[str] = []
+    # (relpath, reason) where reason is "modified" (drifted from last sync) or
+    # "preexisting" (already on disk but never synced by us).
+    warnings: list[tuple[str, str]] = []
     writes = 0
 
     for src, rel in plan:
@@ -259,8 +261,14 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
         if dst.exists():
             cur_sha = _sha_bytes(dst.read_bytes())
             man_sha = old_files.get(rel)
-            if man_sha is not None and cur_sha != man_sha:
-                warnings.append(rel)
+            if man_sha is None:
+                # Present on disk but never synced by us (e.g. a consumer that
+                # already had .github/prompts/select-ticket.prompt.md with its
+                # own content). Don't clobber it silently.
+                if cur_sha != new_sha:
+                    warnings.append((rel, "preexisting"))
+            elif cur_sha != man_sha:
+                warnings.append((rel, "modified"))
             if cur_sha == new_sha:
                 continue  # idempotent no-touch
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -296,15 +304,18 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
         region = _extract_block(cur_agents)
         if region is not None and man_block_sha is not None \
                 and _sha_bytes(region.encode("utf-8")) != man_block_sha:
-            warnings.append(f"{AGENTS_REL} (tkt-pack block)")
+            warnings.append((f"{AGENTS_REL} (tkt-pack block)", "modified"))
     new_agents = _splice_block(cur_agents, block)
     if new_agents != cur_agents:
         agents_path.parent.mkdir(parents=True, exist_ok=True)
         agents_path.write_text(new_agents, encoding="utf-8")
         writes += 1
 
-    for rel in warnings:
-        print(f"warning: {rel} was locally modified since last sync — overwriting")
+    for rel, reason in warnings:
+        if reason == "preexisting":
+            print(f"warning: pre-existing file overwritten: {rel}")
+        else:
+            print(f"warning: {rel} was locally modified since last sync — overwriting")
 
     # Rewrite the manifest only when the material (non-timestamp) content
     # changed; otherwise leave it byte-for-byte identical so re-runs stay clean.
@@ -329,7 +340,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
     else:
         summary = f"sync-pack: {writes} file(s) written to {target}"
         if warnings:
-            summary += f", {len(warnings)} locally-modified overwritten"
+            summary += f", {len(warnings)} pre-existing/locally-modified overwritten"
         print(summary)
         if wrote_manifest:
             print(f"  manifest: {manifest_path}")
