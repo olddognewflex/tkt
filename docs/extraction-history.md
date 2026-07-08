@@ -1,5 +1,8 @@
 # Portable SDLC Skill Pack — Plan
 
+> Historical extraction plan/coupling inventory; kept for reference.
+
+
 Goal: take the `automated-sdlc` skill family (currently hardwired to Jira + Tempo +
 GitHub + pnpm/turbo) and make it **plug into any project** with a configurable
 ticketing system and kanban board. Backends to support: **Jira, GitHub Issues+Projects,

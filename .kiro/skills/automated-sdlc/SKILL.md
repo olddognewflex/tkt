@@ -59,7 +59,7 @@ tkt worklog "$KEY" --from-role <role> --note "<context>" --json
 
 `tkt worklog` finds the most recent entry into that lane (paging the provider's
 full changelog/history), computes elapsed time, writes the canonical time entry
-(e.g. a Jira/Tempo worklog, or a local JSONL row), and returns
+(e.g. your ticketing backend's worklog, or a local JSONL row), and returns
 `{human, worklog_id, seconds}`. It is a **no-op** (empty `worklog_id`) when
 `[timetracking].provider = "none"`. Then post the human-readable comment embedding
 both values:
@@ -159,6 +159,7 @@ PR stays **open**. Transition + annotate:
 ```shell
 WL=$(tkt worklog "$KEY" --from-role review --note "Approved — promoting to QA" --json)
 tkt transition "$KEY" qa_ready
+tkt edit "$KEY" --agent-status waiting
 tkt comment "$KEY" "Preview: <url>. PR open and approved, awaiting QA. \
 Time in review (incl. loops): $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 ```
@@ -180,6 +181,7 @@ watches the deploy workflow, gates manual prod deploy, then handles the final
 ```shell
 WL=$(tkt worklog "$KEY" --from-role in_progress --note "Blocked — <desc>" --json)
 tkt transition "$KEY" blocked
+tkt edit "$KEY" --agent-status blocked
 tkt comment "$KEY" "BLOCKED: <desc>. Waiting on: <who>. Need: <what unblocks>. \
 Time in In Progress before blocking: $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 ```

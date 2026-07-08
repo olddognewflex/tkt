@@ -57,7 +57,7 @@ or shared-lib change. Note the typical files touched for each.
 Build/test commands come from config — don't hardcode the toolchain:
 
 ```shell
-tkt cfg build.build --pkg "<pkg>"     # e.g. pnpm turbo build --filter=<pkg>
+tkt cfg build.build --pkg "<pkg>"     # resolves to the configured build command
 tkt cfg build.test  --pkg "<pkg>"
 tkt cfg build.typecheck
 ```
