@@ -23,7 +23,7 @@ ones — see "When NOT to Sync") gets a copy here.
 
 | # | Location | Format | Used By |
 |---|----------|--------|---------|
-| 1 | `.agents/skills/<name>/SKILL.md` | Agent Skills (YAML + MD) | Antigravity, JetBrains Junie |
+| 1 | `.agents/skills/<name>/SKILL.md` | Agent Skills (YAML + MD) | Codex, Antigravity, JetBrains Junie |
 | 2 | `.kiro/skills/<name>/SKILL.md` | Agent Skills (YAML + MD) | AWS Kiro |
 | 3 | `.github/prompts/<name>.prompt.md` | Copilot Prompt (YAML + MD) | GitHub Copilot |
 | 4 | `.gemini/commands/<name>.toml` | TOML | Gemini CLI |
@@ -212,6 +212,9 @@ Copy to:
 - `.agents/skills/<name>/SKILL.md`
 - `.kiro/skills/<name>/SKILL.md`
 
+Codex consumes the `.agents/skills/<name>/SKILL.md` copy directly — keep it
+byte-identical to the `skills/<name>/SKILL.md` source.
+
 ### 3. Tier A: condensed translations (always)
 
 Translate to:
@@ -287,7 +290,8 @@ done
 ## Portability Rules for All Translations
 
 1. **No backend specifics.** Skills must call `tkt view`, `tkt transition`, etc.,
-   never `acli`, `gh issue`, Jira REST, or Linear GraphQL directly.
+   never a ticketing backend's own CLI or REST/GraphQL API directly (whatever
+   provider `.sdlc/config.toml` selects).
 2. **No repo/toolchain hardcoding.** Read values through `tkt cfg`
    (e.g. `tkt cfg vcs.repo`, `tkt cfg build.test --pkg X`).
 3. **Speak in roles, not lane names.** Use `in_progress`, `review`, `done`, etc.;

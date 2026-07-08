@@ -61,7 +61,7 @@ for N in 1 2 3 4 5; do
   [ "$(echo "$OUT" | jq 'length')" -gt 0 ] || continue
 
   # Filter blockers per-candidate via `tkt blockers` (authoritative on every
-  # backend — some list paths don't carry link data, e.g. Jira via acli).
+  # backend — some list paths don't carry link data via the ticketing backend).
   SELECTABLE='[]'
   for K in $(echo "$OUT" | jq -r '.[].key'); do
     [ -n "$(is_blocked "$K")" ] && continue

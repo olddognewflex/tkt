@@ -1,9 +1,10 @@
-"""Jira adapter — ports the existing acli + REST + Tempo logic from the edge
-SDLC skills behind the verb contract. Behavior is intended to match the
-original skills exactly so the live DTB board is the regression baseline.
+"""Jira adapter — ports the acli + REST + Tempo logic from the pre-extraction
+SDLC skills behind the verb contract. Behavior is intended to match those
+skills exactly so the live Jira board they ran against is the regression
+baseline.
 
 Auth (env names declared in config [ticketing].auth_env, defaults shown):
-    CONFLUENCE_SITE       e.g. auctionedge.atlassian.net
+    CONFLUENCE_SITE       e.g. yourcompany.atlassian.net
     CONFLUENCE_EMAIL
     CONFLUENCE_API_TOKEN
     TEMPO_API_TOKEN       optional; required to mark worklogs non-billable

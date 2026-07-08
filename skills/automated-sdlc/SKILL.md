@@ -59,7 +59,7 @@ tkt worklog "$KEY" --from-role <role> --note "<context>" --json
 
 `tkt worklog` finds the most recent entry into that lane (paging the provider's
 full changelog/history), computes elapsed time, writes the canonical time entry
-(e.g. a Jira/Tempo worklog, or a local JSONL row), and returns
+(e.g. your ticketing backend's worklog, or a local JSONL row), and returns
 `{human, worklog_id, seconds}`. It is a **no-op** (empty `worklog_id`) when
 `[timetracking].provider = "none"`. Then post the human-readable comment embedding
 both values:
