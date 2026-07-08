@@ -1,4 +1,4 @@
-# Example tkt config for the DTB / edge-dev-platform Jira board.
+# Example tkt config for a Jira board (project key DTB shown).
 # Copy to .sdlc/config.toml at your repo root and adjust.
 
 # `tkt cfg priorities` returns Jira's live priority scheme in REST mode; this
@@ -51,7 +51,7 @@ deploy_ready = 'status = "Ready for Deploy" ORDER BY priority DESC, updated ASC'
 
 [vcs]
 provider       = "github"
-repo           = "auctionedge/edge-dev-platform"
+repo           = "your-org/your-repo"
 default_branch = "main"
 branch_fmt     = "feature/{key-lower}-{slug}"
 hotfix_fmt     = "hotfix/{key-lower}-{slug}"

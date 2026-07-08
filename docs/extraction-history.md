@@ -23,7 +23,7 @@ Scanned all 22 skills + 4 agents. Hardcoded provider assumptions:
 | Project key `DTB`, board id `999` | select-ticket, automated-sdlc | — |
 | Lane names: `Backlog→To Do→In Progress→PR Needs Review→Ready for QA→QA→Ready for Deploy→Done` + `Revise/Blocked/Cancelled` | all pipeline skills | — |
 | Issue types `Story/Bug/Task/Sub-task/Chore/Epic/Spike` → routing | automated-sdlc P1.5, triage, complete-deliverable | — |
-| VCS: `gh`, repo `auctionedge/edge-dev-platform`, Copilot reviewer, FelipeFlow branches | open-pr, deploy-ready, ci-fix | — |
+| VCS: `gh`, hardcoded upstream repo slug, Copilot reviewer, FelipeFlow branches | open-pr, deploy-ready, ci-fix | — |
 | Build/test: `pnpm turbo build/test/typecheck/lint` | automated-sdlc, plan, resume | 17 |
 | Keyword→package map | triage-ticket | — |
 | Docs: Confluence pages | publish-docs, grill-with-adrs | — |
@@ -143,7 +143,7 @@ tier2 = 'status="To Do" AND assignee=currentUser() ORDER BY priority DESC, creat
 
 [vcs]
 provider     = "github"
-repo         = "auctionedge/edge-dev-platform"
+repo         = "your-org/your-repo"
 branch_fmt   = "feature/{key-lower}-{slug}"
 reviewers    = ["copilot-pull-request-reviewer[bot]"]
 merge        = "squash"

@@ -5,9 +5,6 @@ repository. The pack is a CLI (`tkt`) plus a set of SDLC skills that install int
 your repo as **committed files**, so every AI harness — and CI, and anything that
 reads the repo over git — sees them.
 
-For a worked, backend-specific example, see
-[Migrating edge-dev-platform to the pack](migrating-edge-dev-platform.md).
-
 ## 1. Install the CLI
 
 The CLI ships as a single entry script that locates its own `core/` and
@@ -130,13 +127,12 @@ There are two ways to activate the pack; use committed copies for any shared rep
   on your machine — they are invisible to git, CI, and cloud harnesses. Not for
   shared repos.
 
-## 6. Policy framing (Auction Edge)
+## 6. Policy framing
 
 Shipping resident config for a harness means the pack **technically supports** that
 harness — it is **not** an endorsement to use it. Company policy governs which
 harnesses, subscriptions, and models are approved for work. Today the approved
 harnesses are **GitHub Copilot (Business)** and **AWS Kiro (Enterprise Pro)**.
-This mirrors the stance in `edge-dev-platform` ADR-0013 (AI-tooling policy).
 
 The **default** `tkt sync-pack` set is deliberately narrow: the two company-approved
 harnesses (Copilot, Kiro), the canonical Claude source the skills are authored in,
