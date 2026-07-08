@@ -155,6 +155,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--sample", action="store_true",
                     help="markdown: also write a starter ticket")
 
+    sp = add("sync-pack")
+    sp.add_argument("--all-harnesses", action="store_true", dest="all_harnesses",
+                    help="also install the curated Tier-B harness dirs "
+                         "(.gemini, .cursor, .windsurf, ...) path-verbatim")
+    sp.add_argument("--dir", default=".",
+                    help="consumer repo to install the pack into (default cwd)")
+    sp.add_argument("--check", action="store_true",
+                    help="report-only: list missing/locally-modified/out-of-date "
+                         "pack files and exit 1 if any; writes nothing")
+
     sp = add("cfg")
     sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo")
     sp.add_argument("--pkg", default="", help="substitute {pkg} in the value")
@@ -236,6 +246,12 @@ def main(argv: list[str]) -> int:
             from .scaffold import init as scaffold_init
             return scaffold_init(args.provider, args.dir, args.force,
                                  args.link_skills, args.sample, interactive=True)
+
+        # `sync-pack` installs pack files into a consumer tree; it needs no
+        # config and may run before `tkt init`.
+        if args.verb == "sync-pack":
+            from .pack import sync_pack
+            return sync_pack(args.dir, args.all_harnesses, args.check)
 
         config = Config.load(args.config)
 
@@ -380,6 +396,10 @@ def main(argv: list[str]) -> int:
 
         elif args.verb == "doctor":
             checks = adapter.doctor()
+            from .pack import doctor_check
+            pack_c = doctor_check(config)
+            if pack_c is not None:
+                checks = checks + [pack_c]
             ok_all = all(c.ok for c in checks)
             if args.json:
                 print(json.dumps([c.to_dict() for c in checks], indent=2))

@@ -93,7 +93,8 @@ def init(provider: str | None, target_dir: str, force: bool,
         print("  2. (markdown: no auth needed)")
     print(f"  3. {_tkt_invocation()} doctor")
     if not link_skills:
-        print("  4. Activate skills: tkt init --link-skills (or copy skills/ into .claude/skills/)")
+        print("  4. Activate skills: `tkt sync-pack` (committed copies — best for "
+              "cloud/CI harnesses like Copilot) or `tkt init --link-skills` (symlinks)")
     return 0
 
 
