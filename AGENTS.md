@@ -6,6 +6,10 @@ skill pack. The pack's skills speak semantic verbs (`tkt view`, `tkt transition`
 dispatches to the configured provider adapter, and normalizes every backend into
 one JSON ticket shape.
 
+This file is the harness-facing contract: how to drive `tkt` and how to edit the
+skills without breaking portability. For this repo's internals (`core/`,
+`adapters/`, how to add a provider), see `CLAUDE.md`.
+
 Use this file as the root fallback when your harness does not have a dedicated
 per-tool folder (Cursor rules, Windsurf rules, OpenCode instructions, etc. are in
 separate harness-specific files).
@@ -13,10 +17,8 @@ separate harness-specific files).
 ## Core portability rules
 
 1. **No backend specifics in workflow logic.**
-   - Use `tkt view`, `tkt transition`, `tkt comment`, `tkt blockers`,
-     `tkt worklog`, `tkt lane-time`, `tkt list`, `tkt create`, `tkt link`.
-   - Never call `acli`, `gh issue`, Jira REST, Linear GraphQL, or any other
-     backend API directly for ticketing.
+   - Use the semantic verbs below — never call `acli`, `gh issue`, Jira REST,
+     Linear GraphQL, or any other backend API directly for ticketing.
 
 2. **No repo/toolchain hardcoding.**
    - Read values through `tkt cfg`:
@@ -50,23 +52,57 @@ separate harness-specific files).
    - Comments should still read naturally (e.g. "Time in In Progress: (no time
      tracking)").
 
+6. **Optional verbs are opt-in per adapter.**
+   - `create`, `apply`, `edit`, and `link` raise a "not supported"
+     `ProviderError` on backends that don't implement them. Branch on the exit
+     code (3) rather than assuming availability.
+
 ## Verb contract (quick reference)
 
 | Command | Purpose |
 |---------|---------|
 | `tkt whoami` | current user id |
-| `tkt list --tier N` / `--query NAME` | run named query from config |
+| `tkt list --tier N` \| `--query NAME` | run named query from config (one is required) |
 | `tkt view KEY --json` | normalized ticket |
 | `tkt transition KEY ROLE` | move ticket to role's lane |
 | `tkt comment KEY BODY` | post activity comment |
 | `tkt blockers KEY --json` | unresolved blockers only |
-| `tkt worklog KEY --from-role ROLE [--note T]` | log time since entry → now |
-| `tkt lane-time KEY --role ROLE` | log time for closed lane interval |
-| `tkt create --type T --summary S ...` | create a ticket (adapter-opt-in) |
+| `tkt worklog KEY --from-role ROLE [--note T] [--billable]` | log time since entry → now |
+| `tkt lane-time [KEY] --role ROLE [--keys K1:role,K2:role] [--read-only]` | log time for a closed lane interval; batch via `--keys` |
+| `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket (adapter-opt-in) |
+| `tkt apply [KEY] --file PATH` \| `--new --file PATH` \| `--template` | create/update from a full ticket markdown doc (`-` reads stdin) |
+| `tkt edit KEY [--summary/--body/--priority/--assignee/--add-label/--remove-label/--due/--scheduled/--completed/--agent-status]` | field-level update |
 | `tkt link KEY --to OTHER --type T` | link tickets (adapter-opt-in) |
 | `tkt lane ROLE` | resolve role → provider lane name |
-| `tkt cfg DOTTED.KEY ...` | read config + template substitution |
-| `tkt doctor` | validate auth + reachability + board model |
+| `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
+| `tkt cfg priorities` | backend-aware priority list, highest-first |
+| `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force]` | scaffold `.sdlc/` |
+| `tkt sync-pack [--dir D] [--all-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
+| `tkt doctor` | validate auth + reachability + board model + pack sync |
+
+`--json` works on either side of the verb.
+
+### Edit semantics
+
+`tkt edit` distinguishes "not supplied" from "clear":
+
+- Omit a flag → field unchanged.
+- Pass `""` → field cleared (e.g. `--assignee ""`).
+- `--due` / `--scheduled` / `--completed` take `YYYY-MM-DD`.
+- `--agent-status` takes one of `idle`, `processing`, `waiting`, `done`,
+  `blocked` (or `""` to clear). Invalid values are rejected up front so a typo
+  can't write a state the board's badge mapping won't recognize.
+
+### Exit codes
+
+Branch on these — errors always go to stderr with a non-zero exit:
+
+| Code | Meaning |
+|------|---------|
+| 2 | config error |
+| 3 | provider error (includes "verb not supported by this adapter") |
+| 4 | not found |
+| 64 | usage error |
 
 ## SDLC skill pack
 
@@ -92,17 +128,48 @@ per-tool folders (`.opencode/commands/`, `.cursor/commands/`, `.cursor/skills/`,
 | `deploy-preview` | confirm preview env, post URL to ticket + PR |
 | `hotfix-revert` | fast-track prod revert |
 | `resume-from-revise` | re-enter the loop after a human revise fix |
+| `sync-skills` | translate the canonical skills into each harness format |
+
+### Editing skills
+
+- **No backend specifics in skill text.** Speak in roles, and read all
+  toolchain/VCS/deploy settings through `tkt cfg`. Never hardcode Jira/pnpm/
+  GitHub/repo names.
+- VCS (PR/CI/merge via `gh`) and infra (preview/deploy) are still GitHub/
+  cloud-shaped, but repo/branch/reviewer/workflow values come from config;
+  genuinely infra-specific steps are marked `PROJECT-SPECIFIC` in the skill text.
+- Editing a skill's frontmatter `description` changes the `sync-pack` managed
+  block in consumer repos — it is generated from the first sentence.
+
+## Distributing the pack
+
+`tkt sync-pack` installs the pack into a consumer repo as **committed copies**,
+not symlinks: cloud harnesses and CI only see tracked files, so the symlinks
+`tkt init --link-skills` writes are invisible to them. It only writes paths it
+records in `.sdlc/pack-manifest.json`, never deletes, and is idempotent (a second
+run with an unchanged pack leaves `git status` clean).
+
+In a consumer repo it also maintains a generated block inside that repo's
+`AGENTS.md`, delimited by markers — content outside the markers is preserved
+verbatim. `tkt sync-pack --check` reports missing/locally-modified/out-of-date
+pack files and exits 1; `tkt doctor` folds the same check in.
+
+This file — the pack repo's own `AGENTS.md` — has no managed block and is
+hand-maintained.
 
 ## Meta
 
-- `skills/sync-skills/SKILL.md` documents how to translate the canonical skills
-  into each harness format.
 - `agents/ticket-researcher.md` is the read-only lookup subagent.
+- `docs/install.md` — installing `tkt` and the pack.
+- `docs/markdown-ticketing.md` — the markdown provider's on-disk format.
+- `docs/extraction-history.md` — how this pack was extracted from its origin repo.
+- `scripts/` — `company-import.sh` (bulk import) and `smoke-sync-pack.sh`
+  (sync-pack smoke test).
 - This repo is pure stdlib Python 3.11+; no build step.
 
 ## When in doubt
 
 - Run `tkt doctor` to validate a project's config.
 - Run `tkt view KEY --json` to see the normalized shape.
-- Run `tkt cfg <dotted.key> --help` is not supported; consult
-  `.sdlc/config.toml` or `examples/config.<provider>.toml`.
+- Config keys are not self-documenting: consult `.sdlc/config.toml` or
+  `examples/config.<provider>.toml`.
