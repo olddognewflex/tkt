@@ -76,7 +76,7 @@ separate harness-specific files).
 | `tkt lane ROLE` | resolve role → provider lane name |
 | `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
-| `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force]` | scaffold `.sdlc/` |
+| `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
 | `tkt sync-pack [--dir D] [--all-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 

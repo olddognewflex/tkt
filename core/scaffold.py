@@ -7,6 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import toolchain
 from .errors import ConfigError, UsageError
 
 PACK_ROOT = Path(__file__).resolve().parent.parent
@@ -37,7 +38,8 @@ Created by `tkt init --sample`. Edit or delete this file.
 
 
 def init(provider: str | None, target_dir: str, force: bool,
-         link_skills: bool, sample: bool, interactive: bool) -> int:
+         link_skills: bool, sample: bool, interactive: bool,
+         detect_build: bool = True) -> int:
     providers = available_providers()
 
     if not provider:
@@ -68,6 +70,9 @@ def init(provider: str | None, target_dir: str, force: bool,
     shutil.copyfile(src, cfg)
     print(f"wrote {cfg}  (from examples/config.{provider}.toml)")
 
+    if detect_build:
+        _seed_build(cfg, target)
+
     if sample and provider == "markdown":
         board = sdlc / "board"
         board.mkdir(parents=True, exist_ok=True)
@@ -96,6 +101,23 @@ def init(provider: str | None, target_dir: str, force: bool,
         print("  4. Activate skills: `tkt sync-pack` (committed copies — best for "
               "cloud/CI harnesses like Copilot) or `tkt init --link-skills` (symlinks)")
     return 0
+
+
+def _seed_build(cfg: Path, target: Path) -> None:
+    """Replace the example's placeholder [build] commands with detected ones."""
+    found, label = toolchain.detect(target)
+    if not found:
+        print("  no build/test commands detected — [build] left at example "
+              "defaults (edit by hand)")
+        return
+    cfg.write_text(toolchain.apply_to_config(cfg.read_text(), found))
+    print(f"  detected {label} toolchain; [build] set to:")
+    for key in toolchain.KEYS:
+        if key in found:
+            print(f"    {key:<9} = {found[key]}")
+    missing = [k for k in toolchain.KEYS if k not in found]
+    if missing:
+        print(f"  not declared by the project (left as-is): {', '.join(missing)}")
 
 
 def _link_pack(target: Path) -> None:

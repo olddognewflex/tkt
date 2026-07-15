@@ -40,7 +40,15 @@ tkt doctor                        # validate auth + board model
 `tkt init` flags: `--provider` (required non-interactively; prompts on a TTY),
 `--dir` (target, default cwd), `--force` (overwrite existing config),
 `--link-skills` (symlink the pack into `.claude/`), `--sample` (markdown starter
-ticket). It refuses to clobber an existing `.sdlc/config.toml` without `--force`.
+ticket), `--no-detect-build` (skip toolchain detection). It refuses to clobber an
+existing `.sdlc/config.toml` without `--force`.
+
+`init` seeds `[build]` from whatever the project already declares, so skills run
+the project's real commands without hand-editing: `package.json` scripts (runner
+picked from `packageManager`/lockfile — pnpm, yarn, bun, npm), `Cargo.toml`,
+`go.mod`, `pyproject.toml` (pytest/mypy/pyright/ruff/flake8, prefixed with
+`uv run`/`poetry run` when a lockfile says so), or `Makefile` targets. Keys the
+project doesn't declare keep the example's value.
 
 Manual equivalent, if you prefer:
 
@@ -91,7 +99,7 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L] [--due D] [--scheduled D] [--completed D] [--agent-status S]` | edit content/fields in place (only flags passed change; status excluded — use `transition`). Dates are ISO `YYYY-MM-DD`; pass `""` to clear. `--agent-status` is the agent execution state (`idle`/`processing`/`waiting`/`done`/`blocked`, `""` to clear) a board can surface; markdown backend only. | normalized ticket / `--json` |
 | `tkt apply --new --file F` / `tkt apply KEY --file F` | create / update a ticket from a full markdown doc (frontmatter + body; `-` = stdin). Owns the doc except `status` (use `transition`) and backend-managed sections (Comments), preserved verbatim. | new/updated key / `--json` ticket |
 | `tkt apply --template` | print the create-document template the editor opens with | markdown doc |
-| `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
+| `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample] [--no-detect-build]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
@@ -282,6 +290,7 @@ core/
   registry.py  provider name -> adapter (lazy import)
   schema.py    Ticket / Worklog / Check dataclasses + to_dict()
   query.py     shared JQL-subset evaluator (markdown + linear + openkanban)
+  toolchain.py detect build/test/typecheck/lint commands for `tkt init`
   ticketdoc.py canonical full-ticket markdown doc parser (for `tkt apply`)
   scaffold.py  `tkt init` scaffolder
   errors.py    typed errors -> exit codes
