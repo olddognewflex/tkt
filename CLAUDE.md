@@ -65,6 +65,10 @@ Two layers, connected only by the verb contract and the normalized schema:
     writes outside recorded paths, and is idempotent.
   - `errors.py` — typed errors → exit codes (see `AGENTS.md` for the table). Errors
     always go to stderr with a non-zero exit so skills branch on codes.
+  - `toolchain.py` — best-effort detection of a project's build/test/typecheck/lint
+    commands (package.json scripts, Cargo.toml, go.mod, pyproject.toml, Makefile)
+    plus the `[build]`-table rewrite `init` applies to the copied example config.
+    Advisory only: a key the project doesn't declare keeps the example's value.
   - `scaffold.py` — implements `tkt init`.
 - **`adapters/`** — one file per backend, each subclassing `adapters/base.Adapter`.
   - `base.py` is the contract: required `@abstractmethod` verbs (whoami, list, view,

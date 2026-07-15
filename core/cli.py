@@ -154,6 +154,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="symlink skills/ + agents/ into .claude/")
     sp.add_argument("--sample", action="store_true",
                     help="markdown: also write a starter ticket")
+    sp.add_argument("--no-detect-build", action="store_false", dest="detect_build",
+                    help="keep the example's [build] commands instead of seeding "
+                         "them from the project's package manager")
 
     sp = add("sync-pack")
     sp.add_argument("--all-harnesses", action="store_true", dest="all_harnesses",
@@ -245,7 +248,8 @@ def main(argv: list[str]) -> int:
         if args.verb == "init":
             from .scaffold import init as scaffold_init
             return scaffold_init(args.provider, args.dir, args.force,
-                                 args.link_skills, args.sample, interactive=True)
+                                 args.link_skills, args.sample, interactive=True,
+                                 detect_build=args.detect_build)
 
         # `sync-pack` installs pack files into a consumer tree; it needs no
         # config and may run before `tkt init`.
