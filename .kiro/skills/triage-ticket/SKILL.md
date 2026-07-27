@@ -2,6 +2,7 @@
 name: triage-ticket
 description: 'Read a ticket, extract requirements, move it to In Progress, and start time tracking. Provider-agnostic via tkt.'
 allowed-tools: [Bash, Read, Edit]
+model_tier: cheap
 ---
 
 # Triage Ticket
@@ -61,6 +62,7 @@ or `CLAUDE.md`; this skill stays generic. Example shape:
 
 ```shell
 tkt transition "$KEY" in_progress
+tkt edit "$KEY" --agent-status processing
 ```
 
 ### 4. Start time tracking

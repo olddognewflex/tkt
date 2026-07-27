@@ -1,6 +1,7 @@
 ---
 name: plan-ticket
 description: 'Analyze a triaged ticket and produce a structured implementation plan before coding begins. Provider-agnostic via tkt.'
+model_tier: deep
 ---
 
 # Plan Ticket

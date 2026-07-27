@@ -78,6 +78,7 @@ separate harness-specific files).
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
 | `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
 | `tkt sync-pack [--dir D] [--all-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
+| `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 
 `--json` works on either side of the verb.
@@ -128,6 +129,11 @@ per-tool folders (`.opencode/commands/`, `.cursor/commands/`, `.cursor/skills/`,
 | `deploy-preview` | confirm preview env, post URL to ticket + PR |
 | `hotfix-revert` | fast-track prod revert |
 | `resume-from-revise` | re-enter the loop after a human revise fix |
+| `qa-strategy` | test plan from acceptance criteria (Break-It Checklist) |
+| `qa-author` | write adversarial tests, red-before-green enforced |
+| `qa-critique` | score an existing suite for coverage + assertion strength |
+| `qa-flake-triage` | classify a flaky test's root cause; never papers over it |
+| `qa-bug-report` | structured bug report with a minimal reproduction |
 | `sync-skills` | translate the canonical skills into each harness format |
 
 ### Editing skills
@@ -159,9 +165,27 @@ hand-maintained.
 
 ## Meta
 
-- `agents/ticket-researcher.md` is the read-only lookup subagent.
+- `agents/` holds the subagent catalog, shipped to `.claude/agents/` by
+  `sync-pack`. Each is trust-scoped so the pipeline never self-approves:
+
+  | Agent | Trust | Used by |
+  | --- | --- | --- |
+  | `ticket-researcher` | read-only | ad-hoc ticket lookup |
+  | `sdlc-planner` | read-only | plan phase |
+  | `sdlc-executor` | file read/write + build/test, no VCS push, no transitions | implement phase |
+  | `sdlc-reviewer` | read-only | self-review, review pass |
+  | `sdlc-verifier` | read + build/test only | self-review, check pass |
+  | `qa-engineer` | read + write tests + test runner | QA phase (P4.5) |
+
+  Every phase that delegates also states an inline fallback, so harnesses without
+  subagent support run the pipeline unchanged.
 - `docs/install.md` — installing `tkt` and the pack.
 - `docs/markdown-ticketing.md` — the markdown provider's on-disk format.
+- `docs/model-routing.md` — the `model_tier` frontmatter key and the `[models]`
+  tier→model mapping skills resolve via `tkt cfg models.<tier>`.
+- `docs/behavior-specs.md` — the BDD practice behind the optional `build.bdd` key.
+- `docs/qa-suite-design.md` — how the five `qa-*` skills and `qa-engineer` fit
+  together, and the Break-It Checklist they share.
 - `docs/extraction-history.md` — how this pack was extracted from its origin repo.
 - `scripts/` — `company-import.sh` (bulk import) and `smoke-sync-pack.sh`
   (sync-pack smoke test).

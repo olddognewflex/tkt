@@ -2,6 +2,7 @@
 name: deploy-ready
 description: 'Pick up tickets in the deploy_ready lane: annotate QA lane times, merge the PR, watch the staging workflow for the merge commit, gate manual production deploy, comment status. Provider-agnostic ticketing via tkt; VCS via gh.'
 disable-model-invocation: true
+model_tier: standard
 ---
 
 # Deploy Ready
@@ -123,7 +124,7 @@ SHIPPED=$(git log <prev-prod-tag>..origin/"$DEFAULT_BRANCH" --format='%s %b' \
 If your prod workflow truly deploys → transition each to `done`:
 
 ```shell
-# for K in $SHIPPED; do tkt transition "$K" done; done
+# for K in $SHIPPED; do tkt transition "$K" done; tkt edit "$K" --agent-status done; done
 ```
 
 If it's a build/auth stub → comment and leave in `deploy_ready` for human Done:

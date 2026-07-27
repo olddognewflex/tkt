@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.request
@@ -53,14 +54,254 @@ def _adf_to_text(node) -> str:
     return "".join(out)
 
 
-def _text_to_adf(text: str) -> dict:
-    """Wrap plaintext as a minimal ADF document — one paragraph per line."""
-    content = []
-    for line in text.split("\n"):
-        para: dict = {"type": "paragraph", "content": []}
-        if line:
-            para["content"] = [{"type": "text", "text": line}]
-        content.append(para)
+# ---- Markdown -> ADF ---------------------------------------------------
+#
+# Jira's REST v3 API stores rich text as Atlassian Document Format (ADF), a JSON
+# tree — not wiki markup, and not plain text. Skills author ticket bodies and
+# comments in Markdown, so every write path (create/apply descriptions, comments)
+# runs the body through this converter. Without it, Markdown lands as literal
+# text ("## Heading", "**bold**", "- item" shown verbatim). This is a pragmatic,
+# dependency-free subset of CommonMark — enough for the block/inline constructs
+# skills actually emit; anything unrecognized degrades to a plain paragraph.
+
+_INLINE_CODE = re.compile(r"`([^`]+)`")
+_LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+_STRONG_STAR = re.compile(r"\*\*(?!\s)(.+?)(?<!\s)\*\*")
+_STRONG_UND = re.compile(r"__(?!\s)(.+?)(?<!\s)__")
+_STRIKE = re.compile(r"~~(?!\s)(.+?)(?<!\s)~~")
+_EM_STAR = re.compile(r"\*(?!\s)(.+?)(?<!\s)\*")
+_EM_UND = re.compile(r"(?<![A-Za-z0-9_])_(?!\s)(.+?)(?<!\s)_(?![A-Za-z0-9_])")
+
+# Priority order matters: earliest match in the text wins; ties break to the
+# order here, so code/link/strong resolve before em (`**x**` is strong, not two
+# ems). Each entry is (kind, compiled-regex); every regex captures its inner text
+# in group(1) (link also captures its href in group(2)).
+_INLINE_RULES = [
+    ("code", _INLINE_CODE),
+    ("link", _LINK),
+    ("strong", _STRONG_STAR),
+    ("strong", _STRONG_UND),
+    ("strike", _STRIKE),
+    ("em", _EM_STAR),
+    ("em", _EM_UND),
+]
+
+# Only mark links whose target is safe to render: an explicit allowed scheme, or
+# a schemeless relative/anchor path. Anything else (javascript:, data:, and a
+# protocol-relative //host) stays plain text so a hostile target never lands in
+# the ADF.
+_HREF_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
+_ALLOWED_HREF_SCHEMES = ("http:", "https:", "mailto:")
+
+
+def _is_safe_href(href: str) -> bool:
+    h = href.strip()
+    if h.startswith("//"):  # protocol-relative — reject to be safe
+        return False
+    if not _HREF_SCHEME.match(h):  # schemeless relative path or #anchor
+        return True
+    return h.lower().startswith(_ALLOWED_HREF_SCHEMES)
+
+_LIST_RE = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_FENCE_OPEN_RE = re.compile(r"^(```+|~~~+)\s*([\w+#.-]*)\s*$")
+_FENCE_CLOSE_RE = re.compile(r"^(```+|~~~+)\s*$")
+_HR_RE = re.compile(r"^\s*([-*_])(?:\s*\1){2,}\s*$")
+_QUOTE_RE = re.compile(r"^\s*>\s?")
+
+
+def _text_node(text: str, marks: list | None = None) -> dict:
+    node: dict = {"type": "text", "text": text}
+    if marks:
+        node["marks"] = list(marks)
+    return node
+
+
+def _add_mark(nodes: list, mark: dict) -> None:
+    """Add a mark to every text node, without duplicating a mark type (so a
+    bold link keeps both its link and strong marks, but never two strongs)."""
+    for node in nodes:
+        if node.get("type") == "text":
+            marks = node.setdefault("marks", [])
+            if not any(m.get("type") == mark.get("type") for m in marks):
+                marks.append(mark)
+
+
+def _inline(text: str) -> list:
+    """Parse inline Markdown (code, links, bold/italic/strike) into ADF text
+    nodes. Unmatched markup characters (a lone `*` in `services/*`) stay literal
+    because the emphasis regexes require a properly flanked, closed pair."""
+    nodes: list = []
+    pos = 0
+    while pos < len(text):
+        best = None  # (start, kind, match)
+        for kind, pat in _INLINE_RULES:
+            m = pat.search(text, pos)
+            if m and (best is None or m.start() < best[0]):
+                best = (m.start(), kind, m)
+        if best is None:
+            nodes.append(_text_node(text[pos:]))
+            break
+        start, kind, m = best
+        if start > pos:
+            nodes.append(_text_node(text[pos:start]))
+        if kind == "code":
+            nodes.append(_text_node(m.group(1), marks=[{"type": "code"}]))
+        elif kind == "link":
+            inner = _inline(m.group(1))
+            if _is_safe_href(m.group(2)):
+                _add_mark(inner, {"type": "link", "attrs": {"href": m.group(2)}})
+            nodes.extend(inner)
+        elif kind == "strong":
+            inner = _inline(m.group(1))
+            _add_mark(inner, {"type": "strong"})
+            nodes.extend(inner)
+        elif kind == "strike":
+            inner = _inline(m.group(1))
+            _add_mark(inner, {"type": "strike"})
+            nodes.extend(inner)
+        elif kind == "em":
+            inner = _inline(m.group(1))
+            _add_mark(inner, {"type": "em"})
+            nodes.extend(inner)
+        pos = m.end()
+    return [n for n in nodes if not (n.get("type") == "text" and n.get("text") == "")]
+
+
+def _paragraph(text: str) -> dict:
+    return {"type": "paragraph", "content": _inline(text)}
+
+
+def _starts_block(line: str) -> bool:
+    return bool(
+        _HEADING_RE.match(line)
+        or _FENCE_OPEN_RE.match(line.strip())
+        or _HR_RE.match(line)
+        or _QUOTE_RE.match(line)
+        or _LIST_RE.match(line)
+    )
+
+
+def _parse_list(lines: list, i: int, end: int, base_indent: int):
+    """Build a (possibly nested) bullet/ordered list starting at lines[i]. A
+    deeper-indented list line becomes a sublist on the current item."""
+    ordered = bool(re.match(r"\d+[.)]", _LIST_RE.match(lines[i]).group(2)))
+    items: list = []
+    while i < end:
+        line = lines[i]
+        if not line.strip():
+            # Tolerate a blank line between items (a "loose" list) as long as the
+            # list actually continues; otherwise the list has ended.
+            k = i + 1
+            while k < end and not lines[k].strip():
+                k += 1
+            nxt = _LIST_RE.match(lines[k]) if k < end else None
+            if nxt and len(nxt.group(1)) >= base_indent:
+                i = k
+                continue
+            break
+        m = _LIST_RE.match(line)
+        if not m or len(m.group(1)) < base_indent:
+            break
+        if len(m.group(1)) > base_indent:  # defensive; handled as a sublist below
+            break
+        para = _paragraph(m.group(3))
+        item_content: list = [para]
+        i += 1
+        nxt = _LIST_RE.match(lines[i]) if i < end else None
+        if nxt and len(nxt.group(1)) > base_indent:
+            sub, i = _parse_list(lines, i, end, base_indent=len(nxt.group(1)))
+            if sub["content"]:  # never attach an all-empty sublist
+                item_content.append(sub)
+        # Skip a wholly empty item (a bare marker with no text and no sublist).
+        if para["content"] or len(item_content) > 1:
+            items.append({"type": "listItem", "content": item_content})
+    return {"type": "orderedList" if ordered else "bulletList", "content": items}, i
+
+
+# ADF's blockquote content model allows only these block types (notably not
+# heading, rule, or a nested blockquote), so anything else parsed inside a `>`
+# is degraded here — otherwise Jira rejects the whole document with a 400.
+_BLOCKQUOTE_ALLOWED = {"paragraph", "bulletList", "orderedList", "codeBlock"}
+
+
+def _coerce_blockquote_children(nodes: list) -> list:
+    out: list = []
+    for node in nodes:
+        ntype = node.get("type")
+        if ntype in _BLOCKQUOTE_ALLOWED:
+            out.append(node)
+        elif ntype == "heading":  # keep the text, drop the heading level
+            out.append({"type": "paragraph", "content": node.get("content", [])})
+        elif ntype == "blockquote":  # flatten a nested quote into this one
+            out.extend(_coerce_blockquote_children(node.get("content", [])))
+        # rule (and anything else carrying no text) is dropped
+    return out
+
+
+def _blocks(lines: list, i: int, end: int) -> list:
+    out: list = []
+    while i < end:
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        fence = _FENCE_OPEN_RE.match(line.strip())
+        if fence:
+            lang, buf, j = fence.group(2), [], i + 1
+            while j < end and not _FENCE_CLOSE_RE.match(lines[j].strip()):
+                buf.append(lines[j])
+                j += 1
+            node: dict = {"type": "codeBlock"}
+            if lang:
+                node["attrs"] = {"language": lang}
+            if buf:
+                node["content"] = [_text_node("\n".join(buf))]
+            out.append(node)
+            i = j + 1
+            continue
+        heading = _HEADING_RE.match(line)
+        if heading and heading.group(2).strip():
+            out.append({
+                "type": "heading",
+                "attrs": {"level": len(heading.group(1))},
+                "content": _inline(heading.group(2).strip()),
+            })
+            i += 1
+            continue
+        if _HR_RE.match(line):
+            out.append({"type": "rule"})
+            i += 1
+            continue
+        if _QUOTE_RE.match(line):
+            buf = []
+            while i < end and _QUOTE_RE.match(lines[i]):
+                buf.append(_QUOTE_RE.sub("", lines[i], count=1))
+                i += 1
+            inner = _coerce_blockquote_children(_blocks(buf, 0, len(buf)))
+            out.append({"type": "blockquote",
+                        "content": inner or [{"type": "paragraph", "content": []}]})
+            continue
+        if _LIST_RE.match(line):
+            indent = len(_LIST_RE.match(line).group(1))
+            node, i = _parse_list(lines, i, end, base_indent=indent)
+            if node["content"]:  # an all-empty list emits no (invalid) empty list
+                out.append(node)
+            continue
+        # Paragraph: gather soft-wrapped lines until a blank line or a new block.
+        buf = [line.strip()]
+        i += 1
+        while i < end and lines[i].strip() and not _starts_block(lines[i]):
+            buf.append(lines[i].strip())
+            i += 1
+        out.append(_paragraph(" ".join(buf)))
+    return out
+
+
+def _md_to_adf(text: str) -> dict:
+    """Convert a Markdown string into an ADF document for the Jira REST API."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    content = _blocks(lines, 0, len(lines))
     if not content:
         content = [{"type": "paragraph", "content": []}]
     return {"type": "doc", "version": 1, "content": content}
@@ -289,9 +530,10 @@ class JiraAdapter(Adapter):
         if assignee:
             args += ["--assignee", assignee]
         if body:
+            # acli's --description only accepts plain text, so Markdown would land
+            # literally. Pass it as a plain-text fallback (so a REST-less setup still
+            # gets content) and overwrite it with rendered ADF via REST below.
             args += ["--description", body]
-        # acli `create` has no --priority flag (nor does `edit`); set it via REST
-        # post-create when a token is available, otherwise warn.
         created = self._acli_json(*args)
         key = created.get("key") if isinstance(created, dict) else None
         if not key:
@@ -299,14 +541,20 @@ class JiraAdapter(Adapter):
             key = (created[0].get("key") if isinstance(created, list) and created else None)
         if not key:
             raise ProviderError(f"acli create returned no key: {created}")
-        if priority:
-            if self.have_rest:
-                self._jira("PUT", f"/rest/api/3/issue/{key}",
-                           {"fields": {"priority": {"name": priority}}})
-            else:
-                print(f"tkt: priority '{priority}' not set on {key} — acli can't set "
-                      f"priority and no REST token is configured. Set it manually.",
-                      flush=True)
+        # acli `create` has neither a --priority flag nor ADF descriptions; patch
+        # both via REST post-create when a token is available, otherwise warn.
+        if self.have_rest:
+            fields: dict = {}
+            if priority:
+                fields["priority"] = {"name": priority}
+            if body:
+                fields["description"] = _md_to_adf(body)
+            if fields:
+                self._jira("PUT", f"/rest/api/3/issue/{key}", {"fields": fields})
+        elif priority:
+            print(f"tkt: priority '{priority}' not set on {key} — acli can't set "
+                  f"priority and no REST token is configured. Set it manually.",
+                  flush=True)
         return self.view(key)
 
     def apply_template(self):
@@ -346,7 +594,7 @@ class JiraAdapter(Adapter):
             raise ProviderError(
                 "apply update needs a REST token (set CONFLUENCE_SITE/EMAIL/"
                 "API_TOKEN); acli cannot patch issue fields")
-        fields: dict = {"summary": summary, "description": _text_to_adf(desc)}
+        fields: dict = {"summary": summary, "description": _md_to_adf(desc)}
         if "priority" in fm_in:
             fields["priority"] = {"name": str(fm_in["priority"])}
         if "labels" in fm_in:
@@ -367,6 +615,12 @@ class JiraAdapter(Adapter):
                    "--status", lane, "--yes")
 
     def comment(self, key, body):
+        # REST accepts ADF, so comments render their Markdown (headings, lists,
+        # bold). acli's --body is plain-text only, so it's the REST-less fallback.
+        if self.have_rest:
+            self._jira("POST", f"/rest/api/3/issue/{key}/comment",
+                       {"body": _md_to_adf(body)})
+            return
         self._acli("jira", "workitem", "comment", "create", "--key", key, "--body", body)
 
     def blockers(self, key):

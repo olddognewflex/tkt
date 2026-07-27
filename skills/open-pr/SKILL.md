@@ -1,6 +1,7 @@
 ---
 name: open-pr
 description: 'Commit changes, push the branch, open a PR, request reviewers, and transition the ticket to the review lane with lane-time annotation. Provider-agnostic ticketing via tkt; VCS via gh.'
+model_tier: standard
 ---
 
 # Open PR

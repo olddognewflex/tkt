@@ -7,7 +7,7 @@ normalizes every backend into one JSON shape. Skills never touch `acli`/`gh`/RES
 
 This is a **standalone, portable package** — clone it once and point any project at
 it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
-(uses stdlib `tomllib`); no third-party deps.
+(uses stdlib `tomllib`); no third-party deps. Runs on macOS, Linux, and Windows.
 
 Status: core + `jira`, `markdown`, `github`, `linear`, and `openkanban` adapters,
 plus the **full** ported SDLC skill pack — 14 skills + the ticket-researcher agent
@@ -16,6 +16,8 @@ implementing the verb contract; no skill changes.
 
 ## Install
 
+### macOS / Linux
+
 ```sh
 git clone <this-repo> ~/Development/tkt
 ln -s ~/Development/tkt/tkt /usr/local/bin/tkt   # put `tkt` on PATH (optional)
@@ -23,6 +25,39 @@ ln -s ~/Development/tkt/tkt /usr/local/bin/tkt   # put `tkt` on PATH (optional)
 
 `tkt` runs from anywhere; it locates its own `core/`/`adapters/` relative to the
 script, so the symlink target must resolve back to the repo (a symlink is fine).
+
+### Windows
+
+```powershell
+git clone <this-repo> C:\tools\tkt
+```
+
+Then put `tkt` on `PATH`. Either add `C:\tools\tkt` to `Path` (Settings → System →
+About → Advanced system settings → Environment Variables), or persist it from
+PowerShell:
+
+```powershell
+[Environment]::SetEnvironmentVariable("Path",
+  "$([Environment]::GetEnvironmentVariable('Path','User'));C:\tools\tkt",
+  "User")
+```
+
+The `tkt` entrypoint is a shebang script, which Windows shells don't honour, so
+invoke it through Python. A batch wrapper in a directory already on `PATH`:
+
+```bat
+@echo off
+python C:\tools\tkt\tkt %*
+```
+
+…or a PowerShell function in your `$PROFILE`:
+
+```powershell
+function tkt { python C:\tools\tkt\tkt @args }
+```
+
+> Windows symlinks (`mklink`, `New-Item -Type SymbolicLink`) need Developer Mode
+> or an elevated prompt. The PATH/wrapper approach avoids that entirely.
 
 ## Use in a project
 
@@ -55,6 +90,17 @@ Manual equivalent, if you prefer:
 ```sh
 mkdir -p .sdlc && cp ~/Development/tkt/examples/config.markdown.toml .sdlc/config.toml
 ln -s ~/Development/tkt/skills/* .claude/skills/
+```
+
+On Windows, use `tkt sync-pack` instead of the symlink step — `--link-skills` and
+`ln -s` both need Developer Mode or an elevated prompt, whereas `sync-pack` writes
+committed copies and needs no special permissions (it is also the better choice for
+shared and CI environments on any platform):
+
+```powershell
+mkdir .sdlc -Force
+copy C:\tools\tkt\examples\config.markdown.toml .sdlc\config.toml
+tkt sync-pack
 ```
 
 Config discovery order: `--config <path>` → `$TKT_CONFIG` → nearest `.sdlc/config.toml`
@@ -280,6 +326,138 @@ VCS (PR/CI/merge via `gh`) and infra (preview/deploy) remain GitHub/cloud-shaped
 repo, branch formats, reviewers, and workflow names are all config-driven, and
 genuinely infra-specific steps (e.g. preview-URL extraction) are clearly marked
 PROJECT-SPECIFIC in the skill text.
+
+## Unattended runs
+
+`tkt run` is an external loop driver: it invokes a configured AI harness
+headlessly, one pipeline phase per invocation, persisting state between calls.
+**The driver is the loop** — it never relies on the model "continuing" across
+sessions.
+
+### Why
+
+Every loop in the automated-sdlc pipeline (CI-fix retries, review cycles, the
+pipeline itself) exists only as prose inside whichever session runs the skill.
+When that session ends, times out, or compacts, the pipeline dies with it.
+`tkt run` moves the loop *outside* the harness: a process that invokes the harness
+once per phase, reads a structured result file, persists phase state on the
+ticket, and loops until a gate, a STOP signal, or a cap.
+
+### Usage
+
+```sh
+tkt run TKT-1                   # run/resume TKT-1's pipeline
+tkt run                         # P0 select-ticket first, then proceed
+tkt run --status TKT-1          # print the current phase marker
+tkt run --stop TKT-1            # halt at the next iteration boundary
+tkt run --dry-run TKT-1         # print the prompt without invoking
+tkt run --max-iterations 5 TKT-1
+```
+
+### Config (`[run]` section)
+
+```toml
+[run]
+harness_cmd = "claude -p {prompt} --permission-mode acceptEdits"
+max_iterations = 30        # total invocations per run
+max_phase_attempts = 3     # per-phase retry cap
+invocation_timeout = 3600  # seconds per harness invocation
+```
+
+`{prompt}` is replaced with the phase prompt. Per-harness examples:
+
+```toml
+harness_cmd = "claude -p {prompt} --permission-mode acceptEdits"   # Claude Code
+harness_cmd = "kiro-cli chat --no-interactive --trust-all-tools {prompt}"
+harness_cmd = "codex exec {prompt}"
+```
+
+On Windows the same commands work when the harness CLI is on `PATH`; reference
+`.cmd`/`.ps1` wrappers directly if that's how it was installed.
+
+### Resume model
+
+Authoritative phase state lives **on the ticket**, as a machine-readable marker
+comment:
+
+```
+[run] Phase P5 (open-pr), attempt 1 — advance
+<!-- tkt-run: {"phase":"P5","attempt":1,"outcome":"advance","next":"P6",...} -->
+```
+
+On start, `run` reads the newest marker to decide where to resume. Kill the
+driver, restart it on the same ticket, and it picks up from there.
+
+The verb contract has no "list comments" verb, so only the markdown adapter can
+read its own markers back. On every other backend the driver resumes from a local
+mirror at `.sdlc/state/run/<key>/marker.json`. The ticket comment therefore stays
+the human-readable and cross-machine record, but **resuming on a different machine
+is markdown-only** — elsewhere, a run resumed from a fresh worktree starts over.
+
+### Safety controls
+
+- **STOP file:** drop `.sdlc/state/run/<key>/STOP` (or run `tkt run --stop KEY`)
+  to halt at the next iteration boundary.
+- **Iteration cap:** `max_iterations` (default 30) bounds runaway loops.
+- **Per-phase attempt cap:** 3 failed attempts on one phase transitions the ticket
+  to `blocked` with log context.
+- **QA gate:** P9 (`qa_ready`) always halts. The human QA gate is never bypassed.
+- **Human-owned transitions:** any transition marked `human` in `[board.ownership]`
+  is never performed by the driver.
+- **Production deploy:** P10 is blocked unless `[board.ownership]` explicitly grants
+  `"deploy_ready->done" = "agent"`.
+- **Timeout:** the per-invocation timeout bounds a hung harness.
+
+### Result-file contract
+
+Each invocation's prompt instructs the agent to write
+`.sdlc/state/run/<key>/result.json`:
+
+```json
+{"phase":"P6","outcome":"advance","next":"P7","reason":"CI green"}
+```
+
+Valid outcomes: `advance` (move on), `retry` (same phase again), `blocked`
+(unrecoverable), `gate` (human gate reached). A missing or invalid result file
+counts as a failed attempt.
+
+### Security note
+
+A headless run executes with whatever permissions `harness_cmd` grants. Use
+least-privilege flags (`--permission-mode acceptEdits`, scoped tool trust) with
+`[board.ownership]` as the guardrail. The driver itself never performs VCS
+operations and never bypasses adapter verbs.
+
+## Platform notes (Windows)
+
+Shell examples throughout this README use Unix syntax. The differences that
+actually matter on Windows:
+
+- **Invocation.** `tkt` is a shebang script; Windows shells ignore shebangs, so run
+  it as `python tkt <verb>` or via the batch/PowerShell wrapper in Install above.
+- **Symlinks.** `tkt init --link-skills` calls `Path.symlink_to`, which needs
+  Developer Mode or an elevated prompt. Use `tkt sync-pack` (committed copies)
+  instead.
+- **Environment variables.** Auth env (`CONFLUENCE_API_TOKEN`, `LINEAR_API_KEY`, …)
+  and `TKT_CONFIG` are `$env:VAR = "value"` in PowerShell, `set VAR=value` in cmd.
+  Persist them via System Environment Variables or your `$PROFILE`.
+- **Path separators.** Config discovery is `pathlib`-based, so `.sdlc/config.toml`
+  and `.sdlc\config.toml` both resolve.
+- **Line endings.** Ticket documents and JSONL sidecars are parsed with
+  `splitlines()`, so CRLF is read correctly. Git's `core.autocrlf` can still churn
+  the markdown board's files — add `* text=auto eol=lf` to `.gitattributes`.
+- **Shell translation:**
+
+  | Unix | PowerShell | cmd |
+  |------|------------|-----|
+  | `export VAR=value` | `$env:VAR = "value"` | `set VAR=value` |
+  | `cmd1 && cmd2` | `cmd1; cmd2` (`&&` works in PS 7+) | `cmd1 && cmd2` |
+  | `mkdir -p dir` | `mkdir dir -Force` | `mkdir dir` |
+  | `$EDITOR file` | `code file` / `notepad file` | `notepad file` |
+  | `ln -s target link` | `New-Item -Type SymbolicLink -Path link -Target target` | `mklink link target` |
+
+The provider CLIs each backend shells out to (`acli`, `gh`) must be on `PATH`
+independently; `tkt doctor` reports when one is missing.
 
 ## Architecture
 

@@ -42,6 +42,7 @@ _EXCLUDE_SKILLS = {"sync-skills"}
 _EXTRA_HARNESS_DIRS = [
     ".gemini/commands",
     ".agents/skills",
+    ".agents/workflows",
     ".cursor/skills",
     ".cursor/commands",
     ".windsurf/workflows",
@@ -103,11 +104,13 @@ def _add_tree(plan: list, base: Path, dest_prefix: str) -> None:
 def _default_plan() -> list:
     plan: list = []
     _add_tree(plan, PACK_ROOT / "skills", ".claude/skills")
-    agent = PACK_ROOT / "agents" / "ticket-researcher.md"
-    if agent.is_file():
-        plan.append((agent, ".claude/agents/ticket-researcher.md"))
+    _add_tree(plan, PACK_ROOT / "agents", ".claude/agents")
     _add_tree(plan, PACK_ROOT / ".github" / "prompts", ".github/prompts")
     _add_tree(plan, PACK_ROOT / ".kiro" / "skills", ".kiro/skills")
+    # Kiro does not read AGENTS.md — steering is its only project-convention
+    # surface, so it ships by default rather than under --all-harnesses.
+    _add_tree(plan, PACK_ROOT / ".kiro" / "steering", ".kiro/steering")
+    _add_tree(plan, PACK_ROOT / ".kiro" / "agents", ".kiro/agents")
     return plan
 
 

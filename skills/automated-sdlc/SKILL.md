@@ -1,6 +1,7 @@
 ---
 name: automated-sdlc
 description: 'Automated SDLC pipeline: ticket selection, intake, plan, implement, self-review, PR, review, CI, preview, human QA gate, deploy. Provider-agnostic via tkt — configure ticketing + board in .sdlc/config.toml. Orchestrates sub-skills with explicit human gates and lane-time annotation.'
+model_tier: standard
 ---
 
 # Automated SDLC
@@ -10,6 +11,32 @@ sub-skills with explicit human gates and per-lane time annotation. **Every
 ticketing/board operation goes through `tkt`**, so the same pipeline runs on Jira,
 GitHub Issues+Projects, Linear, qi, or a markdown board — the backend and board
 shape are declared in `.sdlc/config.toml`.
+
+## Model routing
+
+Each sub-skill declares a `model_tier` (`cheap` | `standard` | `deep`) in its
+frontmatter. Resolve the tier to a concrete model from project config before
+invoking a phase:
+
+```shell
+tkt cfg models.deep         # exit 4 = no [models] table -> skip routing entirely
+```
+
+| Tier | Phases |
+|------|--------|
+| cheap | `select-ticket`, `check-blockers`, `triage-ticket` |
+| deep | `plan-ticket` |
+| standard | everything else |
+
+**Escalate on failure, never start high.** A cheap-tier phase that returns a wrong
+or ambiguous result gets retried once at standard. If `self-review` cycles 3+ times
+without converging, re-plan at deep and resume the review at standard. Escalation
+is per-invocation — subsequent phases resume at their assigned tier.
+
+**Never block on routing.** If the harness cannot select a model, or `[models]` is
+unset, proceed on the session default. No phase requires a specific model to
+produce correct output — routing is a cost optimization. Full policy and the
+per-harness support matrix: [docs/model-routing.md](../../docs/model-routing.md).
 
 ## Prerequisites
 
@@ -108,15 +135,20 @@ esac
 Spike) → **invoke `complete-deliverable`, then stop**. The `full_sdlc` /
 `deliverable` sets are defined in `[issue_types]`.
 
-### Phase 2: Plan
+### Phase 2: Plan (→ `sdlc-planner`)
 
-**Invoke `plan-ticket`.** Output: files, test strategy, risks. External dep missing
-→ see "External blocker handling".
+**Delegate to `sdlc-planner`** with the ticket JSON (`tkt view "$KEY" --json`) as
+context. It returns files to touch, ordered steps, risks, test strategy, and
+parallelism hints. External dep missing → see "External blocker handling".
 
-### Phase 3: Implement + test
+**Fallback:** invoke `plan-ticket` inline. Same output, same context — acceptable
+here because planning is not adversarial.
+
+### Phase 3: Implement + test (→ `sdlc-executor`)
 
 1. Branch: `git checkout -b "$(tkt cfg vcs.branch_fmt --ticket "$KEY" --slug "<slug>")"`
-2. Implement per plan.
+2. Implement per plan. **Delegate to `sdlc-executor`**, which is scoped to the repo
+   worktree and cannot transition tickets or push. Fallback: implement inline.
 3. After each logical unit, run the configured toolchain:
 
    ```shell
@@ -129,7 +161,24 @@ Spike) → **invoke `complete-deliverable`, then stop**. The `full_sdlc` /
 
 ### Phase 4: Self-review (adversarial)
 
-**Invoke `self-review`** in a loop until clean.
+**Invoke `self-review`** in a loop until clean. Its review pass delegates to
+`sdlc-reviewer` (read-only, findings only) and its check pass to `sdlc-verifier`
+(PASS/FAIL with command output as evidence) — both fresh contexts that did not
+write the code.
+
+### Phase 4.5: Adversarial QA (optional, → `qa-engineer`)
+
+Run when the change carries real failure risk — new endpoints, auth, money, data
+migrations, concurrency — or when Phase 4 flagged a test gap. Skip for docs-only
+and trivial changes; say which and why.
+
+**Delegate to `qa-engineer`**, which routes to the QA skills: `qa-strategy` (test
+plan from acceptance criteria), `qa-author` (adversarial tests, red-before-green),
+`qa-critique` (existing-suite assessment). See
+[docs/qa-suite-design.md](../../docs/qa-suite-design.md).
+
+A P0 finding sends the ticket back to Phase 3. **Fallback:** invoke `qa-author`
+inline against the modules Phase 4 flagged.
 
 ### Phase 5: Open PR
 

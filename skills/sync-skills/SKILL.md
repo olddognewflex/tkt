@@ -60,6 +60,8 @@ policy change.
 | `.continue/rules/*.md` | YAML + MD (`globs:`) | Continue.dev |
 | `.augment/rules/*.md` | YAML + MD (`type:`) | Augment Code |
 | `.agents/rules/*.md` | YAML + MD (`trigger:`) | Antigravity |
+| `.kiro/steering/*.md` | Steering MD (optional YAML frontmatter) | AWS Kiro |
+| `.kiro/agents/*.md` + `*.json` | Kiro sub-agent definitions (IDE reads MD, CLI reads JSON) | AWS Kiro |
 
 Root `AGENTS.md` is the universal fallback. Sub-`AGENTS.md` cascading is honored by
 Codex, Kilo, Amp, Factory, and Windsurf; other tools fall back gracefully to root.
@@ -199,6 +201,68 @@ e.g. `!git status --short`.>
 
 Markdown body is the prompt template. Optional frontmatter keys: `agent`, `model`,
 `subtask`. Guardrails are enforced separately by project config — not per-command.
+
+### 9. Kiro Steering (`.kiro/steering/*.md`)
+
+Project-wide conventions. Three inclusion modes control when a file loads:
+
+```markdown
+# always (the default — no frontmatter needed)
+```
+
+```markdown
+---
+inclusion: fileMatch
+fileMatchPattern: '.sdlc/config.toml'
+---
+```
+
+```markdown
+---
+inclusion: manual        # opt in from chat via a # context key
+---
+```
+
+Steering supports `#[[file:<relative_path>]]` to pull in another file by reference
+instead of duplicating it.
+
+**Kiro does not read `AGENTS.md`** — steering is its only project-convention
+surface. `tech.md` bridges that gap: an always-included file whose entire job is
+`#[[file:../../AGENTS.md]]`, so Kiro sees the same rules as every other harness
+with nothing duplicated to drift.
+
+| File | Inclusion | Purpose |
+|------|-----------|---------|
+| `tech.md` | always | Pulls the repo's `AGENTS.md` in by reference |
+| `tkt.md` | always | Core portability rules + verb contract |
+| `sdlc-config.md` | fileMatch (`.sdlc/config.toml`) | Config schema reference |
+| `ticket-workflow.md` | manual | Ticket lifecycle, lane-time, decision points |
+
+### 10. Kiro Agent (`.kiro/agents/<name>.md` + `<name>.json`)
+
+Generated from the canonical `agents/<name>.md`. The `.md` mirrors the source; the
+`.json` is what `kiro-cli chat --agent <name>` reads:
+
+```json
+{
+  "name": "<agent-name>",
+  "description": "<one-line description>",
+  "model": "claude-sonnet-4.6",
+  "prompt": "<system prompt — a single string>",
+  "tools": ["fs_read", "execute_bash"],
+  "allowedTools": ["fs_read", "read"],
+  "toolsSettings": {}
+}
+```
+
+Kiro CLI model IDs must be the exact dotted form (`claude-haiku-4.5`,
+`claude-sonnet-4.6`, `claude-opus-4.8`); bare aliases fail. Resolve the agent's
+`model_tier` against `[models]` and spell the result in that form. `allowedTools`
+restricts what the agent can actually invoke; `toolsSettings` adds write-scoping or
+deny-lists — defense in depth, not a security boundary.
+
+Kiro agents inherit the same portability rules as skills: no backend specifics, no
+hardcoded repo or toolchain values.
 
 ## Steps to Sync
 

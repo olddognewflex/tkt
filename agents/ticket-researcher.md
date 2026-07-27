@@ -2,7 +2,8 @@
 name: ticket-researcher
 description: Look up ticket details, related tickets, blockers, and recent comments via tkt (provider-agnostic, read-only)
 tools: [Bash]
-model: claude-haiku-4-5
+model_tier: cheap
+model: haiku
 ---
 
 # Ticket Researcher Subagent

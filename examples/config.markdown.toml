@@ -49,6 +49,26 @@ build     = "make build"
 test      = "make test"
 typecheck = "true"
 lint      = "true"
+# bdd (optional): the repo's behavior-spec runner. self-review runs it as a
+# non-blocking signal, mirroring the non-strict BDD posture. Omit when the repo
+# has no behavior specs. See docs/behavior-specs.md.
+# bdd     = "go test ./features/..."
+
+[run]                         # external loop driver — `tkt run`. Optional.
+# harness_cmd is required to use `tkt run`; {prompt} is substituted with the
+# per-phase prompt. Use the least-privilege flags your harness offers.
+# harness_cmd        = "claude -p {prompt} --permission-mode acceptEdits"
+# max_iterations     = 30     # total phase invocations before the run gives up
+# max_phase_attempts = 3      # failed attempts on one phase -> transition blocked
+# invocation_timeout = 3600   # seconds per harness invocation
+
+[models]                      # advisory model routing (see docs/model-routing.md).
+# Skills declare `model_tier: cheap|standard|deep` in frontmatter; the orchestrator
+# resolves the tier here via `tkt cfg models.<tier>`. Optional — omit the whole
+# table and every phase runs on the harness's session default.
+cheap    = "claude-haiku-4-5"
+standard = "claude-sonnet-5"
+deep     = "claude-opus-5"
 
 [timetracking]
 provider = "local"            # none disables worklog; anything else -> local JSONL
