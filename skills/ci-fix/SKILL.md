@@ -86,10 +86,27 @@ tkt comment "$KEY" "CI failing after 3 attempts on PR #$PR — needs human inves
 ### 9. Flaky tests
 
 Non-deterministic failure (passes locally, random timeout): `gh run rerun <run-id> --failed`
-**once**. If it fails again, treat as real.
+**once**. If it fails again on the same assertion but with a different value or
+timing, it is a flake, not a regression.
+
+Hand the root cause to **`qa-flake-triage`** rather than patching around it:
+
+```
+⚠️ FLAKE DETECTED: <test name> in <file>
+  - Failed with: <assertion/error>
+  - Passed on rerun: yes/no
+  → Recommend: invoke `qa-flake-triage` for root-cause classification and fix.
+```
+
+`ci-fix` must **not**: add `sleep()` or raise timeouts, skip or disable the test,
+or rerun more than once. Each of those turns a real race condition into a silent
+one. If the flake still blocks CI after one rerun, flag it and stop — the QA suite
+classifies the cause (race, shared state, clock sensitivity, test ordering) and
+proposes a real fix.
 
 ## Output
 
 - CI status: green / still failing
 - Fixes applied (commits)
+- Flake findings (handed to `qa-flake-triage`)
 - If stuck: the unresolved failure

@@ -166,6 +166,20 @@ here because planning is not adversarial.
 (PASS/FAIL with command output as evidence) — both fresh contexts that did not
 write the code.
 
+### Phase 4.5: Adversarial QA (optional, → `qa-engineer`)
+
+Run when the change carries real failure risk — new endpoints, auth, money, data
+migrations, concurrency — or when Phase 4 flagged a test gap. Skip for docs-only
+and trivial changes; say which and why.
+
+**Delegate to `qa-engineer`**, which routes to the QA skills: `qa-strategy` (test
+plan from acceptance criteria), `qa-author` (adversarial tests, red-before-green),
+`qa-critique` (existing-suite assessment). See
+[docs/qa-suite-design.md](../../docs/qa-suite-design.md).
+
+A P0 finding sends the ticket back to Phase 3. **Fallback:** invoke `qa-author`
+inline against the modules Phase 4 flagged.
+
 ### Phase 5: Open PR
 
 **Invoke `open-pr`** — pushes, opens the PR, requests reviewers, and (for

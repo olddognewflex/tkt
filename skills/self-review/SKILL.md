@@ -56,6 +56,19 @@ The reviewer produces findings only; the author context fixes them in step 4.
 
 Fix all blocker + warning items. Don't skip.
 
+**Test gaps are not fixed here.** If the reviewer flags "new code without tests" or
+"tests that assert nothing meaningful," do **not** write tests inline — a fix-pass
+test written to close a finding tends to assert whatever the code already does.
+Note the gap and hand it to `qa-author` (or the `qa-engineer` agent) after this
+loop completes, which writes adversarial tests with red-before-green verification.
+
+Format the flag as:
+
+```
+⚠️ TEST GAP: <file:line> — <description>
+→ Recommend: invoke `qa-author` targeting <file/module> after self-review passes.
+```
+
 ### 5. Rebuild and re-test (→ `sdlc-verifier`)
 
 **Delegate to `sdlc-verifier`**, which runs the configured checks and returns a

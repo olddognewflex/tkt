@@ -129,6 +129,11 @@ per-tool folders (`.opencode/commands/`, `.cursor/commands/`, `.cursor/skills/`,
 | `deploy-preview` | confirm preview env, post URL to ticket + PR |
 | `hotfix-revert` | fast-track prod revert |
 | `resume-from-revise` | re-enter the loop after a human revise fix |
+| `qa-strategy` | test plan from acceptance criteria (Break-It Checklist) |
+| `qa-author` | write adversarial tests, red-before-green enforced |
+| `qa-critique` | score an existing suite for coverage + assertion strength |
+| `qa-flake-triage` | classify a flaky test's root cause; never papers over it |
+| `qa-bug-report` | structured bug report with a minimal reproduction |
 | `sync-skills` | translate the canonical skills into each harness format |
 
 ### Editing skills
@@ -170,6 +175,7 @@ hand-maintained.
   | `sdlc-executor` | file read/write + build/test, no VCS push, no transitions | implement phase |
   | `sdlc-reviewer` | read-only | self-review, review pass |
   | `sdlc-verifier` | read + build/test only | self-review, check pass |
+  | `qa-engineer` | read + write tests + test runner | QA phase (P4.5) |
 
   Every phase that delegates also states an inline fallback, so harnesses without
   subagent support run the pipeline unchanged.
@@ -177,6 +183,9 @@ hand-maintained.
 - `docs/markdown-ticketing.md` — the markdown provider's on-disk format.
 - `docs/model-routing.md` — the `model_tier` frontmatter key and the `[models]`
   tier→model mapping skills resolve via `tkt cfg models.<tier>`.
+- `docs/behavior-specs.md` — the BDD practice behind the optional `build.bdd` key.
+- `docs/qa-suite-design.md` — how the five `qa-*` skills and `qa-engineer` fit
+  together, and the Break-It Checklist they share.
 - `docs/extraction-history.md` — how this pack was extracted from its origin repo.
 - `scripts/` — `company-import.sh` (bulk import) and `smoke-sync-pack.sh`
   (sync-pack smoke test).
