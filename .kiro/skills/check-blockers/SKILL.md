@@ -3,6 +3,7 @@ name: check-blockers
 description: 'Review tickets in the blocked lane, classify each blocker, and recommend unblock actions. Ad-hoc or standup-driven. Provider-agnostic via tkt.'
 model: claude-haiku-4-5
 allowed-tools: [Bash, Read]
+model_tier: cheap
 ---
 
 # Check Blockers
@@ -78,7 +79,7 @@ automatically:
 
 ```
 Auto-unblock candidates (confirm first):
-  <KEY> — blocked by <B> which is now Done. Suggest: tkt transition <KEY> in_progress
+  <KEY> — blocked by <B> which is now Done. Suggest: tkt transition <KEY> in_progress (and `tkt edit <KEY> --agent-status processing`)
 ```
 
 ### 6. Optional nudge on stale blockers (after human confirms)

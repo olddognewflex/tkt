@@ -1,6 +1,7 @@
 ---
 name: open-pr
 description: 'Commit changes, push the branch, open a PR, request reviewers, and transition the ticket to the review lane with lane-time annotation. Provider-agnostic ticketing via tkt; VCS via gh.'
+model_tier: standard
 ---
 
 # Open PR
@@ -97,6 +98,7 @@ if [ "$CLASS" = "full_sdlc" ]; then
   # Annotate time in in_progress, then move to review.
   WL=$(tkt worklog "$KEY" --from-role in_progress --note "PR opened: $PR_URL" --json)
   tkt transition "$KEY" review
+  tkt edit "$KEY" --agent-status waiting
   tkt comment "$KEY" "PR opened: $PR_URL. Review requested. Time in In Progress: \
 $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
 else

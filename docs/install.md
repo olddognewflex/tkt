@@ -62,13 +62,16 @@ install the curated long tail of other harnesses, path-verbatim.
 
 | Destination | Harness | Default | `--all-harnesses` |
 |---|---|:---:|:---:|
-| `.claude/skills/` (14 skills) | Claude Code | ✓ | ✓ |
-| `.claude/agents/ticket-researcher.md` | Claude Code (lookup subagent) | ✓ | ✓ |
+| `.claude/skills/` (19 skills) | Claude Code | ✓ | ✓ |
+| `.claude/agents/` (6 subagents) | Claude Code | ✓ | ✓ |
 | `.github/prompts/` | GitHub Copilot | ✓ | ✓ |
-| `.kiro/skills/` | AWS Kiro | ✓ | ✓ |
+| `.kiro/skills/` | AWS Kiro (invocable skills) | ✓ | ✓ |
+| `.kiro/steering/` | AWS Kiro (project conventions) | ✓ | ✓ |
+| `.kiro/agents/` | AWS Kiro (sub-agent definitions) | ✓ | ✓ |
 | `AGENTS.md` managed block (`<!-- tkt-pack:begin/end -->`) | Universal fallback (Codex, Amp, Devin, …) | ✓ | ✓ |
 | `.gemini/commands/` | Gemini CLI | | ✓ |
 | `.agents/skills/` | Antigravity, Junie, Codex | | ✓ |
+| `.agents/workflows/` | Antigravity | | ✓ |
 | `.cursor/skills/` + `.cursor/commands/` | Cursor | | ✓ |
 | `.windsurf/workflows/` | Windsurf | | ✓ |
 | `.clinerules/workflows/` | Cline | | ✓ |
