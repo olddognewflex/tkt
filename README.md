@@ -7,7 +7,7 @@ normalizes every backend into one JSON shape. Skills never touch `acli`/`gh`/RES
 
 This is a **standalone, portable package** — clone it once and point any project at
 it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
-(uses stdlib `tomllib`); no third-party deps.
+(uses stdlib `tomllib`); no third-party deps. Runs on macOS, Linux, and Windows.
 
 Status: core + `jira`, `markdown`, `github`, `linear`, and `openkanban` adapters,
 plus the **full** ported SDLC skill pack — 14 skills + the ticket-researcher agent
@@ -16,6 +16,8 @@ implementing the verb contract; no skill changes.
 
 ## Install
 
+### macOS / Linux
+
 ```sh
 git clone <this-repo> ~/Development/tkt
 ln -s ~/Development/tkt/tkt /usr/local/bin/tkt   # put `tkt` on PATH (optional)
@@ -23,6 +25,39 @@ ln -s ~/Development/tkt/tkt /usr/local/bin/tkt   # put `tkt` on PATH (optional)
 
 `tkt` runs from anywhere; it locates its own `core/`/`adapters/` relative to the
 script, so the symlink target must resolve back to the repo (a symlink is fine).
+
+### Windows
+
+```powershell
+git clone <this-repo> C:\tools\tkt
+```
+
+Then put `tkt` on `PATH`. Either add `C:\tools\tkt` to `Path` (Settings → System →
+About → Advanced system settings → Environment Variables), or persist it from
+PowerShell:
+
+```powershell
+[Environment]::SetEnvironmentVariable("Path",
+  "$([Environment]::GetEnvironmentVariable('Path','User'));C:\tools\tkt",
+  "User")
+```
+
+The `tkt` entrypoint is a shebang script, which Windows shells don't honour, so
+invoke it through Python. A batch wrapper in a directory already on `PATH`:
+
+```bat
+@echo off
+python C:\tools\tkt\tkt %*
+```
+
+…or a PowerShell function in your `$PROFILE`:
+
+```powershell
+function tkt { python C:\tools\tkt\tkt @args }
+```
+
+> Windows symlinks (`mklink`, `New-Item -Type SymbolicLink`) need Developer Mode
+> or an elevated prompt. The PATH/wrapper approach avoids that entirely.
 
 ## Use in a project
 
@@ -55,6 +90,17 @@ Manual equivalent, if you prefer:
 ```sh
 mkdir -p .sdlc && cp ~/Development/tkt/examples/config.markdown.toml .sdlc/config.toml
 ln -s ~/Development/tkt/skills/* .claude/skills/
+```
+
+On Windows, use `tkt sync-pack` instead of the symlink step — `--link-skills` and
+`ln -s` both need Developer Mode or an elevated prompt, whereas `sync-pack` writes
+committed copies and needs no special permissions (it is also the better choice for
+shared and CI environments on any platform):
+
+```powershell
+mkdir .sdlc -Force
+copy C:\tools\tkt\examples\config.markdown.toml .sdlc\config.toml
+tkt sync-pack
 ```
 
 Config discovery order: `--config <path>` → `$TKT_CONFIG` → nearest `.sdlc/config.toml`
@@ -280,6 +326,37 @@ VCS (PR/CI/merge via `gh`) and infra (preview/deploy) remain GitHub/cloud-shaped
 repo, branch formats, reviewers, and workflow names are all config-driven, and
 genuinely infra-specific steps (e.g. preview-URL extraction) are clearly marked
 PROJECT-SPECIFIC in the skill text.
+
+## Platform notes (Windows)
+
+Shell examples throughout this README use Unix syntax. The differences that
+actually matter on Windows:
+
+- **Invocation.** `tkt` is a shebang script; Windows shells ignore shebangs, so run
+  it as `python tkt <verb>` or via the batch/PowerShell wrapper in Install above.
+- **Symlinks.** `tkt init --link-skills` calls `Path.symlink_to`, which needs
+  Developer Mode or an elevated prompt. Use `tkt sync-pack` (committed copies)
+  instead.
+- **Environment variables.** Auth env (`CONFLUENCE_API_TOKEN`, `LINEAR_API_KEY`, …)
+  and `TKT_CONFIG` are `$env:VAR = "value"` in PowerShell, `set VAR=value` in cmd.
+  Persist them via System Environment Variables or your `$PROFILE`.
+- **Path separators.** Config discovery is `pathlib`-based, so `.sdlc/config.toml`
+  and `.sdlc\config.toml` both resolve.
+- **Line endings.** Ticket documents and JSONL sidecars are parsed with
+  `splitlines()`, so CRLF is read correctly. Git's `core.autocrlf` can still churn
+  the markdown board's files — add `* text=auto eol=lf` to `.gitattributes`.
+- **Shell translation:**
+
+  | Unix | PowerShell | cmd |
+  |------|------------|-----|
+  | `export VAR=value` | `$env:VAR = "value"` | `set VAR=value` |
+  | `cmd1 && cmd2` | `cmd1; cmd2` (`&&` works in PS 7+) | `cmd1 && cmd2` |
+  | `mkdir -p dir` | `mkdir dir -Force` | `mkdir dir` |
+  | `$EDITOR file` | `code file` / `notepad file` | `notepad file` |
+  | `ln -s target link` | `New-Item -Type SymbolicLink -Path link -Target target` | `mklink link target` |
+
+The provider CLIs each backend shells out to (`acli`, `gh`) must be on `PATH`
+independently; `tkt doctor` reports when one is missing.
 
 ## Architecture
 
