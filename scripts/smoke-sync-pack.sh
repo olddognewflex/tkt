@@ -22,17 +22,29 @@ C="$(mktemp -d)"
 trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
+# Expected counts are derived from the pack, not hardcoded, so adding a skill
+# does not require editing this file. sync-pack never ships `sync-skills`.
+want_skills=$(find "$PACK/skills" -maxdepth 1 -mindepth 1 -type d ! -name sync-skills | wc -l | tr -d ' ')
+want_prompts=$(find "$PACK/.github/prompts" -maxdepth 1 -type f | wc -l | tr -d ' ')
+want_kiro=$(find "$PACK/.kiro/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+want_agents=$(find "$PACK/agents" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
+want_steer=$(find "$PACK/.kiro/steering" -maxdepth 1 -type f | wc -l | tr -d ' ')
+
 "$TKT" sync-pack --dir "$C" >/dev/null
 skills_n=$(find "$C/.claude/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
 prompts_n=$(find "$C/.github/prompts" -maxdepth 1 -type f | wc -l | tr -d ' ')
 kiro_n=$(find "$C/.kiro/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+agents_n=$(find "$C/.claude/agents" -maxdepth 1 -type f | wc -l | tr -d ' ')
+steer_n=$(find "$C/.kiro/steering" -maxdepth 1 -type f | wc -l | tr -d ' ')
 ok=1
-[ "$skills_n" = "14" ] || { ok=0; echo "  .claude/skills=$skills_n (want 14)"; }
-[ "$prompts_n" = "14" ] || { ok=0; echo "  .github/prompts=$prompts_n (want 14)"; }
-[ "$kiro_n" = "14" ] || { ok=0; echo "  .kiro/skills=$kiro_n (want 14)"; }
+[ "$skills_n" = "$want_skills" ] || { ok=0; echo "  .claude/skills=$skills_n (want $want_skills)"; }
+[ "$prompts_n" = "$want_prompts" ] || { ok=0; echo "  .github/prompts=$prompts_n (want $want_prompts)"; }
+[ "$kiro_n" = "$want_kiro" ] || { ok=0; echo "  .kiro/skills=$kiro_n (want $want_kiro)"; }
+[ "$agents_n" = "$want_agents" ] || { ok=0; echo "  .claude/agents=$agents_n (want $want_agents)"; }
+[ "$steer_n" = "$want_steer" ] || { ok=0; echo "  .kiro/steering=$steer_n (want $want_steer)"; }
 [ -f "$C/.sdlc/pack-manifest.json" ] || { ok=0; echo "  manifest missing"; }
 grep -q "tkt-pack:begin" "$C/AGENTS.md" || { ok=0; echo "  AGENTS.md markers missing"; }
-[ "$ok" = "1" ] && pass "case1 fresh install (skills=14 prompts=14 kiro=14 manifest+markers)" \
+[ "$ok" = "1" ] && pass "case1 fresh install (skills=$want_skills prompts=$want_prompts kiro=$want_kiro agents=$want_agents steering=$want_steer manifest+markers)" \
                 || fail "case1 fresh install"
 
 # ---- case 2: idempotent second run leaves git clean -------------------------
