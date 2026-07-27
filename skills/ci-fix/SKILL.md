@@ -1,6 +1,7 @@
 ---
 name: ci-fix
 description: 'Monitor CI status on a PR, diagnose failures from logs, fix, and re-push. Loop until green. VCS via gh; build commands + ticket comments via tkt config.'
+model_tier: standard
 ---
 
 # CI Fix

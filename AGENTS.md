@@ -162,6 +162,8 @@ hand-maintained.
 - `agents/ticket-researcher.md` is the read-only lookup subagent.
 - `docs/install.md` — installing `tkt` and the pack.
 - `docs/markdown-ticketing.md` — the markdown provider's on-disk format.
+- `docs/model-routing.md` — the `model_tier` frontmatter key and the `[models]`
+  tier→model mapping skills resolve via `tkt cfg models.<tier>`.
 - `docs/extraction-history.md` — how this pack was extracted from its origin repo.
 - `scripts/` — `company-import.sh` (bulk import) and `smoke-sync-pack.sh`
   (sync-pack smoke test).

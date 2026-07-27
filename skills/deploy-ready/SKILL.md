@@ -2,6 +2,7 @@
 name: deploy-ready
 description: 'Pick up tickets in the deploy_ready lane: annotate QA lane times, merge the PR, watch the staging workflow for the merge commit, gate manual production deploy, comment status. Provider-agnostic ticketing via tkt; VCS via gh.'
 disable-model-invocation: true
+model_tier: standard
 ---
 
 # Deploy Ready

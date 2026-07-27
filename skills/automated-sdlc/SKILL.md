@@ -1,6 +1,7 @@
 ---
 name: automated-sdlc
 description: 'Automated SDLC pipeline: ticket selection, intake, plan, implement, self-review, PR, review, CI, preview, human QA gate, deploy. Provider-agnostic via tkt — configure ticketing + board in .sdlc/config.toml. Orchestrates sub-skills with explicit human gates and lane-time annotation.'
+model_tier: standard
 ---
 
 # Automated SDLC
@@ -10,6 +11,32 @@ sub-skills with explicit human gates and per-lane time annotation. **Every
 ticketing/board operation goes through `tkt`**, so the same pipeline runs on Jira,
 GitHub Issues+Projects, Linear, qi, or a markdown board — the backend and board
 shape are declared in `.sdlc/config.toml`.
+
+## Model routing
+
+Each sub-skill declares a `model_tier` (`cheap` | `standard` | `deep`) in its
+frontmatter. Resolve the tier to a concrete model from project config before
+invoking a phase:
+
+```shell
+tkt cfg models.deep         # exit 4 = no [models] table -> skip routing entirely
+```
+
+| Tier | Phases |
+|------|--------|
+| cheap | `select-ticket`, `check-blockers`, `triage-ticket` |
+| deep | `plan-ticket` |
+| standard | everything else |
+
+**Escalate on failure, never start high.** A cheap-tier phase that returns a wrong
+or ambiguous result gets retried once at standard. If `self-review` cycles 3+ times
+without converging, re-plan at deep and resume the review at standard. Escalation
+is per-invocation — subsequent phases resume at their assigned tier.
+
+**Never block on routing.** If the harness cannot select a model, or `[models]` is
+unset, proceed on the session default. No phase requires a specific model to
+produce correct output — routing is a cost optimization. Full policy and the
+per-harness support matrix: [docs/model-routing.md](../../docs/model-routing.md).
 
 ## Prerequisites
 

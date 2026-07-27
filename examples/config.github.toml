@@ -87,5 +87,13 @@ test      = "make test"
 typecheck = "true"
 lint      = "true"
 
+[models]                      # advisory model routing (see docs/model-routing.md).
+# Skills declare `model_tier: cheap|standard|deep` in frontmatter; the orchestrator
+# resolves the tier here via `tkt cfg models.<tier>`. Optional — omit the whole
+# table and every phase runs on the harness's session default.
+cheap    = "claude-haiku-4-5"
+standard = "claude-sonnet-5"
+deep     = "claude-opus-5"
+
 [timetracking]
 provider = "none"        # GitHub has no time tracking; worklog/lane-time are no-ops

@@ -1,6 +1,7 @@
 ---
 name: complete-deliverable
 description: 'Short-circuit flow for non-PR ticket types (Task, Sub-task, Epic, Chore, Spike). Produces the deliverable, comments with the artifact link, logs lane time, and transitions straight to Done. Provider-agnostic via tkt.'
+model_tier: standard
 ---
 
 # Complete Deliverable

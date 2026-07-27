@@ -38,6 +38,8 @@ class Config:
         self.queries: dict[str, str] = dict(data.get("queries", {}))
         self.vcs = data.get("vcs", {})
         self.build = data.get("build", {})
+        # tier → model identifier; advisory routing hints, empty when unset.
+        self.models: dict[str, str] = dict(data.get("models", {}))
         self.timetracking = data.get("timetracking", {})
         self.docs = data.get("docs", {})
         # provider-specific blocks (e.g. [markdown], [github])
