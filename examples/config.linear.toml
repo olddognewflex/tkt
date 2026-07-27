@@ -68,6 +68,10 @@ build     = "make build"
 test      = "make test"
 typecheck = "true"
 lint      = "true"
+# bdd (optional): the repo's behavior-spec runner. self-review runs it as a
+# non-blocking signal, mirroring the non-strict BDD posture. Omit when the repo
+# has no behavior specs. See docs/behavior-specs.md.
+# bdd     = "go test ./features/..."
 
 [models]                      # advisory model routing (see docs/model-routing.md).
 # Skills declare `model_tier: cheap|standard|deep` in frontmatter; the orchestrator

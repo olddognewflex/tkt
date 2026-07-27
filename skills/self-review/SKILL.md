@@ -70,6 +70,25 @@ eval "$(tkt cfg build.test --pkg "<pkg>")"
 eval "$(tkt cfg build.typecheck)"
 ```
 
+### 5b. Run behavior specs — non-blocking (if configured)
+
+If the repo binds a behavior-spec runner, run it as a **reported, non-blocking**
+signal, mirroring the non-strict BDD posture: pending scenarios inform the author
+but never block the flow. Skip cleanly when `build.bdd` is unset. See
+[docs/behavior-specs.md](../../docs/behavior-specs.md).
+
+```shell
+# Only a missing key (tkt cfg exit 4 = NotFoundError) is a clean skip.
+# Surface any other failure (e.g. exit 2 = bad/missing config) instead of
+# silently swallowing it. On success stderr is empty, so 2>&1 is safe to eval.
+out="$(tkt cfg build.bdd --pkg "<pkg>" 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ]; then
+  eval "$out" || echo "bdd: behavior-spec runner exited non-zero (non-blocking)"
+elif [ "$rc" -ne 4 ]; then
+  echo "bdd: could not resolve build.bdd (tkt cfg exit $rc): $out" >&2
+fi
+```
+
 ### 6. Loop
 
 Repeat until a pass yields **zero blockers and zero warnings**. Max 3 passes; if
