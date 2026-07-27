@@ -327,6 +327,107 @@ repo, branch formats, reviewers, and workflow names are all config-driven, and
 genuinely infra-specific steps (e.g. preview-URL extraction) are clearly marked
 PROJECT-SPECIFIC in the skill text.
 
+## Unattended runs
+
+`tkt run` is an external loop driver: it invokes a configured AI harness
+headlessly, one pipeline phase per invocation, persisting state between calls.
+**The driver is the loop** — it never relies on the model "continuing" across
+sessions.
+
+### Why
+
+Every loop in the automated-sdlc pipeline (CI-fix retries, review cycles, the
+pipeline itself) exists only as prose inside whichever session runs the skill.
+When that session ends, times out, or compacts, the pipeline dies with it.
+`tkt run` moves the loop *outside* the harness: a process that invokes the harness
+once per phase, reads a structured result file, persists phase state on the
+ticket, and loops until a gate, a STOP signal, or a cap.
+
+### Usage
+
+```sh
+tkt run TKT-1                   # run/resume TKT-1's pipeline
+tkt run                         # P0 select-ticket first, then proceed
+tkt run --status TKT-1          # print the current phase marker
+tkt run --stop TKT-1            # halt at the next iteration boundary
+tkt run --dry-run TKT-1         # print the prompt without invoking
+tkt run --max-iterations 5 TKT-1
+```
+
+### Config (`[run]` section)
+
+```toml
+[run]
+harness_cmd = "claude -p {prompt} --permission-mode acceptEdits"
+max_iterations = 30        # total invocations per run
+max_phase_attempts = 3     # per-phase retry cap
+invocation_timeout = 3600  # seconds per harness invocation
+```
+
+`{prompt}` is replaced with the phase prompt. Per-harness examples:
+
+```toml
+harness_cmd = "claude -p {prompt} --permission-mode acceptEdits"   # Claude Code
+harness_cmd = "kiro-cli chat --no-interactive --trust-all-tools {prompt}"
+harness_cmd = "codex exec {prompt}"
+```
+
+On Windows the same commands work when the harness CLI is on `PATH`; reference
+`.cmd`/`.ps1` wrappers directly if that's how it was installed.
+
+### Resume model
+
+Authoritative phase state lives **on the ticket**, as a machine-readable marker
+comment:
+
+```
+[run] Phase P5 (open-pr), attempt 1 — advance
+<!-- tkt-run: {"phase":"P5","attempt":1,"outcome":"advance","next":"P6",...} -->
+```
+
+On start, `run` reads the newest marker to decide where to resume. Kill the
+driver, restart it on the same ticket, and it picks up from there.
+
+The verb contract has no "list comments" verb, so only the markdown adapter can
+read its own markers back. On every other backend the driver resumes from a local
+mirror at `.sdlc/state/run/<key>/marker.json`. The ticket comment therefore stays
+the human-readable and cross-machine record, but **resuming on a different machine
+is markdown-only** — elsewhere, a run resumed from a fresh worktree starts over.
+
+### Safety controls
+
+- **STOP file:** drop `.sdlc/state/run/<key>/STOP` (or run `tkt run --stop KEY`)
+  to halt at the next iteration boundary.
+- **Iteration cap:** `max_iterations` (default 30) bounds runaway loops.
+- **Per-phase attempt cap:** 3 failed attempts on one phase transitions the ticket
+  to `blocked` with log context.
+- **QA gate:** P9 (`qa_ready`) always halts. The human QA gate is never bypassed.
+- **Human-owned transitions:** any transition marked `human` in `[board.ownership]`
+  is never performed by the driver.
+- **Production deploy:** P10 is blocked unless `[board.ownership]` explicitly grants
+  `"deploy_ready->done" = "agent"`.
+- **Timeout:** the per-invocation timeout bounds a hung harness.
+
+### Result-file contract
+
+Each invocation's prompt instructs the agent to write
+`.sdlc/state/run/<key>/result.json`:
+
+```json
+{"phase":"P6","outcome":"advance","next":"P7","reason":"CI green"}
+```
+
+Valid outcomes: `advance` (move on), `retry` (same phase again), `blocked`
+(unrecoverable), `gate` (human gate reached). A missing or invalid result file
+counts as a failed attempt.
+
+### Security note
+
+A headless run executes with whatever permissions `harness_cmd` grants. Use
+least-privilege flags (`--permission-mode acceptEdits`, scoped tool trust) with
+`[board.ownership]` as the guardrail. The driver itself never performs VCS
+operations and never bypasses adapter verbs.
+
 ## Platform notes (Windows)
 
 Shell examples throughout this README use Unix syntax. The differences that

@@ -168,6 +168,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="report-only: list missing/locally-modified/out-of-date "
                          "pack files and exit 1 if any; writes nothing")
 
+    sp = add("run")
+    sp.add_argument("key", nargs="?", default=None,
+                    help="ticket key to run/resume; omit to select a P0 candidate")
+    sp.add_argument("--status", action="store_true",
+                    help="print the current marker/phase without running")
+    sp.add_argument("--stop", action="store_true",
+                    help="drop a STOP file to halt the run at the next boundary")
+    sp.add_argument("--max-iterations", type=int, default=None, dest="max_iterations",
+                    help="override max iterations for this run")
+    sp.add_argument("--dry-run", action="store_true", dest="dry_run",
+                    help="print the prompt and command without invoking the harness")
+
     sp = add("cfg")
     sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo")
     sp.add_argument("--pkg", default="", help="substitute {pkg} in the value")
@@ -397,6 +409,18 @@ def main(argv: list[str]) -> int:
                 print(json.dumps(t.to_dict(), indent=2))
             else:
                 _print_ticket_human(t)
+
+        elif args.verb == "run":
+            from .run import cmd_run, cmd_status, cmd_stop
+            if args.stop:
+                if not args.key:
+                    raise UsageError("run --stop requires a ticket KEY")
+                return cmd_stop(config, args.key)
+            if args.status:
+                if not args.key:
+                    raise UsageError("run --status requires a ticket KEY")
+                return cmd_status(config, args.key)
+            return cmd_run(config, args.key, args.max_iterations, args.dry_run)
 
         elif args.verb == "doctor":
             checks = adapter.doctor()

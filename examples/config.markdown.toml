@@ -54,6 +54,14 @@ lint      = "true"
 # has no behavior specs. See docs/behavior-specs.md.
 # bdd     = "go test ./features/..."
 
+[run]                         # external loop driver — `tkt run`. Optional.
+# harness_cmd is required to use `tkt run`; {prompt} is substituted with the
+# per-phase prompt. Use the least-privilege flags your harness offers.
+# harness_cmd        = "claude -p {prompt} --permission-mode acceptEdits"
+# max_iterations     = 30     # total phase invocations before the run gives up
+# max_phase_attempts = 3      # failed attempts on one phase -> transition blocked
+# invocation_timeout = 3600   # seconds per harness invocation
+
 [models]                      # advisory model routing (see docs/model-routing.md).
 # Skills declare `model_tier: cheap|standard|deep` in frontmatter; the orchestrator
 # resolves the tier here via `tkt cfg models.<tier>`. Optional — omit the whole

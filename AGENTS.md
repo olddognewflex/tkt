@@ -78,6 +78,7 @@ separate harness-specific files).
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
 | `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
 | `tkt sync-pack [--dir D] [--all-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
+| `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 
 `--json` works on either side of the verb.

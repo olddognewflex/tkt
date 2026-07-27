@@ -40,6 +40,8 @@ class Config:
         self.build = data.get("build", {})
         # tier → model identifier; advisory routing hints, empty when unset.
         self.models: dict[str, str] = dict(data.get("models", {}))
+        # external loop driver settings (see core/run.py); empty when unset.
+        self.run = data.get("run", {})
         self.timetracking = data.get("timetracking", {})
         self.docs = data.get("docs", {})
         # provider-specific blocks (e.g. [markdown], [github])
