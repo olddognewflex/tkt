@@ -111,7 +111,7 @@ If the user confirms, create a ticket:
 tkt create \
   --type Bug \
   --summary "<one-line summary>" \
-  --description "<full report body>" \
+  --body "<full report body>" \
   --priority "<severity-mapped-priority>"
 ```
 
