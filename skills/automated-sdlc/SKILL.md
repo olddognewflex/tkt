@@ -135,15 +135,20 @@ esac
 Spike) → **invoke `complete-deliverable`, then stop**. The `full_sdlc` /
 `deliverable` sets are defined in `[issue_types]`.
 
-### Phase 2: Plan
+### Phase 2: Plan (→ `sdlc-planner`)
 
-**Invoke `plan-ticket`.** Output: files, test strategy, risks. External dep missing
-→ see "External blocker handling".
+**Delegate to `sdlc-planner`** with the ticket JSON (`tkt view "$KEY" --json`) as
+context. It returns files to touch, ordered steps, risks, test strategy, and
+parallelism hints. External dep missing → see "External blocker handling".
 
-### Phase 3: Implement + test
+**Fallback:** invoke `plan-ticket` inline. Same output, same context — acceptable
+here because planning is not adversarial.
+
+### Phase 3: Implement + test (→ `sdlc-executor`)
 
 1. Branch: `git checkout -b "$(tkt cfg vcs.branch_fmt --ticket "$KEY" --slug "<slug>")"`
-2. Implement per plan.
+2. Implement per plan. **Delegate to `sdlc-executor`**, which is scoped to the repo
+   worktree and cannot transition tickets or push. Fallback: implement inline.
 3. After each logical unit, run the configured toolchain:
 
    ```shell
@@ -156,7 +161,10 @@ Spike) → **invoke `complete-deliverable`, then stop**. The `full_sdlc` /
 
 ### Phase 4: Self-review (adversarial)
 
-**Invoke `self-review`** in a loop until clean.
+**Invoke `self-review`** in a loop until clean. Its review pass delegates to
+`sdlc-reviewer` (read-only, findings only) and its check pass to `sdlc-verifier`
+(PASS/FAIL with command output as evidence) — both fresh contexts that did not
+write the code.
 
 ### Phase 5: Open PR
 

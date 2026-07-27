@@ -18,7 +18,15 @@ BEFORE opening a PR. Loops until no blockers remain. Toolchain comes from
 git diff $(git merge-base HEAD origin/$(tkt cfg vcs.default_branch))...HEAD
 ```
 
-### 2. Review as adversary
+### 2. Review as adversary (→ `sdlc-reviewer`)
+
+**Delegate to `sdlc-reviewer`**, passing the diff and the plan/ticket summary. The
+point is separation: the reviewer is a fresh context that did not write the code,
+so it judges the evidence rather than recalling the intent.
+
+**Fallback** (no subagent support): run this pass yourself, but explicitly — re-read
+the diff from scratch and argue against it before approving. Pretend it is a
+stranger's PR. Do not rubber-stamp your own code.
 
 Hostile-reviewer mindset. Check every changed file for:
 
@@ -39,13 +47,22 @@ project's own conventions doc — read them and apply.
 ### 3. List findings
 
 Per issue: file+line, severity (**blocker** / **warning** / **nit**), description,
-suggested fix.
+suggested fix. Plus an overall verdict — PASS (zero blockers, zero warnings) skips
+straight to the final check.
+
+The reviewer produces findings only; the author context fixes them in step 4.
 
 ### 4. Fix blockers and warnings
 
 Fix all blocker + warning items. Don't skip.
 
-### 5. Rebuild and re-test (config toolchain)
+### 5. Rebuild and re-test (→ `sdlc-verifier`)
+
+**Delegate to `sdlc-verifier`**, which runs the configured checks and returns a
+binary PASS/FAIL with the exact commands and their output as evidence. It never
+fixes anything — a FAIL comes back here.
+
+**Fallback:** run them yourself.
 
 ```shell
 eval "$(tkt cfg build.build --pkg "<pkg>")"

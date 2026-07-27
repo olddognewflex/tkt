@@ -103,9 +103,7 @@ def _add_tree(plan: list, base: Path, dest_prefix: str) -> None:
 def _default_plan() -> list:
     plan: list = []
     _add_tree(plan, PACK_ROOT / "skills", ".claude/skills")
-    agent = PACK_ROOT / "agents" / "ticket-researcher.md"
-    if agent.is_file():
-        plan.append((agent, ".claude/agents/ticket-researcher.md"))
+    _add_tree(plan, PACK_ROOT / "agents", ".claude/agents")
     _add_tree(plan, PACK_ROOT / ".github" / "prompts", ".github/prompts")
     _add_tree(plan, PACK_ROOT / ".kiro" / "skills", ".kiro/skills")
     return plan

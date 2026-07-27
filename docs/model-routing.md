@@ -77,12 +77,22 @@ phases resume at their assigned tier.
 | **Kiro IDE** | `.kiro/agents/*.md` frontmatter `model:` | Per agent |
 | Codex, Cursor, Gemini CLI, Windsurf, Cline, Continue, Augment, OpenCode, Antigravity, GitHub Copilot | — | Advisory only; session default |
 
-`sync-pack` ships the pack's canonical `model_tier` frontmatter verbatim; it does
-**not** rewrite it into a harness-native `model:` field, because the resolved ID
-depends on the consumer's `[models]` table. On the enforcing harnesses above, add
-the `model:` key to your synced `.claude/agents/*.md` (or `.kiro/agents/*`) copies
-with whatever your `[models]` table resolves to, then re-run `sync-pack --check`
-to confirm nothing else drifted.
+**Skills** carry only `model_tier` — the orchestrator resolves it through
+`tkt cfg models.<tier>`, so nothing needs rewriting at sync time.
+
+**Agents** carry both, because the enforcing harnesses read the frontmatter
+themselves and a tier name means nothing to them:
+
+```yaml
+model_tier: deep      # portable statement of intent
+model: opus           # harness-native default, safe to override
+```
+
+The shipped `model:` values are generation-stable aliases (`haiku` / `sonnet` /
+`opus`) rather than pinned IDs, so they don't rot with each model release. A
+consumer who wants a specific build edits the synced `.claude/agents/*.md` copy —
+`sync-pack --check` will then report that file as drifted, which is the intended
+signal, not an error.
 
 On advisory harnesses, `model_tier` is documentation: the operator can select a
 model manually before invoking a skill. The pipeline never blocks or fails because

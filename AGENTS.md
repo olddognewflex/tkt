@@ -159,7 +159,19 @@ hand-maintained.
 
 ## Meta
 
-- `agents/ticket-researcher.md` is the read-only lookup subagent.
+- `agents/` holds the subagent catalog, shipped to `.claude/agents/` by
+  `sync-pack`. Each is trust-scoped so the pipeline never self-approves:
+
+  | Agent | Trust | Used by |
+  | --- | --- | --- |
+  | `ticket-researcher` | read-only | ad-hoc ticket lookup |
+  | `sdlc-planner` | read-only | plan phase |
+  | `sdlc-executor` | file read/write + build/test, no VCS push, no transitions | implement phase |
+  | `sdlc-reviewer` | read-only | self-review, review pass |
+  | `sdlc-verifier` | read + build/test only | self-review, check pass |
+
+  Every phase that delegates also states an inline fallback, so harnesses without
+  subagent support run the pipeline unchanged.
 - `docs/install.md` — installing `tkt` and the pack.
 - `docs/markdown-ticketing.md` — the markdown provider's on-disk format.
 - `docs/model-routing.md` — the `model_tier` frontmatter key and the `[models]`
