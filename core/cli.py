@@ -159,9 +159,18 @@ def build_parser() -> argparse.ArgumentParser:
                          "them from the project's package manager")
 
     sp = add("sync-pack")
+    sp.add_argument("harnesses", nargs="*", metavar="HARNESS",
+                    help="harness(es) to add to this project, e.g. `cursor`. "
+                         "Additive and sticky: once added, later bare runs keep "
+                         "them in sync. Omit to refresh what is already installed")
+    sp.add_argument("--harness", action="append", default=[], dest="harness_flag",
+                    metavar="NAME", help="same as a positional HARNESS; repeatable")
+    sp.add_argument("--list-harnesses", action="store_true", dest="list_harnesses",
+                    help="list harness names, their target dirs, and which ones "
+                         "this project already installs; writes nothing")
     sp.add_argument("--all-harnesses", action="store_true", dest="all_harnesses",
-                    help="also install the curated Tier-B harness dirs "
-                         "(.gemini, .cursor, .windsurf, ...) path-verbatim")
+                    help="install every known harness (.cursor, .gemini, "
+                         ".windsurf, ...) path-verbatim")
     sp.add_argument("--dir", default=".",
                     help="consumer repo to install the pack into (default cwd)")
     sp.add_argument("--check", action="store_true",
@@ -266,8 +275,13 @@ def main(argv: list[str]) -> int:
         # `sync-pack` installs pack files into a consumer tree; it needs no
         # config and may run before `tkt init`.
         if args.verb == "sync-pack":
-            from .pack import sync_pack
-            return sync_pack(args.dir, args.all_harnesses, args.check)
+            from .pack import list_harnesses, sync_pack
+            if args.list_harnesses:
+                return list_harnesses(args.dir)
+            names = [n.strip()
+                     for raw in (args.harnesses + args.harness_flag)
+                     for n in raw.split(",") if n.strip()]
+            return sync_pack(args.dir, args.all_harnesses, args.check, names)
 
         config = Config.load(args.config)
 

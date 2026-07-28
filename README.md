@@ -115,9 +115,13 @@ the full guide.
 - `tkt sync-pack` writes real, tracked files into the repo (`.claude/skills`,
   `.github/prompts`, `.kiro/skills`, an `AGENTS.md` managed block, and a
   `.sdlc/pack-manifest.json`). Cloud harnesses, CI, and teammates only see tracked
-  files, so this is the option that works off your machine. Add `--all-harnesses`
-  for the curated long tail (Gemini, Cursor, Windsurf, Cline, Continue, Augment,
-  OpenCode, Antigravity).
+  files, so this is the option that works off your machine.
+- Adding a harness to a project that is already set up: name it —
+  `tkt sync-pack cursor`. The choice is additive and sticky (recorded in the
+  manifest), so later bare `tkt sync-pack` runs keep it in sync. `--all-harnesses`
+  takes the whole long tail (Gemini, Cursor, Windsurf, Cline, Continue, Augment,
+  OpenCode, AGENTS.md-native); `--list-harnesses` shows the names, their target
+  dirs, and which ones the project already installs.
 - `tkt init --link-skills` symlinks the pack into `.claude/` — fine for solo local
   work, invisible to git/CI. Use committed copies for anything shared.
 - Updating: `git pull` the pack clone, re-run `tkt sync-pack` per consumer repo;

@@ -77,7 +77,7 @@ separate harness-specific files).
 | `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
 | `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
-| `tkt sync-pack [--dir D] [--all-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
+| `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
 | `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 
@@ -159,6 +159,29 @@ In a consumer repo it also maintains a generated block inside that repo's
 `AGENTS.md`, delimited by markers — content outside the markers is preserved
 verbatim. `tkt sync-pack --check` reports missing/locally-modified/out-of-date
 pack files and exits 1; `tkt doctor` folds the same check in.
+
+### Harness selection
+
+A bare `tkt sync-pack` installs the default harnesses (`claude`, `copilot`,
+`kiro`). Name others to add them to an already-synced project:
+
+```sh
+tkt sync-pack cursor              # add Cursor to this repo
+tkt sync-pack cursor windsurf     # several at once
+tkt sync-pack --all-harnesses     # every known harness
+tkt sync-pack --list-harnesses    # names, target dirs, what's installed here
+```
+
+Selection is **additive and sticky**: the resulting set is recorded under
+`harnesses` in `.sdlc/pack-manifest.json`, so a later bare `tkt sync-pack` keeps
+every added harness up to date rather than reverting to the default three.
+Removing a harness means dropping it from that list by hand — `sync-pack` never
+deletes files.
+
+The defaults apply only when nothing is named **and** nothing is recorded. So in
+a repo that was set up with `tkt init --link-skills` (symlinked `.claude/`, no
+manifest), `tkt sync-pack cursor` installs `.cursor/` and the `AGENTS.md` block
+and nothing else — it will not drop committed copies on top of the symlinks.
 
 This file — the pack repo's own `AGENTS.md` — has no managed block and is
 hand-maintained.
