@@ -37,20 +37,59 @@ END = "<!-- tkt-pack:end -->"
 # Pack-internal meta skill; never shipped to a consumer.
 _EXCLUDE_SKILLS = {"sync-skills"}
 
-# Curated Tier-B / extra harness dirs, copied path-verbatim only with
-# --all-harnesses. Only files present in THIS repo are copied.
-_EXTRA_HARNESS_DIRS = [
-    ".gemini/commands",
-    ".agents/skills",
-    ".agents/workflows",
-    ".cursor/skills",
-    ".cursor/commands",
-    ".windsurf/workflows",
-    ".clinerules/workflows",
-    ".continue/prompts",
-    ".augment/commands",
-    ".opencode/commands",
-]
+# Named harnesses. Each maps to (pack-relative source, consumer-relative dest)
+# pairs; every Tier-B dir is copied path-verbatim, so source == dest for all but
+# Claude Code (whose sources are the pack's top-level skills/ and agents/).
+# Only files present in THIS repo are copied — an absent source is a no-op.
+_HARNESSES: dict[str, tuple[str, list[tuple[str, str]]]] = {
+    "claude": ("Claude Code", [
+        ("skills", ".claude/skills"),
+        ("agents", ".claude/agents"),
+    ]),
+    "copilot": ("GitHub Copilot", [
+        (".github/prompts", ".github/prompts"),
+    ]),
+    # Kiro does not read AGENTS.md — steering is its only project-convention
+    # surface, so it ships by default rather than opt-in.
+    "kiro": ("Kiro", [
+        (".kiro/skills", ".kiro/skills"),
+        (".kiro/steering", ".kiro/steering"),
+        (".kiro/agents", ".kiro/agents"),
+    ]),
+    "cursor": ("Cursor", [
+        (".cursor/skills", ".cursor/skills"),
+        (".cursor/commands", ".cursor/commands"),
+    ]),
+    "gemini": ("Gemini CLI", [
+        (".gemini/commands", ".gemini/commands"),
+    ]),
+    "agents": ("Antigravity / Junie / Codex", [
+        (".agents/skills", ".agents/skills"),
+        (".agents/workflows", ".agents/workflows"),
+    ]),
+    "windsurf": ("Windsurf", [
+        (".windsurf/workflows", ".windsurf/workflows"),
+    ]),
+    "cline": ("Cline", [
+        (".clinerules/workflows", ".clinerules/workflows"),
+    ]),
+    "continue": ("Continue", [
+        (".continue/prompts", ".continue/prompts"),
+    ]),
+    "augment": ("Augment", [
+        (".augment/commands", ".augment/commands"),
+    ]),
+    "opencode": ("OpenCode", [
+        (".opencode/commands", ".opencode/commands"),
+    ]),
+}
+
+# Installed unless the caller narrows the set.
+_DEFAULT_HARNESSES = ("claude", "copilot", "kiro")
+
+
+def harness_names() -> list[str]:
+    return list(_HARNESSES)
 
 
 # ---- hashing / small helpers ----------------------------------------------
@@ -101,24 +140,73 @@ def _add_tree(plan: list, base: Path, dest_prefix: str) -> None:
         plan.append((f, f"{dest_prefix}/{rel_in.as_posix()}"))
 
 
-def _default_plan() -> list:
+def _plan_for(harnesses: list[str]) -> list:
+    """Source→dest plan for the selected harnesses, de-duplicated on dest so two
+    harnesses sharing a directory can't queue the same write twice."""
     plan: list = []
-    _add_tree(plan, PACK_ROOT / "skills", ".claude/skills")
-    _add_tree(plan, PACK_ROOT / "agents", ".claude/agents")
-    _add_tree(plan, PACK_ROOT / ".github" / "prompts", ".github/prompts")
-    _add_tree(plan, PACK_ROOT / ".kiro" / "skills", ".kiro/skills")
-    # Kiro does not read AGENTS.md — steering is its only project-convention
-    # surface, so it ships by default rather than under --all-harnesses.
-    _add_tree(plan, PACK_ROOT / ".kiro" / "steering", ".kiro/steering")
-    _add_tree(plan, PACK_ROOT / ".kiro" / "agents", ".kiro/agents")
+    seen: set[str] = set()
+    for name in harnesses:
+        for src_rel, dest_rel in _HARNESSES[name][1]:
+            for src, rel in _sub_plan(src_rel, dest_rel):
+                if rel in seen:
+                    continue
+                seen.add(rel)
+                plan.append((src, rel))
     return plan
 
 
-def _extra_plan() -> list:
+def _sub_plan(src_rel: str, dest_rel: str) -> list:
     plan: list = []
-    for d in _EXTRA_HARNESS_DIRS:
-        _add_tree(plan, PACK_ROOT / d, d)
+    _add_tree(plan, PACK_ROOT / src_rel, dest_rel)
     return plan
+
+
+def _resolve_harnesses(requested: list[str], all_harnesses: bool,
+                       manifest: dict) -> list[str]:
+    """Selection is ADDITIVE and STICKY: the harnesses recorded by a previous
+    sync stay installed, and `--harness X` adds X to that set permanently. This
+    is what makes a later bare `tkt sync-pack` keep every harness up to date
+    instead of silently reverting to the default three."""
+    selected = set(_manifest_harnesses(manifest))
+    if all_harnesses:
+        selected |= set(_HARNESSES)
+    for name in requested:
+        if name not in _HARNESSES:
+            raise UsageError(
+                f"unknown harness '{name}'. Available: "
+                f"{', '.join(_HARNESSES)} (or --list-harnesses)")
+        selected.add(name)
+    if not selected:
+        selected = set(_DEFAULT_HARNESSES)
+    # Stable order: registry order, which puts the defaults first.
+    return [n for n in _HARNESSES if n in selected]
+
+
+def _manifest_harnesses(manifest: dict) -> list[str]:
+    """Harnesses a previous sync installed. Understands the pre-registry
+    manifests that recorded only `harness_set: default|all`."""
+    recorded = manifest.get("harnesses")
+    if isinstance(recorded, list):
+        return [n for n in recorded if n in _HARNESSES]
+    if manifest.get("harness_set") == "all":
+        return list(_HARNESSES)
+    if manifest.get("harness_set") == "default":
+        return list(_DEFAULT_HARNESSES)
+    return []
+
+
+def list_harnesses(target_dir: str) -> int:
+    installed = set(_manifest_harnesses(
+        _load_manifest(Path(target_dir).expanduser().resolve() / MANIFEST_REL)))
+    for name, (label, dirs) in _HARNESSES.items():
+        mark = "*" if name in installed else " "
+        default = " (default)" if name in _DEFAULT_HARNESSES else ""
+        print(f" {mark} {name:<10} {label}{default}")
+        print(f"     {', '.join(d for _, d in dirs)}")
+    print()
+    print("  * = recorded in this project's pack manifest")
+    print("  add one with: tkt sync-pack <name>")
+    return 0
 
 
 # ---- AGENTS.md managed block ----------------------------------------------
@@ -215,7 +303,8 @@ def _report_check(missing: list, locally_mod: list, outdated: list) -> None:
 
 # ---- entry point -----------------------------------------------------------
 
-def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
+def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
+              harnesses: list[str] | None = None) -> int:
     target = Path(target_dir).expanduser().resolve()
 
     # Guardrail: never install into the pack checkout itself.
@@ -224,15 +313,13 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
             f"--dir {target} is inside the pack checkout ({PACK_ROOT}); "
             "sync-pack installs INTO a separate consumer repo, not over the pack")
 
-    plan = _default_plan()
-    harness_set = "default"
-    if all_harnesses:
-        plan += _extra_plan()
-        harness_set = "all"
-
     manifest_path = target / MANIFEST_REL
     old = _load_manifest(manifest_path)
     old_files = old.get("files", {}) if isinstance(old.get("files"), dict) else {}
+
+    selected = _resolve_harnesses(harnesses or [], all_harnesses, old)
+    added = [n for n in selected if n not in _manifest_harnesses(old)]
+    plan = _plan_for(selected)
 
     new_files: dict[str, str] = {}
     missing: list[str] = []
@@ -299,6 +386,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
                     locally_mod.append(f"{AGENTS_REL} (tkt-pack block)")
                 if cur_region_sha != block_sha:
                     outdated.append(f"{AGENTS_REL} (tkt-pack block)")
+        print(f"harnesses: {', '.join(selected)}")
         _report_check(missing, locally_mod, outdated)
         return 1 if (missing or locally_mod or outdated) else 0
 
@@ -325,10 +413,10 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
     material = {
         "pack_commit": _git_head(PACK_ROOT),
         "pack_root": str(PACK_ROOT),
-        "harness_set": harness_set,
+        "harnesses": selected,
         "files": new_files,
     }
-    old_material = {k: old.get(k) for k in ("pack_commit", "pack_root", "harness_set", "files")}
+    old_material = {k: old.get(k) for k in ("pack_commit", "pack_root", "harnesses", "files")}
     wrote_manifest = False
     if material != old_material or not manifest_path.exists():
         manifest = dict(material)
@@ -338,6 +426,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool) -> int:
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         wrote_manifest = True
 
+    if added:
+        print(f"harnesses added: {', '.join(added)}")
     if writes == 0 and not warnings and not wrote_manifest:
         print(f"sync-pack: up to date ({len(new_files)} entries) at {target}")
     else:

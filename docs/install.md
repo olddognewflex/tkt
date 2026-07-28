@@ -57,27 +57,45 @@ before you install.
 
 ## 3. What gets installed
 
-`tkt sync-pack` copies a **default harness set**. Add `--all-harnesses` to also
-install the curated long tail of other harnesses, path-verbatim.
+`tkt sync-pack` copies a **default harness set**. Name any other harness to add
+it, or use `--all-harnesses` for the whole curated long tail, path-verbatim.
 
-| Destination | Harness | Default | `--all-harnesses` |
-|---|---|:---:|:---:|
-| `.claude/skills/` (19 skills) | Claude Code | ✓ | ✓ |
-| `.claude/agents/` (6 subagents) | Claude Code | ✓ | ✓ |
-| `.github/prompts/` | GitHub Copilot | ✓ | ✓ |
-| `.kiro/skills/` | AWS Kiro (invocable skills) | ✓ | ✓ |
-| `.kiro/steering/` | AWS Kiro (project conventions) | ✓ | ✓ |
-| `.kiro/agents/` | AWS Kiro (sub-agent definitions) | ✓ | ✓ |
-| `AGENTS.md` managed block (`<!-- tkt-pack:begin/end -->`) | Universal fallback (Codex, Amp, Devin, …) | ✓ | ✓ |
-| `.gemini/commands/` | Gemini CLI | | ✓ |
-| `.agents/skills/` | Antigravity, Junie, Codex | | ✓ |
-| `.agents/workflows/` | Antigravity | | ✓ |
-| `.cursor/skills/` + `.cursor/commands/` | Cursor | | ✓ |
-| `.windsurf/workflows/` | Windsurf | | ✓ |
-| `.clinerules/workflows/` | Cline | | ✓ |
-| `.continue/prompts/` | Continue | | ✓ |
-| `.augment/commands/` | Augment | | ✓ |
-| `.opencode/commands/` | OpenCode | | ✓ |
+| Name | Destination | Harness | Default |
+|---|---|---|:---:|
+| `claude` | `.claude/skills/` (19 skills) + `.claude/agents/` (6 subagents) | Claude Code | ✓ |
+| `copilot` | `.github/prompts/` | GitHub Copilot | ✓ |
+| `kiro` | `.kiro/skills/` + `.kiro/steering/` + `.kiro/agents/` | AWS Kiro (skills, project conventions, sub-agents) | ✓ |
+| — | `AGENTS.md` managed block (`<!-- tkt-pack:begin/end -->`) | Universal fallback (Codex, Amp, Devin, …) — always written | ✓ |
+| `cursor` | `.cursor/skills/` + `.cursor/commands/` | Cursor | |
+| `gemini` | `.gemini/commands/` | Gemini CLI | |
+| `agents` | `.agents/skills/` + `.agents/workflows/` | Antigravity, Junie, Codex | |
+| `windsurf` | `.windsurf/workflows/` | Windsurf | |
+| `cline` | `.clinerules/workflows/` | Cline | |
+| `continue` | `.continue/prompts/` | Continue | |
+| `augment` | `.augment/commands/` | Augment | |
+| `opencode` | `.opencode/commands/` | OpenCode | |
+
+### Adding a harness later
+
+A project that was set up with the default set can pick up another harness at any
+time — no re-init, no `--force`:
+
+```sh
+tkt sync-pack cursor              # add Cursor
+tkt sync-pack cursor windsurf     # several at once
+tkt sync-pack --list-harnesses    # names, dirs, and what this repo installs
+```
+
+The selection is **additive and sticky**: it is recorded under `harnesses` in
+`.sdlc/pack-manifest.json`, so subsequent bare `tkt sync-pack` runs (and
+`--check`) cover every added harness instead of reverting to the default three.
+`sync-pack` never deletes, so removing a harness means dropping its name from
+that manifest list and deleting its directory by hand.
+
+The default set applies only when you name nothing **and** the manifest records
+nothing. A repo set up with `tkt init --link-skills` has symlinks in `.claude/`
+and no manifest, so `tkt sync-pack cursor` there installs `.cursor/` plus the
+`AGENTS.md` block only — it will not lay committed copies over the symlinks.
 
 Notes:
 - The `sync-skills` meta-skill is pack-internal and never shipped to a consumer.
