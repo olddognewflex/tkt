@@ -27,6 +27,15 @@ doc — the skill is repo-agnostic.
 Classify the work: new endpoint, bug fix, new feature (cross-cutting), refactor,
 or shared-lib change. Note the typical files touched for each.
 
+### 2a. Bug tickets: regression test first
+
+If the ticket type is a bug (`tkt view "$KEY" --json | jq -r .type` matches
+bug/defect), the plan MUST list a failing regression test as change #1 — one
+that reproduces the reported behaviour and fails against current code. Name the
+test and the assertion in the Changes list, not just Test Strategy. No fix step
+precedes it. If the bug can't be reproduced in a test, say so explicitly under
+Risks and state why.
+
 ### 3. Produce the plan
 
 ```markdown
@@ -43,6 +52,7 @@ or shared-lib change. Note the typical files touched for each.
 - New tests: <describe>
 - Modified tests: <describe>
 - Regression: run the suite for affected packages
+- Regression (bugs): <failing test written first, per §2a>
 
 ### Risks
 - <anything that could go wrong / external schema or API deps>
