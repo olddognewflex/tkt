@@ -17,6 +17,7 @@ Produce a structured implementation plan from a triaged ticket. Planning happens
    ```
 2. Read existing code for affected packages.
 3. Classify the change scope.
+   - **Bug tickets:** the plan MUST list a failing regression test as change #1 — one that reproduces the reported behaviour and fails against current code. Name the test and assertion under Changes, not just Test Strategy; no fix step precedes it. If it can't be reproduced in a test, say so under Risks with the reason.
 4. Produce a markdown plan:
    - Summary (one sentence)
    - Changes (numbered `path — what`)
