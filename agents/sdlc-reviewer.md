@@ -23,6 +23,10 @@ do not assume the author's intent was met.
 - `git diff`, `git log`, `git show` — read changes and history
 - `tkt view <KEY> --json` — read the ticket for requirement context
 - `tkt cfg <DOTTED.KEY>` — read project config
+- If the repo has a mex code graph (`.mex/graph.db` exists):
+  `mex impact <symbol|file>` on changed symbols surfaces callers *outside* the
+  diff (feeds the **Breaking** row); `mex graph query who-calls <symbol>` for
+  exact caller lookups. Both read-only.
 
 ## Guardrails
 

@@ -26,6 +26,13 @@ do not assume the author's intent was met.
 - `tkt blockers <KEY> --json` — check blockers
 - `tkt list --query <name> --json` — search tickets
 - `git log`, `git diff`, `git show` — read history
+- If the repo has a mex code graph (`.mex/graph.db` exists), prefer it over
+  scanning source: `mex graph scope "<task>"` for a compact neighborhood,
+  `mex graph query <who-calls|what-calls|where-defined> <symbol>` for exact
+  lookups, `mex graph get <id> --detail source` to expand the few nodes that
+  matter, and `mex impact <symbol|file>` for blast radius to feed Risks. All
+  read-only. Scope matches words, not meaning — reword at most once, then
+  fall back to reading files.
 
 ## Guardrails
 

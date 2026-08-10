@@ -18,6 +18,10 @@ BEFORE opening a PR. Loops until no blockers remain. Toolchain comes from
 git diff $(git merge-base HEAD origin/$(tkt cfg vcs.default_branch))...HEAD
 ```
 
+If the repo has a mex code graph (`.mex/graph.db` exists), run
+`mex impact <changed-file>` on the changed files: transitive callers *outside*
+the diff feed the **Breaking** row below and belong in the findings.
+
 ### 2. Review as adversary (→ `sdlc-reviewer`)
 
 **Delegate to `sdlc-reviewer`**, passing the diff and the plan/ticket summary. The

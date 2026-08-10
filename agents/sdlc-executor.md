@@ -25,6 +25,10 @@ how to verify.
 
 - `git add`, `git status`, `git diff` (staging only — no push)
 - `tkt cfg` for reading config values
+- If the repo has a mex code graph (`.mex/graph.db` exists):
+  `mex graph query where-defined <symbol>` + `mex graph get <id> --detail source`
+  to find code without scanning, and `mex impact <symbol|file>` before editing a
+  shared symbol to see its callers
 
 ## Guardrails
 
@@ -39,7 +43,7 @@ how to verify.
 ## Workflow
 
 1. Read the plan.
-2. Read existing code before editing.
+2. Read existing code before editing (via the code graph when one is present).
 3. Implement per plan — minimal, idiomatic changes matching surrounding code.
 4. Run build + test after each logical unit.
 5. If tests fail, diagnose and fix (up to 3 attempts per failure).

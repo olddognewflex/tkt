@@ -8,6 +8,7 @@ Adversarial review of your own changes. Run AFTER implementation + tests pass, B
    ```shell
    git diff $(git merge-base HEAD origin/$(tkt cfg vcs.default_branch))...HEAD
    ```
+   If the repo has a mex code graph (`.mex/graph.db` exists), run `mex impact <changed-file>` on the changed files: transitive callers outside the diff feed the Breaking category below and belong in the findings.
 2. Review as adversary across:
    - Security: injection, auth bypass, secrets, unvalidated input
    - Types: loose types, missing null checks

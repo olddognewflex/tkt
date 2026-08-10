@@ -4,7 +4,7 @@ Adversarial review of your own changes. Run AFTER implementation + tests pass, B
 
 ## Steps
 
-1. Generate diff: `git diff $(git merge-base HEAD origin/$(tkt cfg vcs.default_branch))...HEAD`.
+1. Generate diff: `git diff $(git merge-base HEAD origin/$(tkt cfg vcs.default_branch))...HEAD`. If the repo has a mex code graph (`.mex/graph.db` exists), run `mex impact <changed-file>` on the changed files: transitive callers outside the diff are breaking-change findings.
 2. Review as adversary across: security, types, errors, tests, style, breaking changes, performance, edge cases.
 3. List findings: file+line, severity, description, suggested fix.
 4. Fix all blockers and warnings.
