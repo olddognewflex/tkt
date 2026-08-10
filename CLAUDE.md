@@ -62,7 +62,10 @@ Two layers, connected only by the verb contract and the normalized schema:
   - `pack.py` — implements `tkt sync-pack` and its `doctor` check. Copies pack files
     into a consumer tree, tracks them in `.sdlc/pack-manifest.json`, and maintains a
     marker-delimited managed block in the consumer's `AGENTS.md`. Never deletes, never
-    writes outside recorded paths, and is idempotent.
+    writes outside recorded paths, and is idempotent. `_HARNESSES` is the registry of
+    named harnesses → (pack source, consumer dest) dirs; the installed set is
+    additive and persisted in the manifest's `harnesses` list, so a bare re-run
+    refreshes every harness the project ever added.
   - `errors.py` — typed errors → exit codes (see `AGENTS.md` for the table). Errors
     always go to stderr with a non-zero exit so skills branch on codes.
   - `toolchain.py` — best-effort detection of a project's build/test/typecheck/lint

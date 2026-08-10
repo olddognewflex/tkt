@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for `tkt sync-pack`. Exercises fresh install, idempotency, local
-# modification restore + warning, --check exit status, --all-harnesses, and
-# AGENTS.md custom-content preservation. Prints PASS/FAIL per case.
+# modification restore + warning, --check exit status, --all-harnesses,
+# AGENTS.md custom-content preservation, and named/sticky harness selection.
+# Prints PASS/FAIL per case.
 set -euo pipefail
 
 PACK="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,7 +20,7 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 # Expected counts are derived from the pack, not hardcoded, so adding a skill
@@ -118,6 +119,39 @@ if echo "$out7" | grep -q "pre-existing file overwritten" && [ "$replaced" = "1"
 else
   fail "case7 pre-existing file (warned? / replaced=$replaced)"
   echo "$out7" | sed 's/^/    /'
+fi
+
+# ---- case 8: named harness is added and sticks ------------------------------
+# The point of `tkt sync-pack cursor` on an already-synced project: .cursor/ shows
+# up, and a later BARE run keeps it in sync instead of reverting to the defaults.
+C5="$(mktemp -d)"
+git_init "$C5"
+"$TKT" sync-pack --dir "$C5" >/dev/null
+before=$([ -d "$C5/.cursor" ] && echo yes || echo no)
+"$TKT" sync-pack cursor --dir "$C5" >/dev/null
+git -C "$C5" add -A && git -C "$C5" commit -qm "sync + cursor"
+# Bare re-run must be a no-op AND must still consider .cursor part of the set.
+"$TKT" sync-pack --dir "$C5" >/dev/null
+dirty=$(git -C "$C5" status --porcelain | wc -l | tr -d ' ')
+listed=$(grep -c '"cursor"' "$C5/.sdlc/pack-manifest.json" || true)
+checked=$("$TKT" sync-pack --check --dir "$C5" 2>&1 | grep -c 'harnesses:.*cursor' || true)
+if [ "$before" = "no" ] && [ -f "$C5/.cursor/commands/select-ticket.md" ] \
+   && [ "$dirty" = "0" ] && [ "$listed" -ge 1 ] && [ "$checked" -ge 1 ]; then
+  pass "case8 named harness added, recorded, and sticky across bare re-runs"
+else
+  fail "case8 named harness (before=$before dirty=$dirty manifest=$listed check=$checked)"
+fi
+
+# ---- case 9: unknown harness name is a usage error --------------------------
+C6="$(mktemp -d)"
+set +e
+out9="$("$TKT" sync-pack definitely-not-a-harness --dir "$C6" 2>&1)"
+rc9=$?
+set -e
+if [ "$rc9" = "64" ] && echo "$out9" | grep -q "unknown harness"; then
+  pass "case9 unknown harness name rejected with exit 64"
+else
+  fail "case9 unknown harness (rc=$rc9): $out9"
 fi
 
 echo

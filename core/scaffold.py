@@ -100,6 +100,8 @@ def init(provider: str | None, target_dir: str, force: bool,
     if not link_skills:
         print("  4. Activate skills: `tkt sync-pack` (committed copies — best for "
               "cloud/CI harnesses like Copilot) or `tkt init --link-skills` (symlinks)")
+        print("     add a harness later with `tkt sync-pack cursor` "
+              "(`--list-harnesses` for the names)")
     return 0
 
 
