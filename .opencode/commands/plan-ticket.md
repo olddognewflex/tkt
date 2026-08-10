@@ -7,8 +7,8 @@ Produce a structured implementation plan for ticket: $ARGUMENTS
 Planning happens BEFORE any code changes.
 
 1. Read the ticket with `tkt view "$KEY" --json` and extract key, summary, acceptance criteria, and affected packages.
-2. Read existing code for each affected package (route handlers, types, schemas, tests, API specs). Keep the package→file mapping in the project's own conventions doc.
-3. Classify the change: new endpoint, bug fix, new feature, refactor, or shared-lib change.
+2. Read existing code for each affected package (route handlers, types, schemas, tests, API specs). Keep the package→file mapping in the project's own conventions doc. If the repo has a mex code graph (`.mex/graph.db` exists), map the ticket to code through it first with `mex graph scope "<summary>"` and `mex graph query where-defined <symbol>`, expanding only the 1-3 nodes that matter via `mex graph get <id> --detail source`; reword a poor scope match once, then fall back to reading files.
+3. Classify the change: new endpoint, bug fix, new feature, refactor, or shared-lib change. With a code graph present, `mex impact <symbol-or-file>` on the main touchpoints shows the transitive blast radius — fold surprises into Risks.
 4. Produce a markdown plan with these sections:
    - Summary (one sentence)
    - Changes (numbered `path — what`)

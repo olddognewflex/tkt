@@ -4,7 +4,7 @@ description: Adversarial self-review of changes before PR via tkt config
 
 Run an adversarial self-review of the current branch's changes: $ARGUMENTS
 
-1. Generate the diff: `git diff $(git merge-base HEAD origin/$(tkt cfg vcs.default_branch))...HEAD`.
+1. Generate the diff: `git diff $(git merge-base HEAD origin/$(tkt cfg vcs.default_branch))...HEAD`. If the repo has a mex code graph (`.mex/graph.db` exists), run `mex impact <changed-file>` on the changed files: transitive callers outside the diff are breaking-change findings.
 2. Review as adversary across: security, types, errors, tests, style, breaking changes, performance, edge cases.
 3. List findings with file+line, severity (blocker/warning/nit), description, suggested fix.
 4. Fix all blockers and warnings.

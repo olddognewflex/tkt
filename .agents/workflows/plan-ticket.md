@@ -15,8 +15,17 @@ Produce a structured implementation plan from a triaged ticket. Planning happens
    // turbo
    tkt view "$KEY" --json
    ```
-2. Read existing code for affected packages.
-3. Classify the change scope.
+2. Read existing code for affected packages. If the repo has a mex code graph
+   (`.mex/graph.db` exists), map the ticket to code through it first:
+   ```shell
+   mex graph scope "<summary>"
+   mex graph query where-defined <symbol>
+   mex graph get <id> --detail source
+   ```
+   Reword a poor scope match once, then fall back to reading files; treat source the
+   graph returns as already read.
+3. Classify the change scope. With a code graph present, `mex impact <symbol-or-file>`
+   on the main touchpoints shows the transitive blast radius — fold surprises into Risks.
 4. Produce a markdown plan:
    - Summary (one sentence)
    - Changes (numbered `path — what`)

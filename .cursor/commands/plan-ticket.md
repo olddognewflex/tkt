@@ -19,11 +19,15 @@ Extract: `key`, `type` + `type_class`, `summary`, `acceptance`, affected package
 
 ### 2. Read existing code
 
+If the repo has a mex code graph (`.mex/graph.db` exists), map the ticket to code through it first: `mex graph scope "<summary>"`, `mex graph query where-defined <symbol>`, then `mex graph get <id> --detail source` for the 1-3 nodes that matter. Reword a poor scope match once, then fall back to reading files; treat source the graph returns as already read.
+
 For each affected package, read relevant entry points (route handlers, types, schemas, tests, API specs). Keep the package→file mapping in the project's own conventions doc.
 
 ### 3. Identify change scope
 
 Classify: new endpoint, bug fix, new feature, refactor, or shared-lib change.
+
+With a code graph present, `mex impact <symbol-or-file>` on the main touchpoints shows the transitive blast radius — fold surprises into Risks.
 
 ### 4. Produce the plan
 

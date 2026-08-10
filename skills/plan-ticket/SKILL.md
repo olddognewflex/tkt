@@ -18,6 +18,19 @@ Re-read anytime with `tkt view "$KEY" --json`.
 
 ### 1. Read existing code
 
+If the repo has a mex code graph (`.mex/graph.db` exists), map the ticket to
+code through the graph before opening files:
+
+```shell
+mex graph scope "<ticket summary>"        # compact JSONL neighborhood for the task
+mex graph query where-defined <symbol>    # exact lookup when a name is known
+mex graph get <id> --detail source        # expand only the 1-3 nodes that matter
+```
+
+Scope matches words, not meaning — if the manifest looks irrelevant, reword at
+most once, then fall back to reading files. Treat source the graph returns as
+already read.
+
 For each affected package, read the relevant entry points (route handlers, types,
 schemas, tests, API specs). Keep this mapping in the project's own conventions
 doc — the skill is repo-agnostic.
@@ -26,6 +39,9 @@ doc — the skill is repo-agnostic.
 
 Classify the work: new endpoint, bug fix, new feature (cross-cutting), refactor,
 or shared-lib change. Note the typical files touched for each.
+
+With a code graph present, `mex impact <symbol-or-file>` on the main touchpoints
+shows the transitive blast radius — fold surprises into the plan's Risks.
 
 ### 3. Produce the plan
 
