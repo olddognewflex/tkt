@@ -4,3 +4,6 @@ __pycache__/
 # Local SDLC/agent state (dogfooding tkt against the shared ODNF board)
 .sdlc/
 .omo/
+
+# mex: scaffold is committed; the code graph is generated (rebuild: mex graph)
+.mex/graph.db*
