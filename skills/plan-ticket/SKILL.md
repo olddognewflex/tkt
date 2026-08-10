@@ -42,6 +42,7 @@ or shared-lib change. Note the typical files touched for each.
 
 With a code graph present, `mex impact <symbol-or-file>` on the main touchpoints
 shows the transitive blast radius — fold surprises into the plan's Risks.
+
 ### 2a. Bug tickets: regression test first
 
 If the ticket type is a bug (`tkt view "$KEY" --json | jq -r .type` matches
