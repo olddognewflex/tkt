@@ -189,6 +189,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="print the prompt and command without invoking the harness")
 
+    sp = add("agents")
+    sp.add_argument("--stale-after", type=int, default=None, dest="stale_after",
+                    help="seconds without a heartbeat before a run counts as "
+                         "stalled (default 45)")
+    sp.add_argument("--dir", action="append", default=[], dest="dirs",
+                    help="project root to scan; repeatable. Default: the run "
+                         "root of the loaded config")
+    sp.add_argument("--enrich", action="store_true",
+                    help="add board fields (summary, agent_status) — the only "
+                         "option here that contacts the backend")
+    sp.add_argument("--all", action="store_true", dest="include_all",
+                    help="include idle dirs and the _select placeholder")
+
     sp = add("cfg")
     sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo")
     sp.add_argument("--pkg", default="", help="substitute {pkg} in the value")
@@ -303,6 +316,18 @@ def main(argv: list[str]) -> int:
             else:
                 print(json.dumps(val) if args.json else val)
             return 0
+
+        # `agents` is a filesystem read of run state — no adapter unless the
+        # caller asked to enrich rows from the board.
+        if args.verb == "agents":
+            from .agents import DEFAULT_STALE_AFTER, cmd_agents
+            stale = args.stale_after
+            if stale is None:
+                stale = DEFAULT_STALE_AFTER
+            elif stale < 0:
+                raise UsageError("--stale-after must be >= 0")
+            return cmd_agents(config, args.dirs, stale, args.include_all,
+                              args.enrich, args.json)
 
         adapter = get_adapter(config)
 

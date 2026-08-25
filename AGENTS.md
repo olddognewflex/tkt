@@ -79,6 +79,7 @@ separate harness-specific files).
 | `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
 | `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
 | `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
+| `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every run at once (local read; no backend without `--enrich`) |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 
 `--json` works on either side of the verb.
@@ -92,7 +93,9 @@ separate harness-specific files).
 - `--due` / `--scheduled` / `--completed` take `YYYY-MM-DD`.
 - `--agent-status` takes one of `idle`, `processing`, `waiting`, `done`,
   `blocked` (or `""` to clear). Invalid values are rejected up front so a typo
-  can't write a state the board's badge mapping won't recognize.
+  can't write a state the board's badge mapping won't recognize. The adapter
+  stamps `agent_status_at` whenever the state actually changes; re-asserting
+  the same state leaves the stamp alone.
 
 ### Exit codes
 

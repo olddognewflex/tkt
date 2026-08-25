@@ -24,13 +24,22 @@ Pure stdlib, Python 3.11+ (uses `tomllib`). No third-party deps, no build step.
 ./tkt view KEY --json         # normalized ticket shape skills parse
 ./tkt init --provider markdown --link-skills --sample   # scaffold a project's .sdlc/
 ./tkt sync-pack --check --dir ../consumer   # is a consumer repo's pack copy current?
+./tkt agents --json           # state of every agent run (local read, safe to poll)
+
+python3 -m unittest tests.test_run tests.test_agents tests.test_jira_adf
+bash scripts/smoke-agents.sh      # live run -> dead/halted, end to end
+bash scripts/smoke-sync-pack.sh
 ```
 
-There is **no test suite, linter config, or Makefile** in this repo. "Validation"
-of an adapter means running `tkt doctor` / the read verbs live against a real backend
-(see each provider's "Validation status" in `README.md`). When adding code, exercise
-it by running the actual verbs against a configured backend rather than expecting CI.
-`scripts/smoke-sync-pack.sh` is the one exception — it smoke-tests `sync-pack`.
+There is **no linter config, no Makefile, and no CI** in this repo — nothing runs
+the tests automatically. `tests/` is a stdlib `unittest` suite covering the run
+driver's state machine (`test_run.py`), the `tkt agents` readers (`test_agents.py`),
+and the Jira Markdown→ADF converter (`test_jira_adf.py`); `unittest discover` does
+not work (no `tests/__init__.py`), so name the modules. Nothing under `adapters/`
+is covered: "validation" of an adapter still means running `tkt doctor` / the read
+verbs live against a real backend (see each provider's "Validation status" in
+`README.md`). The two `scripts/smoke-*.sh` scripts cover `sync-pack` and `agents`
+end to end.
 
 `tkt` locates its own `core/`/`adapters/` relative to the script (`tkt:12`), so it
 runs from any cwd and a PATH symlink is fine.
@@ -73,6 +82,19 @@ Two layers, connected only by the verb contract and the normalized schema:
     plus the `[build]`-table rewrite `init` applies to the copied example config.
     Advisory only: a key the project doesn't declare keeps the example's value.
   - `scaffold.py` — implements `tkt init`.
+  - `run.py` — the `tkt run` external loop driver, and the only writer of run
+    state: phase markers (ticket comment + `marker.json` mirror), the `run.log`
+    JSONL, the STOP file, and `heartbeat.json`. The heartbeat runs on a daemon
+    thread because a harness invocation blocks for up to `invocation_timeout`;
+    a beat written only at loop boundaries could be an hour stale and could not
+    distinguish "working" from "crashed". `run_root()` resolves where all of it
+    lives, honouring `[run].state_dir` so repos sharing a board can share a
+    run-state root.
+  - `agents.py` — the read side: `tkt agents`, plus the row `tkt run --status`
+    prints. Imports from `run.py`, never the reverse. Contract: **no adapter is
+    constructed and no backend call is made** unless the caller passes
+    `--enrich`, so a TUI can poll it once a second. `resolve_state()` holds the
+    running/stalled/dead/blocked/halted/idle table.
 - **`adapters/`** — one file per backend, each subclassing `adapters/base.Adapter`.
   - `base.py` is the contract: required `@abstractmethod` verbs (whoami, list, view,
     transition, comment, blockers, worklog, lane_time, doctor) plus **optional** verbs
@@ -94,8 +116,10 @@ are in `AGENTS.md`.
 Beyond the obvious fields, `Ticket` carries `status` (provider lane, verbatim) alongside
 `status_role` (canonical role), `type_class` (`full_sdlc` | `deliverable` | `unknown`),
 the date fields `due` / `scheduled` / `completed`, and `agent_status` (board agent state:
-`idle` | `processing` | `waiting` | `done` | `blocked`, or empty). Adapters that can't
-store a field leave it at its default rather than faking it.
+`idle` | `processing` | `waiting` | `done` | `blocked`, or empty) alongside
+`agent_status_at` (when that state last actually changed, ISO-8601 UTC; stamped by
+the adapter, never passed in, so re-asserting the same state doesn't reset it).
+Adapters that can't store a field leave it at its default rather than faking it.
 
 ## Adding a provider
 

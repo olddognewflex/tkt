@@ -17,6 +17,9 @@ git_init() {
   git -C "$1" init -q
   git -C "$1" config user.email "smoke@example.com"
   git -C "$1" config user.name "smoke"
+  # Throwaway repos must not inherit a global signing key: committing would
+  # block on its passphrase prompt.
+  git -C "$1" config commit.gpgsign false
 }
 
 C="$(mktemp -d)"

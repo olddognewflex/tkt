@@ -42,20 +42,26 @@ Then read this file fully before doing anything else in this session.
 - `tkt init` — scaffolds `.sdlc/` from `examples/config.<provider>.toml` and seeds the
   `[build]` table from whatever the target project already declares.
 - `tkt run` — the external loop driver: one pipeline phase per harness invocation, with
-  resume markers, a STOP file, iteration and attempt caps, and three enforced gates.
-- 58 offline unit tests (`tests/test_run.py`, `tests/test_jira_adf.py`) plus
-  `scripts/smoke-sync-pack.sh`, all runnable with a bare Python 3.11+ interpreter.
+  resume markers, a heartbeat file, a STOP file, iteration and attempt caps, and three
+  enforced gates.
+- `tkt agents` — read-only view of every run at once, for a dashboard or TUI. Reads
+  only the filesystem; contacts a backend only with `--enrich`.
+- 87 offline unit tests (`tests/test_run.py`, `tests/test_agents.py`,
+  `tests/test_jira_adf.py`) plus `scripts/smoke-sync-pack.sh` and
+  `scripts/smoke-agents.sh`, all runnable with a bare Python 3.11+ interpreter.
 
 **Not yet built:**
 - No CI. `.github/` contains only Copilot prompt translations — there are no workflows,
   so nothing runs the tests or the smoke script automatically.
 - No packaging or distribution. There is no packaging manifest, no build script, and
   no Makefile in the tree; installation is clone-and-symlink.
-- No adapter tests. The suite covers the run driver's state machine and the Jira
-  Markdown→ADF converter; every code path under `adapters/` is validated by hand
-  against a live backend.
-- `agent_status` is persisted only by the `markdown` adapter; the other four leave it
-  at its default.
+- No adapter tests. The suite covers the run driver's state machine, the `tkt agents`
+  readers, and the Jira Markdown→ADF converter; every code path under `adapters/` is
+  validated by hand against a live backend.
+- `agent_status` (and its `agent_status_at` stamp) is persisted only by the `markdown`
+  adapter; the other four leave it at its default.
+- Run state lives beside the config that started the run unless `[run].state_dir` says
+  otherwise, so repos sharing one board do not share one run-state root by default.
 - The verb contract has no "list comments" verb, which is why run-state resume needs a
   local mirror on every backend except `markdown`.
 
