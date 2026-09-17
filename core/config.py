@@ -30,6 +30,18 @@ class Config:
         self.roles: dict[str, str] = dict(board.get("roles", {}))
         self._lane_to_role = {lane: role for role, lane in self.roles.items()}
         self.ownership: dict[str, str] = dict(board.get("ownership", {}))
+        # Roles whose transition also closes the ticket on backends that have a
+        # terminal state (GitHub issues). Empty = never close; adapters with no
+        # notion of closing ignore it, so one [board] block can serve several repos.
+        raw_close = board.get("close_on", [])
+        if not isinstance(raw_close, list):
+            raise ConfigError('[board].close_on must be an array of roles, e.g. ["done"]')
+        self.close_on: list[str] = [str(r) for r in raw_close]
+        unknown = [r for r in self.close_on if r not in self.roles]
+        if unknown:
+            raise ConfigError(
+                f"[board].close_on names roles not in [board.roles]: {', '.join(unknown)}"
+            )
 
         it = data.get("issue_types", {})
         self.full_sdlc = set(it.get("full_sdlc", []))

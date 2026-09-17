@@ -38,6 +38,11 @@ blocked      = "Blocked"
 revise       = "Revise"
 cancelled    = "Cancelled"
 
+# Roles whose transition also closes the GitHub issue (reopened when moved back
+# to any other role). `cancelled` closes with --reason "not planned". Omit to leave
+# issues open; adapters without a terminal state ignore this key.
+# close_on = ["done", "cancelled"]
+
 [board.ownership]
 "todo->in_progress"   = "agent"
 "in_progress->review" = "agent"

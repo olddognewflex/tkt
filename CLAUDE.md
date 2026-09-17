@@ -47,9 +47,9 @@ Two layers, connected only by the verb contract and the normalized schema:
     load an adapter. Input validation for dates and `--agent-status` lives here so a
     typo fails before it reaches a backend.
   - `config.py` — loads `.sdlc/config.toml`. Discovery order: `--config` → `$TKT_CONFIG`
-    → nearest `.sdlc/config.toml` walking up from cwd. Owns role↔lane mapping, issue-type
-    routing (`full_sdlc` vs `deliverable`), named queries, the backend-agnostic priority
-    ordering, and dotted-path `get()`.
+    → nearest `.sdlc/config.toml` walking up from cwd. Owns role↔lane mapping, the
+    `close_on` terminal roles, issue-type routing (`full_sdlc` vs `deliverable`), named
+    queries, the backend-agnostic priority ordering, and dotted-path `get()`.
   - `registry.py` — `provider name → (module, class)`, **lazy-imported** so one adapter's
     missing optional dep can't break the others.
   - `schema.py` — `Ticket` / `Worklog` / `Check` dataclasses + `to_dict()` (the JSON shape).

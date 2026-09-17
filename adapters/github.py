@@ -261,6 +261,7 @@ class GithubAdapter(Adapter):
 
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
+        role = self.config.lane_to_role(lane)  # caller may have passed the lane name
         if self.board == "projectv2":
             proj = self._project()
             oid = proj["options"].get(lane)
@@ -271,6 +272,7 @@ class GithubAdapter(Adapter):
             self._gh("project", "item-edit", "--id", item_id,
                      "--project-id", proj["id"], "--field-id", proj["status_field_id"],
                      "--single-select-option-id", oid)
+            self._sync_issue_state(key, role)
             return
         # labels mode: swap the Status: label
         cur = self.view(key)
@@ -279,6 +281,29 @@ class GithubAdapter(Adapter):
         if existing and existing != lane:
             args += ["--remove-label", f"{self.status_label_prefix}{existing}"]
         self._gh(*args)
+        self._sync_issue_state(key, role)
+
+    def _sync_issue_state(self, key, role):
+        """Close or reopen the issue so its open/closed state agrees with the board.
+
+        Driven by `[board].close_on`. A board status is only a label or a project
+        field; GitHub's own issue list shows open/closed, and that is the surface
+        people read. Runs after the board update, so a failed close leaves the
+        board moved and the issue still open; a retry is idempotent (same label,
+        then close) and heals it. Skipped entirely when `close_on` is unset.
+        """
+        close_on = self.config.close_on
+        if not close_on:
+            return
+        state = self._gh_json("issue", "view", key, "--repo", self.repo,
+                              "--json", "state").get("state", "")
+        if role in close_on:
+            if state != "CLOSED":
+                # gh spells it with a space: {completed|not planned|duplicate}
+                reason = "not planned" if role == "cancelled" else "completed"
+                self._gh("issue", "close", key, "--repo", self.repo, "--reason", reason)
+        elif state == "CLOSED":
+            self._gh("issue", "reopen", key, "--repo", self.repo)
 
     def comment(self, key, body):
         self._gh("issue", "comment", key, "--repo", self.repo, "--body", body)

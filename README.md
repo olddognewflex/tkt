@@ -216,6 +216,11 @@ scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode
   (`gh project item-list --query`); labels → issue search (`gh issue list --search`).
 - **No time tracking** — `worklog`/`lane-time` are no-ops; set
   `[timetracking].provider = "none"`.
+- **Closing issues** — a board status is only a label or project field; the issue
+  stays open unless `[board].close_on` lists the role, e.g.
+  `close_on = ["done", "cancelled"]`. A transition into a listed role runs
+  `gh issue close` (`--reason "not planned"` for `cancelled`); moving a closed
+  issue back to any other role reopens it. Unset = never close/reopen.
 
 Validation status: labels mode is validated live (reads); projectv2 mode is built
 against the documented `gh project` JSON and validate-after-scope-refresh.
