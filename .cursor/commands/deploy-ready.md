@@ -8,17 +8,16 @@ Pick up tickets in `deploy_ready`, annotate QA lane times, merge the PR, watch t
    ```shell
    tkt list --query deploy_ready --json
    ```
-1.5. After-hours hold (before any merge/staging step). Optional `[schedule]` config table;
-   a missing table (exit 4) disables the check:
+1.5. After-hours hold (before any merge/staging step). Optional `[schedule]` config
+   table; `tkt schedule` owns the window maths (exit 2 = misconfigured: fail closed and hold):
    ```shell
-   AH_LABEL=$(tkt cfg schedule.after_hours_label 2>/dev/null) || AH_LABEL=""
-   # also: schedule.business_hours (HH:MM-HH:MM; start > end = overnight window),
-   # schedule.timezone (IANA), schedule.days (lowercase `date +%a` names)
+   SCHED=$(tkt schedule --json)   # {"label": ..., "in_window": true|false, ...}
    ```
-   If the ticket's labels contain `$AH_LABEL` and the current time is inside the
-   business-hours window: comment the ticket, echo `HOLD`, and stop before
-   merge/staging — under `tkt run`, report outcome `gate`. A re-run outside the
-   window proceeds normally from the top.
+   Under `tkt run KEY` consider only KEY. During business hours (`in_window` true), drop tickets whose labels contain
+   `label` and take the next eligible ticket; held tickets wait without blocking
+   others. Only when every deploy_ready ticket is held: comment each, echo `HOLD`,
+   and stop before merge/staging — under `tkt run`, report outcome `gate`. A
+   re-run outside the window proceeds normally from the top.
 2. Annotate QA-lane times retroactively:
    ```shell
    for ROLE in qa_ready qa deploy_ready; do
@@ -36,7 +35,7 @@ Pick up tickets in `deploy_ready`, annotate QA lane times, merge the PR, watch t
    Poll until `MERGED`.
 5. Watch staging workflow matched by merge commit SHA.
 6. Comment and hand off to QE.
-7. Present production deploy gate (manual).
+7. Present production deploy gate (manual); if `tkt schedule` reports business hours and any deploy_ready ticket carries the after-hours label, warn to trigger it only outside the window.
 8. Monitor production deploy once triggered.
 9. Transition to `done` only if prod workflow truly deploys; otherwise leave in `deploy_ready`.
 

@@ -14,7 +14,7 @@ Find the right ticket to work next. All ticketing access goes through `tkt`.
 4. Filter out blocked tickets with `tkt blockers KEY --json`.
 5. Auto-select Tier 1/2 assigned work; recommend Tier 3/4/5 and wait for human pick.
 
-After-hours deferral (optional): if `tkt cfg schedule.after_hours_label` returns a label (exit 4 = no `[schedule]` table = off), candidates carrying it are deferred during `schedule.business_hours` (start > end = overnight) on `schedule.days` in `schedule.timezone` — Tier 1/2 auto-select prefers non-deferred candidates, falling back to a deferred one only when no other exists (note it — deploy holds until after hours); Tier 3/4/5 never hard-filter — sort deferred last and mark the After-hours? column.
+After-hours deferral (optional): `tkt schedule --json` reports `label` and `in_window` for the `[schedule]` table (exit 2 = misconfigured: fail closed and defer); ask it in the same step that partitions the candidates. During business hours, candidates carrying the label are deferred — Tier 1/2 auto-select prefers non-deferred candidates, falling back to a deferred one only when no other exists (note it — deploy holds until after hours); Tier 3/4/5 never hard-filter — sort deferred last and mark the After-hours? column.
 
 Recommendation columns: Key, Type, type_class, Priority, Summary, Effort (S/M/L), Est. tokens, Est. wall time, Blockers?, After-hours?, Why this one.
 

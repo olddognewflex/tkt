@@ -26,7 +26,7 @@ Find the right ticket to work next. All ticketing access goes through `tkt`.
 
 ## After-hours deferral (optional)
 
-Configured via the `[schedule]` table: `tkt cfg schedule.after_hours_label` (exit 4 = no table = feature off), `schedule.business_hours` (HH:MM-HH:MM; start > end = overnight window), `schedule.timezone` (IANA), `schedule.days`. Compute in/out of window once before the tier loop. During business hours, candidates carrying the label are deferred: Tier 1/2 auto-select picks the first non-deferred candidate, falling back to the first deferred one only when no other exists (note it — deploy holds until after hours); Tier 3–5 never hard-filter — sort deferred last and mark the `After-hours?` column.
+Configured via the `[schedule]` table and evaluated by `tkt schedule --json`, which reports `label` and `in_window` (exit 2 = misconfigured: fail closed and defer). Ask it in the same step that partitions the candidates, since that step may run in a fresh shell. During business hours, candidates carrying the label are deferred: Tier 1/2 auto-select picks the first non-deferred candidate, falling back to the first deferred one only when no other exists (note it — deploy holds until after hours); Tier 3–5 never hard-filter — sort deferred last and mark the `After-hours?` column.
 
 ## Recommendation output
 

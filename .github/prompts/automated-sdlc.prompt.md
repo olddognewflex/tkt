@@ -10,7 +10,7 @@ End-to-end pipeline from "what should I work on?" to "shipped." Orchestrates sub
 
 ## Pipeline
 
-1. **select-ticket** — find next work; defers tickets carrying the after-hours label (`tkt cfg schedule.after_hours_label`, optional `[schedule]` table) during business hours when other workable candidates exist
+1. **select-ticket** — find next work; defers tickets carrying the after-hours label (optional `[schedule]` table, evaluated by `tkt schedule`) during business hours when other workable candidates exist
 2. **triage-ticket** → `in_progress`
 3. Route by `type_class`:
    - `full_sdlc` → continue
@@ -23,7 +23,7 @@ End-to-end pipeline from "what should I work on?" to "shipped." Orchestrates sub
 9. **respond-to-review** — approve loop
 10. **deploy-preview** — confirm preview URL
 11. Promote to `qa_ready` and stop for human QA
-12. **deploy-ready** — merge, staging, prod gate; hard-holds after-hours-labeled tickets (gate outcome, before merge) during the configured business hours
+12. **deploy-ready** — merge, staging, prod gate; holds after-hours-labeled tickets before merge during business hours while other tickets proceed (`gate` only when nothing else can)
 
 ## Rules
 

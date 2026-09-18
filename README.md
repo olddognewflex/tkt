@@ -155,6 +155,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample] [--no-detect-build]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
+| `tkt schedule [--at ISO]` | after-hours window from `[schedule]`: `enabled`, `in_window`, `label`, local time and day. Config + clock only; exit 2 on a malformed table. `--at` evaluates another time. | text / `--json` |
 | `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every agent run at once. Filesystem-only — no backend call without `--enrich`; empty board is exit 0. | table / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
 
@@ -322,8 +323,10 @@ originals — every ticketing/board call now goes through `tkt`):
 | `hotfix-revert` | fast-track prod revert (uses `tkt create`/`link`) |
 | `automated-sdlc` | orchestrator across all of the above |
 
-Tickets labeled after-hours (optional `[schedule]` config table) are deferred by
-`select-ticket` during business hours and hard-held before merge by `deploy-ready`.
+Tickets labeled after-hours (optional `[schedule]` config table, evaluated by
+`tkt schedule`) are deferred by `select-ticket` during business hours. `deploy-ready`
+holds them before merge while other tickets proceed, and its prod gate warns when
+a release would ship one inside the window.
 
 `agents/ticket-researcher.md` is the read-only lookup subagent (provider-agnostic
 port of the old `jira-researcher`).

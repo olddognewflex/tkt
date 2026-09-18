@@ -65,9 +65,11 @@ production_workflow = "deploy-production.yml"
 
 # [schedule]                          # optional; absent = no after-hours handling
 # after_hours_label = "after-hours"   # board label: ticket must deploy outside business hours
-# business_hours = "09:00-18:00"      # HH:MM-HH:MM local window (start > end = overnight)
-# timezone = "America/New_York"       # IANA name; absent = system local time
-# days = "mon tue wed thu fri"        # lowercase `date +%a` names, space-separated
+# business_hours = "09:00-18:00"      # start inclusive, end exclusive; "00:00-24:00" = all day;
+#                                     # start > end = overnight, counted on the day it starts
+# timezone = "America/New_York"       # IANA name, validated; absent = system local time
+# days = ["mon", "tue", "wed", "thu", "fri"]   # or "mon tue wed"; default mon-fri
+# Check it with `tkt schedule` (exit 2 = malformed; skills then fail closed).
 
 [build]
 build     = "pnpm turbo build --filter={pkg}"
