@@ -2,11 +2,12 @@
 on read verbs emits the normalized shape for skills to parse."""
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 
 from .config import Config
-from .errors import TktError, UsageError
+from .errors import ConfigError, TktError, UsageError
 from .registry import get_adapter
 from .schema import Ticket
 
@@ -189,6 +190,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="print the prompt and command without invoking the harness")
 
+    sp = add("agents")
+    sp.add_argument("--stale-after", type=int, default=None, dest="stale_after",
+                    help="seconds without a heartbeat before a run counts as "
+                         "stalled (default 45, or 3x [run].heartbeat_interval "
+                         "when that is larger)")
+    sp.add_argument("--dir", action="append", default=[], dest="dirs",
+                    help="project root to scan; repeatable. Default: the run "
+                         "root of the loaded config")
+    sp.add_argument("--enrich", action="store_true",
+                    help="add board fields (summary, agent_status) — the only "
+                         "option here that contacts the backend")
+    sp.add_argument("--all", action="store_true", dest="include_all",
+                    help="include idle dirs and the _select placeholder")
+
     sp = add("cfg")
     sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo")
     sp.add_argument("--pkg", default="", help="substitute {pkg} in the value")
@@ -283,7 +298,21 @@ def main(argv: list[str]) -> int:
                      for n in raw.split(",") if n.strip()]
             return sync_pack(args.dir, args.all_harnesses, args.check, names)
 
-        config = Config.load(args.config)
+        # `agents --dir` is the escape hatch for a caller (a TUI) started in a
+        # directory with no config of its own: the named roots carry theirs.
+        # `--enrich` does need a config (it builds an adapter). Only "nothing
+        # found by walking up from cwd" is tolerated: an explicit --config or
+        # $TKT_CONFIG that fails, or a found config that is invalid, still errors.
+        if (args.verb == "agents" and args.dirs and not args.enrich
+                and not args.config and not os.environ.get("TKT_CONFIG")):
+            try:
+                found = Config._find(None)
+            except ConfigError:
+                config = None
+            else:
+                config = Config.load(str(found))
+        else:
+            config = Config.load(args.config)
 
         # `lane` and `cfg` are pure config resolution — no adapter/backend needed.
         if args.verb == "lane":
@@ -303,6 +332,28 @@ def main(argv: list[str]) -> int:
             else:
                 print(json.dumps(val) if args.json else val)
             return 0
+
+        # `agents` is a filesystem read of run state — no adapter unless the
+        # caller asked to enrich rows from the board.
+        if args.verb == "agents":
+            from .agents import cmd_agents
+            stale = args.stale_after      # None = per-root default, see cmd_agents
+            if stale is not None and stale < 0:
+                raise UsageError("--stale-after must be >= 0")
+            return cmd_agents(config, args.dirs, stale, args.include_all,
+                              args.enrich, args.json)
+
+        # `run --status` / `run --stop` read and write local run state only.
+        # Dispatched above adapter construction so a project whose backend is
+        # misconfigured or unreachable can still be asked, and stopped.
+        if args.verb == "run" and (args.stop or args.status):
+            from .run import cmd_status, cmd_stop
+            if not args.key:
+                flag = "--stop" if args.stop else "--status"
+                raise UsageError(f"run {flag} requires a ticket KEY")
+            if args.stop:
+                return cmd_stop(config, args.key)
+            return cmd_status(config, args.key)
 
         adapter = get_adapter(config)
 
@@ -425,15 +476,7 @@ def main(argv: list[str]) -> int:
                 _print_ticket_human(t)
 
         elif args.verb == "run":
-            from .run import cmd_run, cmd_status, cmd_stop
-            if args.stop:
-                if not args.key:
-                    raise UsageError("run --stop requires a ticket KEY")
-                return cmd_stop(config, args.key)
-            if args.status:
-                if not args.key:
-                    raise UsageError("run --status requires a ticket KEY")
-                return cmd_status(config, args.key)
+            from .run import cmd_run     # --status/--stop were handled above
             return cmd_run(config, args.key, args.max_iterations, args.dry_run)
 
         elif args.verb == "doctor":

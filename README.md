@@ -152,6 +152,7 @@ Every adapter implements these. Read verbs accept `--json` (either side of the v
 | `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample] [--no-detect-build]` | scaffold `.sdlc/config.toml` (+ optionally link the pack) | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
+| `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every agent run at once. Filesystem-only — no backend call without `--enrich`; empty board is exit 0. | table / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
 
 `create`/`link`/`edit`/`apply` are optional verbs — adapters opt in (markdown
@@ -357,7 +358,7 @@ ticket, and loops until a gate, a STOP signal, or a cap.
 ```sh
 tkt run TKT-1                   # run/resume TKT-1's pipeline
 tkt run                         # P0 select-ticket first, then proceed
-tkt run --status TKT-1          # print the current phase marker
+tkt run --status TKT-1          # print this run's state (local first; needs no adapter)
 tkt run --stop TKT-1            # halt at the next iteration boundary
 tkt run --dry-run TKT-1         # print the prompt without invoking
 tkt run --max-iterations 5 TKT-1
@@ -371,6 +372,8 @@ harness_cmd = "claude -p {prompt} --permission-mode acceptEdits"
 max_iterations = 30        # total invocations per run
 max_phase_attempts = 3     # per-phase retry cap
 invocation_timeout = 3600  # seconds per harness invocation
+heartbeat_interval = 15    # seconds between beat-file writes; 0 disables
+state_dir = ".sdlc/state"  # where run state lives (see `tkt agents`)
 ```
 
 `{prompt}` is replaced with the phase prompt. Per-harness examples:
@@ -415,6 +418,59 @@ is markdown-only** — elsewhere, a run resumed from a fresh worktree starts ove
   is never performed by the driver.
 - **Production deploy:** P10 is blocked unless `[board.ownership]` explicitly grants
   `"deploy_ready->done" = "agent"`.
+
+### Watching runs — `tkt agents`
+
+`tkt run --status KEY` answers for one ticket. `tkt agents` answers for all of
+them at once, which is what a dashboard or TUI needs:
+
+```sh
+tkt agents                      # table of every run and what it is doing
+tkt agents --json               # same, machine-readable
+tkt agents --stale-after 90     # widen the "no beat yet" tolerance
+tkt agents --dir ../other-repo  # scan another project root; repeatable
+tkt agents --enrich             # add summary/status/agent_status from the board
+tkt agents --all                # include idle dirs and the _select placeholder
+```
+
+It is a **filesystem read**: no adapter is constructed and no backend call is
+made unless you pass `--enrich`, so polling it once a second costs nothing and
+keeps working when the backend is unreachable. An empty board is exit 0 with an
+empty list, never an error. `--dir` also works from a directory that has no
+`.sdlc/config.toml` of its own, so a TUI can be launched from anywhere.
+
+Without `--stale-after`, a run reads as stalled after 45s with no beat, or after
+three missed beats when `[run].heartbeat_interval` is slower than that, resolved
+per scanned project. Each row carries the `stale_after` it was judged against;
+the top-level value is the largest window in use. `dead`
+needs a pid check on the same host: a run on another host, or one whose pid has
+since been reused, reads `stalled` instead. `tkt run --status KEY` and
+`tkt run --stop KEY` likewise need no adapter; status falls back to the ticket's
+marker comment only when there is no local state, and a failure there is ignored.
+
+While a run is live the driver writes `.sdlc/state/run/<key>/heartbeat.json`
+every `heartbeat_interval` seconds from a background thread — required, because
+a harness invocation blocks for up to `invocation_timeout` (an hour by default),
+and a beat that stale could not distinguish "still working" from "died". The
+file is removed on a clean exit, so its absence is what marks a run as no longer
+live. Each run reports one of:
+
+| state | meaning |
+|---|---|
+| `running` | beat is fresh |
+| `stalled` | beat is stale but the process is alive, or lives on another host |
+| `dead` | beat is stale and the process is gone, or a mid-loop marker with no driver |
+| `blocked` | last marker was `blocked` |
+| `halted` | last marker was `halted`/`gate` — a clean stop |
+| `idle` | a run dir with no state (only shown with `--all`) |
+
+Rows carry `phase`/`phase_name`, `attempt`, `iteration`, `pid`/`host`,
+`beat_age`, `run_age`, `phase_age`, and `stop_requested` (a `*` after the state
+in the table).
+
+**Multi-repo:** run state lives beside the config that started it. If several
+repos share one board, either point their `[run].state_dir` at one shared path
+so `tkt agents` sees everything from a single root, or pass a repeated `--dir`.
 - **Timeout:** the per-invocation timeout bounds a hung harness.
 
 ### Result-file contract
@@ -479,6 +535,8 @@ core/
   query.py     shared JQL-subset evaluator (markdown + linear + openkanban)
   toolchain.py detect build/test/typecheck/lint commands for `tkt init`
   ticketdoc.py canonical full-ticket markdown doc parser (for `tkt apply`)
+  run.py       `tkt run` external loop driver + run-state writers
+  agents.py    `tkt agents` — read-only view of every run's state
   scaffold.py  `tkt init` scaffolder
   errors.py    typed errors -> exit codes
 adapters/

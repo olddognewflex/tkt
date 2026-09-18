@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,6 +71,7 @@ MARKER_RE = re.compile(
 DEFAULT_MAX_ITERATIONS = 30
 DEFAULT_MAX_PHASE_ATTEMPTS = 3
 DEFAULT_INVOCATION_TIMEOUT = 3600
+DEFAULT_HEARTBEAT_INTERVAL = 15
 
 
 # ---- Run config access -------------------------------------------------------
@@ -76,14 +79,19 @@ DEFAULT_INVOCATION_TIMEOUT = 3600
 class RunConfig:
     """Parsed [run] section from .sdlc/config.toml."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, require_harness: bool = True):
         run = config._d.get("run", {})
         self.harness_cmd: str = run.get("harness_cmd", "")
         self.max_iterations: int = int(run.get("max_iterations", DEFAULT_MAX_ITERATIONS))
         self.max_phase_attempts: int = int(run.get("max_phase_attempts", DEFAULT_MAX_PHASE_ATTEMPTS))
         self.invocation_timeout: int = int(run.get("invocation_timeout", DEFAULT_INVOCATION_TIMEOUT))
+        self.heartbeat_interval: int = int(
+            run.get("heartbeat_interval", DEFAULT_HEARTBEAT_INTERVAL))
 
-        if not self.harness_cmd:
+        # Read-only callers (status, stop) pass require_harness=False: asking
+        # for a run's state must not fail on a project that never configured a
+        # harness.
+        if require_harness and not self.harness_cmd:
             raise ConfigError(
                 "[run].harness_cmd is required for `tkt run`. "
                 "Set it in .sdlc/config.toml, e.g.:\n"
@@ -176,11 +184,29 @@ def write_ticket_marker(adapter, key: str, state: dict[str, Any],
 
 # ---- Local state management --------------------------------------------------
 
-def _state_dir(config: Config, key: str) -> Path:
-    """Resolve .sdlc/state/run/<key>/ relative to the project root."""
+def run_root(config: Config) -> Path:
+    """Resolve the directory that holds every run's state dir.
+
+    Defaults to <project root>/.sdlc/state/run. `[run].state_dir` overrides the
+    `.sdlc/state` part (relative paths resolve against the project root), so a
+    setup that shares one board across several repos can share one run-state
+    root too and see every run from a single place.
+    """
     cfg_dir = config.path.parent
     base = cfg_dir.parent if cfg_dir.name == ".sdlc" else cfg_dir
-    return base / ".sdlc" / "state" / "run" / key
+    override = str(config._d.get("run", {}).get("state_dir", "") or "")
+    if override:
+        root = Path(override).expanduser()
+        if not root.is_absolute():
+            root = base / root
+    else:
+        root = base / ".sdlc" / "state"
+    return root / "run"
+
+
+def _state_dir(config: Config, key: str) -> Path:
+    """Resolve one ticket's run state dir under `run_root`."""
+    return run_root(config) / key
 
 
 def ensure_state_dir(config: Config, key: str) -> Path:
@@ -201,6 +227,125 @@ def create_stop_file(config: Config, key: str) -> Path:
     stop = d / "STOP"
     stop.touch()
     return stop
+
+
+# ---- Heartbeat ---------------------------------------------------------------
+
+def heartbeat_path(state_dir: Path) -> Path:
+    return state_dir / "heartbeat.json"
+
+
+def read_heartbeat(state_dir: Path) -> dict[str, Any] | None:
+    """Read a run's heartbeat, or None if there is none / it is unreadable."""
+    path = heartbeat_path(state_dir)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (ValueError, OSError):
+        # ValueError covers bad JSON and non-UTF-8 bytes alike; one damaged
+        # file must not take the whole listing down with a traceback.
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def clear_heartbeat(state_dir: Path) -> None:
+    try:
+        heartbeat_path(state_dir).unlink()
+    except OSError:
+        pass
+
+
+class Heartbeat:
+    """Stamps heartbeat.json on a timer so a reader can tell a live run from a
+    crashed one.
+
+    A background thread is required rather than a write per loop iteration:
+    `invoke_harness` blocks for up to `invocation_timeout` (an hour by
+    default), and a beat that stale cannot distinguish "still working" from
+    "died three phases ago".
+    """
+
+    def __init__(self, state_dir: Path, key: str, interval: float,
+                 run_started: str):
+        self.state_dir = state_dir
+        self.interval = interval
+        self.state: dict[str, Any] = {
+            "key": key,
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "run_started": run_started,
+            "phase": "",
+            "phase_started": run_started,
+            "attempt": 1,
+            "iteration": 0,
+        }
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        # The beat thread and the driver's own update()/rebind() both write, and
+        # they share one temp path. Unlocked, os.replace can publish a file the
+        # other thread has just truncated, and a 1Hz reader sees a torn beat —
+        # which reads as "no heartbeat", i.e. a live run reported dead.
+        self._lock = threading.Lock()
+        self._stopped = False
+
+    def write(self) -> None:
+        """Rewrite the beat file atomically — a TUI polls this at 1Hz and must
+        never catch a half-written file."""
+        with self._lock:
+            self._write_locked()
+
+    def _write_locked(self) -> None:
+        if self._stopped:
+            return      # a beat that lost the race with stop() must not revive the file
+        payload = dict(self.state, beat=_now_iso())
+        tmp = self.state_dir / f".heartbeat.{os.getpid()}.tmp"
+        try:
+            tmp.write_text(json.dumps(payload, separators=(",", ":")))
+            os.replace(tmp, heartbeat_path(self.state_dir))
+        except OSError:
+            # A missed beat costs liveness fidelity, never the run itself.
+            pass
+
+    def update(self, **fields: Any) -> None:
+        with self._lock:
+            self.state.update(fields)
+            self._write_locked()
+
+    def rebind(self, state_dir: Path, key: str) -> None:
+        """Follow the run into its real state dir once P0 has picked a key.
+
+        Clear, swap and rewrite happen under the lock, so a beat already in
+        flight cannot land back in the old dir after it was cleared.
+        """
+        with self._lock:
+            clear_heartbeat(self.state_dir)
+            self.state_dir = state_dir
+            self.state["key"] = key
+            self._write_locked()
+
+    def start(self) -> None:
+        if self.interval <= 0 or self._thread is not None:
+            return
+        self.write()
+        self._thread = threading.Thread(target=self._beat, daemon=True,
+                                        name="tkt-heartbeat")
+        self._thread.start()
+
+    def _beat(self) -> None:
+        while not self._stop.wait(self.interval):
+            self.write()
+
+    def stop(self) -> None:
+        """Halt the timer and remove the beat file — its absence is what marks
+        the run as no longer live."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
+        with self._lock:
+            self._stopped = True
+            clear_heartbeat(self.state_dir)
 
 
 def read_result_file(state_dir: Path) -> dict[str, Any] | None:
@@ -359,6 +504,10 @@ class RunDriver:
         self.attempt: int = 1
         self.iteration: int = 0
         self.state_dir: Path | None = None
+        self.run_started: str = _now_iso()
+        self.phase_started: str = self.run_started
+        self.hb: Heartbeat | None = None
+        self._stamped_phase: str = ""
 
     def run(self) -> int:
         """Execute the driver loop. Returns exit code."""
@@ -371,17 +520,14 @@ class RunDriver:
             self.phase = "P0"
             self.attempt = 1
 
-        return self._loop()
-
-    def status(self) -> dict[str, Any]:
-        """Return current status without running."""
-        if not self.key:
-            return {"error": "no ticket key specified"}
-        marker = read_ticket_marker(self.adapter, self.key,
-                                   _state_dir(self.config, self.key))
-        if marker is None:
-            return {"key": self.key, "phase": None, "status": "no run marker found"}
-        return {"key": self.key, **marker}
+        try:
+            return self._loop()
+        finally:
+            # _loop returns from a dozen places; a stale beat file would leave
+            # the run looking alive forever, so clean up in one guarded spot.
+            if self.hb is not None:
+                self.hb.stop()
+                self.hb = None      # a stopped Heartbeat never beats again
 
     def _init_state(self) -> None:
         """Initialize state dir for the current key."""
@@ -433,6 +579,24 @@ class RunDriver:
                 self.state_dir = ensure_state_dir(self.config, "_select")
 
             assert self.state_dir is not None
+
+            if self.hb is None:
+                self.hb = Heartbeat(self.state_dir, self.key or "_select",
+                                    self.run_config.heartbeat_interval,
+                                    self.run_started)
+                self.hb.start()
+            elif self.hb.state_dir != self.state_dir:
+                # P0 picked a key, so the run moved out of the _select dir.
+                self.hb.rebind(self.state_dir, self.key or "_select")
+
+            # The only place phase duration is stamped, so no phase mutation
+            # site can forget to reset it.
+            if self.phase != self._stamped_phase:
+                self.phase_started = _now_iso()
+                self._stamped_phase = self.phase
+            self.hb.update(phase=self.phase, attempt=self.attempt,
+                           iteration=self.iteration,
+                           phase_started=self.phase_started)
 
             # Check STOP file.
             if check_stop_file(self.state_dir):
@@ -488,6 +652,9 @@ class RunDriver:
             # --- Invoke harness ---
             self.iteration += 1
             started = _now_iso()
+            # Re-stamp after the increment: the pre-flight beat above still
+            # carried the previous iteration's number.
+            self.hb.update(iteration=self.iteration)
             self._log(
                 f"iteration {self.iteration}/{self.max_iterations}, "
                 f"phase {self.phase}, attempt {self.attempt}"
@@ -612,6 +779,8 @@ class RunDriver:
             "attempt": self.attempt,
             "outcome": "blocked",
             "reason": reason or "max attempts exceeded",
+            "run_started": self.run_started,
+            "phase_started": self.phase_started,
             "updated": _now_iso(),
         }
         marker = _build_marker(state)
@@ -631,6 +800,8 @@ class RunDriver:
             "attempt": self.attempt,
             "outcome": "halted",
             "reason": reason,
+            "run_started": self.run_started,
+            "phase_started": self.phase_started,
             "updated": _now_iso(),
         }
         write_ticket_marker(self.adapter, self.key, state, self.state_dir)
@@ -642,6 +813,8 @@ class RunDriver:
             "attempt": self.attempt,
             "outcome": outcome,
             "next": next_phase,
+            "run_started": self.run_started,
+            "phase_started": self.phase_started,
             "updated": _now_iso(),
         }
         write_ticket_marker(self.adapter, self.key, state, self.state_dir)
@@ -682,11 +855,16 @@ def cmd_run(config: Config, key: str | None, max_iterations: int | None,
 
 
 def cmd_status(config: Config, key: str) -> int:
-    """Entry point for `tkt run --status KEY`."""
-    run_config = RunConfig(config)
-    driver = RunDriver(config, run_config, key=key)
-    status = driver.status()
-    print(json.dumps(status, indent=2))
+    """Entry point for `tkt run --status KEY`.
+
+    Needs neither a RunConfig nor an adapter: a project that never set
+    [run].harness_cmd, or whose backend is misconfigured or unreachable, can
+    still be asked what its runs are doing. Local state answers first. Only
+    when there is none does `status_for_key` try the ticket's marker comment —
+    the cross-machine record — and a failure there is swallowed, not raised.
+    """
+    from .agents import status_for_key
+    print(json.dumps(status_for_key(config, key), indent=2))
     return 0
 
 

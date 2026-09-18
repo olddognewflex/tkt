@@ -26,6 +26,8 @@ from core.run import (
     build_phase_prompt, invoke_harness, _build_marker,
     is_gate_phase, is_production_phase, is_human_owned_transition,
 )
+from core.agents import status_for_key
+from core.errors import ConfigError
 from core.registry import get_adapter
 
 
@@ -680,6 +682,10 @@ class TestDriverLoop(unittest.TestCase):
 
 
 class TestDriverStatus(unittest.TestCase):
+    """`tkt run --status` lives in core/agents.py now — it must answer without
+    a RunConfig (so a project with no harness_cmd can still be queried) and
+    still recover state from the ticket comment when nothing is local."""
+
     def test_status_no_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
@@ -687,9 +693,7 @@ class TestDriverStatus(unittest.TestCase):
             config = Config.load(str(cfg_path))
             board_dir = Path(config.provider_cfg["board_dir"])
             _create_ticket(board_dir, "TKT-1")
-            rc_cfg = RunConfig(config)
-            driver = RunDriver(config, rc_cfg, key="TKT-1")
-            status = driver.status()
+            status = status_for_key(config, "TKT-1")
             self.assertIsNone(status.get("phase"))
 
     def test_status_with_marker(self):
@@ -700,14 +704,29 @@ class TestDriverStatus(unittest.TestCase):
             board_dir = Path(config.provider_cfg["board_dir"])
             _create_ticket(board_dir, "TKT-1")
             adapter = get_adapter(config)
+            # No state_dir: the marker exists only as a ticket comment, which
+            # is what a run resumed in a fresh worktree would find.
             write_ticket_marker(adapter, "TKT-1", {
                 "phase": "P5", "attempt": 1, "outcome": "advance",
                 "next": "P6", "updated": "2026-01-01T00:00:00Z",
             })
-            rc_cfg = RunConfig(config)
-            driver = RunDriver(config, rc_cfg, key="TKT-1")
-            status = driver.status()
+            status = status_for_key(config, "TKT-1")
             self.assertEqual(status["phase"], "P5")
+
+    def test_status_needs_no_harness_cmd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            cfg_path = _write_config(tmp)
+            # Strip harness_cmd: asking for status must not require one.
+            text = cfg_path.read_text()
+            cfg_path.write_text("\n".join(
+                ln for ln in text.splitlines() if "harness_cmd" not in ln) + "\n")
+            config = Config.load(str(cfg_path))
+            board_dir = Path(config.provider_cfg["board_dir"])
+            _create_ticket(board_dir, "TKT-1")
+            with self.assertRaises(ConfigError):
+                RunConfig(config)
+            self.assertEqual(status_for_key(config, "TKT-1")["state"], "idle")
 
 
 if __name__ == "__main__":

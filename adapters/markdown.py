@@ -201,6 +201,7 @@ class MarkdownAdapter(Adapter):
             assignee=str(fm.get("assignee", "")),
             priority=str(fm.get("priority", "")),
             agent_status=str(fm.get("agent_status", "")),
+            agent_status_at=_date("agent_status_at"),
             due=_date("due"),
             scheduled=_date("scheduled"),
             completed=_date("completed"),
@@ -416,10 +417,16 @@ class MarkdownAdapter(Adapter):
             fm["assignee"] = assignee
 
         # Agent state: None = leave as-is, "" = clear (drop the key), else set.
+        # The stamp is derived, never passed in: it marks when the state last
+        # actually changed, so re-asserting the same state does not reset it.
         if agent_status is not None:
             if agent_status == "":
                 fm.pop("agent_status", None)
+                fm.pop("agent_status_at", None)
             else:
+                if (fm.get("agent_status") != agent_status
+                        or "agent_status_at" not in fm):
+                    fm["agent_status_at"] = _iso(_now())
                 fm["agent_status"] = agent_status
 
         # Dates: None = leave as-is, "" = clear (drop the key), else set.

@@ -80,6 +80,12 @@ lint      = "pnpm turbo lint"
 # max_iterations     = 30     # total phase invocations before the run gives up
 # max_phase_attempts = 3      # failed attempts on one phase -> transition blocked
 # invocation_timeout = 3600   # seconds per harness invocation
+# heartbeat_interval = 15     # seconds between beat-file writes; 0 disables.
+#                             # `tkt agents` reads these to tell a live run
+#                             # from a crashed one.
+# state_dir          = ".sdlc/state"   # where run state lives. Point several
+#                             # repos at one path and `tkt agents` sees every
+#                             # run from a single root.
 
 [models]                      # advisory model routing (see docs/model-routing.md).
 # Skills declare `model_tier: cheap|standard|deep` in frontmatter; the orchestrator

@@ -113,6 +113,10 @@ The fields that carry design intent:
   short-circuit `complete-deliverable` flow.
 - `agent_status` is board agent state: `""` | `idle` | `processing` | `waiting` |
   `done` | `blocked`. Only the markdown backend persists it today.
+- `agent_status_at` is `str | None` (ISO-8601 UTC): when `agent_status` last actually
+  changed. The adapter stamps it on write — it is never an argument to `edit()` — and
+  re-asserting the same state leaves it alone, so a board can render "processing for
+  12m" without a second clock source.
 - `due` / `scheduled` / `completed` are `str | None` (ISO `YYYY-MM-DD`), rendering as
   JSON `null` when unset — unlike the string fields, which default to `""`.
 - `blocked_by` entries are `{"key": str, "resolved": bool}`; `unresolved_blockers()`

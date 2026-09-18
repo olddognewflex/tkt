@@ -23,6 +23,10 @@ class Ticket:
     # blocked. Set by `tkt edit --agent-status`; only the markdown backend
     # persists it today. "" when unset.
     agent_status: str = ""
+    # When agent_status last changed, ISO-8601 UTC. Stamped by the adapter on
+    # write, never set by hand, so a board can render "processing for 12m"
+    # without a second clock source. None when agent_status is unset.
+    agent_status_at: str | None = None
     # Optional dates, ISO YYYY-MM-DD; None when unset (rendered as null in JSON).
     due: str | None = None
     scheduled: str | None = None
