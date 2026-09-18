@@ -132,6 +132,9 @@ the full guide.
 ## Verb contract
 
 Every adapter implements these. Read verbs accept `--json` (either side of the verb).
+`tkt --version` (or `-V`) prints the release number from `core/__init__.py`, plus the
+checkout's commit when tkt runs from its own git checkout, e.g. `tkt X.Y.Z (v1.2.0-3-gabc1234)`.
+A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 
 | Command | Does | Output |
 | --- | --- | --- |

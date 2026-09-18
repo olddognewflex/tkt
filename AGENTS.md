@@ -82,7 +82,8 @@ separate harness-specific files).
 | `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every run at once (local read; no backend without `--enrich`) |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 
-`--json` works on either side of the verb.
+`--json` works on either side of the verb. `tkt --version` / `-V` prints the tkt build
+(release number plus checkout commit) and exits 0; quote it when reporting a tkt bug.
 
 ### Edit semantics
 
