@@ -81,7 +81,8 @@ separate harness-specific files).
 | `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 
-`--json` works on either side of the verb.
+`--json` works on either side of the verb. `tkt --version` / `-V` prints the tkt build
+(release number plus checkout commit) and exits 0; quote it when reporting a tkt bug.
 
 ### Edit semantics
 

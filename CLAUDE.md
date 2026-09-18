@@ -66,6 +66,9 @@ Two layers, connected only by the verb contract and the normalized schema:
     named harnesses → (pack source, consumer dest) dirs; the installed set is
     additive and persisted in the manifest's `harnesses` list, so a bare re-run
     refreshes every harness the project ever added.
+  - `__init__.py` / `version.py` — `__version__` is the single place the release
+    number is written; bump it when releasing. `version.py` builds what
+    `tkt --version` prints (number + own-checkout `git describe`), lazily.
   - `errors.py` — typed errors → exit codes (see `AGENTS.md` for the table). Errors
     always go to stderr with a non-zero exit so skills branch on codes.
   - `toolchain.py` — best-effort detection of a project's build/test/typecheck/lint

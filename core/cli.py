@@ -43,6 +43,22 @@ def _print_ticket_list(tickets: list[Ticket], as_json: bool) -> None:
         print(f"{t.key}  {t.priority:<8} {t.status:<16} {t.summary}{blocked}")
 
 
+class _VersionAction(argparse.Action):
+    """argparse's built-in `version` action takes a string at parser build
+    time. Ours is computed only when the flag is used, because computing it can
+    run git and every invocation builds the parser."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS,
+                 default=argparse.SUPPRESS, help=None):
+        super().__init__(option_strings, dest=dest, default=default,
+                         nargs=0, help=help)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from .version import version_string
+        print(f"{parser.prog} {version_string()}")
+        parser.exit()
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Shared flags usable on either side of the verb (tkt --json view X == tkt view X --json).
     # SUPPRESS defaults are load-bearing: --config/--json live on both the top-level
@@ -57,9 +73,15 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                         help="emit JSON where supported")
 
+    from . import __version__
     p = argparse.ArgumentParser(
-        prog="tkt", description="Provider-agnostic ticketing CLI", parents=[common]
+        prog="tkt", description="Provider-agnostic ticketing CLI", parents=[common],
+        # The bare number only: help must stay free of git calls. `--version`
+        # adds the checkout commit.
+        epilog=f"version {__version__}",
     )
+    p.add_argument("-V", "--version", action=_VersionAction,
+                   help="print the tkt version (and checkout commit) and exit")
     # NB: do NOT seed these with parser.set_defaults() — that mutates the shared
     # action's .default (parents= copies actions by reference), undoing SUPPRESS
     # and reviving the clobber. Baseline defaults are applied post-parse in main().
