@@ -66,7 +66,8 @@ Two layers, connected only by the verb contract and the normalized schema:
     missing optional dep can't break the others.
   - `schema.py` — `Ticket` / `Worklog` / `Check` dataclasses + `to_dict()` (the JSON shape).
   - `query.py` — shared tiny **JQL-subset** evaluator, used by adapters with no native
-    query language (markdown, linear, openkanban). (Note: `README.md`'s architecture
+    query language (markdown, linear, openkanban). `ORDER BY priority` ranks by the
+    adapter's `priorities()` order, which callers pass in. (Note: `README.md`'s architecture
     block lists this under `adapters/`; it actually lives in `core/`.)
   - `ticketdoc.py` — the canonical full-ticket markdown document (frontmatter + body)
     that `tkt apply` ingests and the `$EDITOR` flow round-trips. Backend-agnostic:

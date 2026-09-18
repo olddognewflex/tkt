@@ -229,6 +229,8 @@ deliverable = ["Task", "Chore", "Spike"]  # short-circuit (complete-deliverable)
 [queries]   # tiny JQL subset: field = "v" [AND ...] [ORDER BY field DIR]
 tier1 = 'status = "To Do" AND priority = Highest AND assignee = currentUser() ORDER BY priority DESC'
 tier2 = 'status = "To Do" AND assignee = currentUser() ORDER BY priority DESC'
+# ORDER BY priority ranks by the priority list (default Highest..Lowest, or a
+# top-level `priorities = [...]`), DESC = highest first; unknown values sort last.
 
 [timetracking]
 provider = "local"             # "none" disables worklog; anything else → local JSONL

@@ -239,7 +239,7 @@ class MarkdownAdapter(Adapter):
 
     def list(self, tier=None, query=None):
         q = self.config.query(tier=tier, name=query)
-        return JqlSubset(q, self.me).run(self._all_tickets())
+        return JqlSubset(q, self.me, self.priorities()).run(self._all_tickets())
 
     def view(self, key):
         fm, body = self._read_raw(key)
