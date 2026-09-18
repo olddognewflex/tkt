@@ -207,6 +207,12 @@ Ports the original acli + Jira REST + Tempo logic. Auth via env named in
 for non-billable worklogs). `worklog`/`lane-time` page the full changelog and patch
 Tempo exactly as the old `annotate_lane_time` helper did.
 
+`transition` does not trust acli's exit code (acli exits 0 on an unavailable
+transition). It re-reads the status afterwards and fails with the transitions
+reachable from the current status (REST mode). A ticket already in the target
+lane counts as success, so retries are safe. If the status can't be
+read, acli's own output decides.
+
 ### github
 Issues = tickets; board status from **Projects v2** (`board="projectv2"`, default) or
 a `Status:` **label** convention (`board="labels"`). All access via the `gh` CLI:
