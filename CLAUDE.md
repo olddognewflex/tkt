@@ -35,7 +35,8 @@ There is **no linter config, no Makefile, and no CI** in this repo — nothing r
 the tests automatically. `tests/` is a stdlib `unittest` suite covering the run
 driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
-(`test_github_close.py`), and the Jira Markdown→ADF converter (`test_jira_adf.py`).
+(`test_github_close.py`), the after-hours window (`test_schedule.py`), and the
+Jira Markdown→ADF converter (`test_jira_adf.py`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
 "validation" of an adapter still means running `tkt doctor` / the read
@@ -87,6 +88,11 @@ Two layers, connected only by the verb contract and the normalized schema:
     plus the `[build]`-table rewrite `init` applies to the copied example config.
     Advisory only: a key the project doesn't declare keeps the example's value.
   - `scaffold.py` — implements `tkt init`.
+  - `schedule.py` — the `[schedule]` table and `tkt schedule`: parses and
+    validates it (bad hours, days or timezone are a `ConfigError`, never a
+    silently disabled hold) and answers "is it business hours now". Skills ask
+    it instead of doing clock maths in shell, which behaved differently under
+    zsh, bash and dash.
   - `run.py` — the `tkt run` external loop driver, and the only writer of run
     state: phase markers (ticket comment + `marker.json` mirror), the `run.log`
     JSONL, the STOP file, and `heartbeat.json`. The heartbeat runs on a daemon

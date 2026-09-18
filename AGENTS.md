@@ -32,6 +32,10 @@ separate harness-specific files).
      - `tkt cfg build.typecheck`
      - `tkt cfg deploy.staging_workflow`
      - `tkt cfg deploy.production_workflow`
+     - `tkt schedule --json` for after-hours handling (optional `[schedule]`
+       table: `after_hours_label`, `business_hours`, `timezone`, `days`). Never
+       compute the window in shell; `in_window` is false and `enabled` false
+       when the table is absent, and exit 2 means it is misconfigured (fail closed).
    - Never hardcode repo names, branch names, workflow names, or build commands.
 
 3. **Speak in roles, not lane names.**
@@ -75,6 +79,7 @@ separate harness-specific files).
 | `tkt link KEY --to OTHER --type T` | link tickets (adapter-opt-in) |
 | `tkt lane ROLE` | resolve role → provider lane name |
 | `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
+| `tkt schedule [--at ISO]` | is it business hours now, per `[schedule]` (config + clock, no backend) |
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
 | `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
 | `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check]` | install the pack into a consumer repo as committed copies |

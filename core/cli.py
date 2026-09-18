@@ -226,6 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--all", action="store_true", dest="include_all",
                     help="include idle dirs and the _select placeholder")
 
+    sp = add("schedule")
+    sp.add_argument("--at", default=None,
+                    help="evaluate at this ISO-8601 time instead of now; a "
+                         "time without an offset is read in [schedule].timezone")
+
     sp = add("cfg")
     sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo")
     sp.add_argument("--pkg", default="", help="substitute {pkg} in the value")
@@ -340,6 +345,11 @@ def main(argv: list[str]) -> int:
         if args.verb == "lane":
             print(config.role_to_lane(args.role))
             return 0
+
+        # `schedule` is config plus the clock: no adapter, no backend.
+        if args.verb == "schedule":
+            from .schedule import cmd_schedule
+            return cmd_schedule(config, args.at, args.json)
 
         if args.verb == "cfg":
             # `priorities` is backend-aware (jira maps to its own scheme), so it
