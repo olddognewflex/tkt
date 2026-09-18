@@ -5,6 +5,7 @@ Pick up tickets in `deploy_ready`, annotate QA lane times, merge the PR, watch s
 ## Steps
 
 1. Find deploy_ready tickets: `tkt list --query deploy_ready --json`.
+1.5. After-hours hold: read `tkt cfg schedule.after_hours_label`, `schedule.business_hours` (HH:MM-HH:MM; start > end = overnight), `schedule.timezone`, `schedule.days` — missing `[schedule]` table (exit 4) disables the check. If the ticket carries the label and now is inside the window: comment the ticket, echo `HOLD`, stop before merge/staging (under `tkt run`, outcome `gate`). Re-run outside the window proceeds normally.
 2. Annotate QA-lane times: `tkt lane-time "$KEY" --role qa_ready`, `qa`, `deploy_ready`.
 3. Find the PR: `gh pr list --repo $(tkt cfg vcs.repo) --search "$KEY in:title,body"`.
 4. Merge and poll until `MERGED`.

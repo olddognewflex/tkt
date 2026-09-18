@@ -15,6 +15,18 @@ Pick up tickets in `deploy_ready`, annotate QA lane times, merge the PR, watch s
    // turbo
    tkt list --query deploy_ready --json
    ```
+1.5. After-hours hold (before any merge/staging step). Optional `[schedule]` config table;
+   a missing table (exit 4) disables the check:
+   ```shell
+   // turbo
+   AH_LABEL=$(tkt cfg schedule.after_hours_label 2>/dev/null) || AH_LABEL=""
+   # also: schedule.business_hours (HH:MM-HH:MM; start > end = overnight window),
+   # schedule.timezone (IANA), schedule.days (lowercase `date +%a` names)
+   ```
+   If the ticket's labels contain `$AH_LABEL` and the current time is inside the
+   business-hours window: comment the ticket, echo `HOLD`, and stop before
+   merge/staging — under `tkt run`, report outcome `gate`. A re-run outside the
+   window proceeds normally from the top.
 2. Annotate QA-lane times:
    ```shell
    // turbo

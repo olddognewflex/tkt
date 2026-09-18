@@ -110,8 +110,10 @@ the backend has no billable concept).
 ### Phase 0: Select ticket
 
 **Invoke `select-ticket`.** Auto-selects Tier 1/2 (assigned); recommends Tier 3–5.
-Drops candidates with unresolved blockers. If nothing across all tiers → stop with
-a "nothing to work on" report.
+Drops candidates with unresolved blockers. Tickets carrying the after-hours label
+(`tkt cfg schedule.after_hours_label`, optional `[schedule]` table) are deferred
+during business hours when other workable candidates exist. If nothing across all
+tiers → stop with a "nothing to work on" report.
 
 ### Phase 1: Triage
 
@@ -221,7 +223,9 @@ Time in review (incl. loops): $(echo "$WL" | jq -r .human) (worklog $(echo "$WL"
 
 **Invoke `deploy-ready`** — picks up `deploy_ready` tickets, merges the open PR,
 watches the deploy workflow, gates manual prod deploy, then handles the final
-`done` transition per your project's deploy contract.
+`done` transition per your project's deploy contract. Tickets carrying the
+after-hours label are hard-held (gate outcome, before merge) during the
+configured business hours.
 
 ## Side flows
 

@@ -322,6 +322,9 @@ originals — every ticketing/board call now goes through `tkt`):
 | `hotfix-revert` | fast-track prod revert (uses `tkt create`/`link`) |
 | `automated-sdlc` | orchestrator across all of the above |
 
+Tickets labeled after-hours (optional `[schedule]` config table) are deferred by
+`select-ticket` during business hours and hard-held before merge by `deploy-ready`.
+
 `agents/ticket-researcher.md` is the read-only lookup subagent (provider-agnostic
 port of the old `jira-researcher`).
 

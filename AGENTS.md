@@ -32,6 +32,9 @@ separate harness-specific files).
      - `tkt cfg build.typecheck`
      - `tkt cfg deploy.staging_workflow`
      - `tkt cfg deploy.production_workflow`
+     - `tkt cfg schedule.after_hours_label` (optional `[schedule]` table:
+       `after_hours_label`, `business_hours`, `timezone`, `days` — skills-only,
+       absent table = exit 4 = no after-hours handling)
    - Never hardcode repo names, branch names, workflow names, or build commands.
 
 3. **Speak in roles, not lane names.**

@@ -12,7 +12,9 @@ Discover and select the next ticket to work on: $ARGUMENTS
 4. If Tier 1 or 2 (assigned work): auto-select the first candidate, emit `SELECTED: <KEY>`, and proceed to `triage-ticket`.
 5. If Tier 3/4/5: print up to 5 ranked recommendations and wait for a human pick.
 
-Recommendation table: Key | Type | type_class | Priority | Summary | Effort (S/M/L) | Est. tokens | Est. wall time | Blockers? | Why this one
+After-hours deferral (optional): if `tkt cfg schedule.after_hours_label` returns a label (exit 4 = no `[schedule]` table = off), candidates carrying it are deferred during `schedule.business_hours` (start > end = overnight) on `schedule.days` in `schedule.timezone` — Tier 1/2 auto-select prefers non-deferred candidates, falling back to a deferred one only when no other exists (note it — deploy holds until after hours); Tier 3/4/5 never hard-filter — sort deferred last and mark the After-hours? column.
+
+Recommendation table: Key | Type | type_class | Priority | Summary | Effort (S/M/L) | Est. tokens | Est. wall time | Blockers? | After-hours? | Why this one
 
 Estimate guidance: S ≤ 100 LOC / ~50k tokens / ~30 min; M 100–400 LOC / ~150k tokens / ~2 h; L > 400 LOC / ~400k tokens / half-day.
 
