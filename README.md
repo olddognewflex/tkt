@@ -358,7 +358,7 @@ ticket, and loops until a gate, a STOP signal, or a cap.
 ```sh
 tkt run TKT-1                   # run/resume TKT-1's pipeline
 tkt run                         # P0 select-ticket first, then proceed
-tkt run --status TKT-1          # print this run's state (local read, no backend)
+tkt run --status TKT-1          # print this run's state (local first; needs no adapter)
 tkt run --stop TKT-1            # halt at the next iteration boundary
 tkt run --dry-run TKT-1         # print the prompt without invoking
 tkt run --max-iterations 5 TKT-1
@@ -436,7 +436,17 @@ tkt agents --all                # include idle dirs and the _select placeholder
 It is a **filesystem read**: no adapter is constructed and no backend call is
 made unless you pass `--enrich`, so polling it once a second costs nothing and
 keeps working when the backend is unreachable. An empty board is exit 0 with an
-empty list, never an error.
+empty list, never an error. `--dir` also works from a directory that has no
+`.sdlc/config.toml` of its own, so a TUI can be launched from anywhere.
+
+Without `--stale-after`, a run reads as stalled after 45s with no beat, or after
+three missed beats when `[run].heartbeat_interval` is slower than that, resolved
+per scanned project. Each row carries the `stale_after` it was judged against;
+the top-level value is the largest window in use. `dead`
+needs a pid check on the same host: a run on another host, or one whose pid has
+since been reused, reads `stalled` instead. `tkt run --status KEY` and
+`tkt run --stop KEY` likewise need no adapter; status falls back to the ticket's
+marker comment only when there is no local state, and a failure there is ignored.
 
 While a run is live the driver writes `.sdlc/state/run/<key>/heartbeat.json`
 every `heartbeat_interval` seconds from a background thread — required, because

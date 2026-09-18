@@ -242,7 +242,9 @@ def read_heartbeat(state_dir: Path) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
+    except (ValueError, OSError):
+        # ValueError covers bad JSON and non-UTF-8 bytes alike; one damaged
+        # file must not take the whole listing down with a traceback.
         return None
     return data if isinstance(data, dict) else None
 
@@ -264,7 +266,7 @@ class Heartbeat:
     "died three phases ago".
     """
 
-    def __init__(self, state_dir: Path, key: str, interval: int,
+    def __init__(self, state_dir: Path, key: str, interval: float,
                  run_started: str):
         self.state_dir = state_dir
         self.interval = interval
@@ -280,10 +282,22 @@ class Heartbeat:
         }
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # The beat thread and the driver's own update()/rebind() both write, and
+        # they share one temp path. Unlocked, os.replace can publish a file the
+        # other thread has just truncated, and a 1Hz reader sees a torn beat —
+        # which reads as "no heartbeat", i.e. a live run reported dead.
+        self._lock = threading.Lock()
+        self._stopped = False
 
     def write(self) -> None:
         """Rewrite the beat file atomically — a TUI polls this at 1Hz and must
         never catch a half-written file."""
+        with self._lock:
+            self._write_locked()
+
+    def _write_locked(self) -> None:
+        if self._stopped:
+            return      # a beat that lost the race with stop() must not revive the file
         payload = dict(self.state, beat=_now_iso())
         tmp = self.state_dir / f".heartbeat.{os.getpid()}.tmp"
         try:
@@ -294,15 +308,21 @@ class Heartbeat:
             pass
 
     def update(self, **fields: Any) -> None:
-        self.state.update(fields)
-        self.write()
+        with self._lock:
+            self.state.update(fields)
+            self._write_locked()
 
     def rebind(self, state_dir: Path, key: str) -> None:
-        """Follow the run into its real state dir once P0 has picked a key."""
-        clear_heartbeat(self.state_dir)
-        self.state_dir = state_dir
-        self.state["key"] = key
-        self.write()
+        """Follow the run into its real state dir once P0 has picked a key.
+
+        Clear, swap and rewrite happen under the lock, so a beat already in
+        flight cannot land back in the old dir after it was cleared.
+        """
+        with self._lock:
+            clear_heartbeat(self.state_dir)
+            self.state_dir = state_dir
+            self.state["key"] = key
+            self._write_locked()
 
     def start(self) -> None:
         if self.interval <= 0 or self._thread is not None:
@@ -323,7 +343,9 @@ class Heartbeat:
         if self._thread is not None:
             self._thread.join(timeout=2)
             self._thread = None
-        clear_heartbeat(self.state_dir)
+        with self._lock:
+            self._stopped = True
+            clear_heartbeat(self.state_dir)
 
 
 def read_result_file(state_dir: Path) -> dict[str, Any] | None:
@@ -505,6 +527,7 @@ class RunDriver:
             # the run looking alive forever, so clean up in one guarded spot.
             if self.hb is not None:
                 self.hb.stop()
+                self.hb = None      # a stopped Heartbeat never beats again
 
     def _init_state(self) -> None:
         """Initialize state dir for the current key."""
@@ -834,9 +857,11 @@ def cmd_run(config: Config, key: str | None, max_iterations: int | None,
 def cmd_status(config: Config, key: str) -> int:
     """Entry point for `tkt run --status KEY`.
 
-    Reads local run state only — no RunConfig, so a project that never set
-    [run].harness_cmd can still be asked what its runs are doing, and no
-    adapter, so asking never costs a backend round-trip.
+    Needs neither a RunConfig nor an adapter: a project that never set
+    [run].harness_cmd, or whose backend is misconfigured or unreachable, can
+    still be asked what its runs are doing. Local state answers first. Only
+    when there is none does `status_for_key` try the ticket's marker comment —
+    the cross-machine record — and a failure there is swallowed, not raised.
     """
     from .agents import status_for_key
     print(json.dumps(status_for_key(config, key), indent=2))

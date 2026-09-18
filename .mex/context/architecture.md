@@ -81,8 +81,9 @@ resolution lives in [`get_adapter()`](mex://function:0b2b33f8ea63b124544ed4f7123
   "crashed". `run_root()` resolves where run state lives, honouring `[run].state_dir`.
 - **`core/agents.py`** — the read side of run state: `tkt agents` and the row
   `tkt run --status` prints. Imports from `run.py`, never the reverse. Its contract is
-  that it constructs no adapter and makes no backend call unless the caller passes
-  `--enrich`, so a TUI can poll it once a second. `resolve_state()` holds the
+  that `tkt agents` constructs no adapter and makes no backend call unless the caller
+  passes `--enrich`, so a TUI can poll it once a second; `status_for_key` alone has a
+  lazy, non-fatal fallback to the ticket marker comment when no local state exists. `resolve_state()` holds the
   running/stalled/dead/blocked/halted/idle classification.
 - **`core/query.py`** — a tiny shared JQL-subset evaluator (`=`, `!=`, `IS EMPTY`,
   `AND`, `ORDER BY`, `currentUser()`), used by the adapters with no native query

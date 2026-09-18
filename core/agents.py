@@ -4,9 +4,11 @@
 them all back at once so a dashboard or TUI can poll a single verb instead of
 one call per ticket.
 
-Deliberately filesystem-only: no adapter is constructed and no backend call is
-made unless the caller asks for `--enrich`, so polling this at 1Hz costs
-nothing and works on a project whose backend is unreachable.
+`tkt agents` is deliberately filesystem-only: no adapter is constructed and no
+backend call is made unless the caller asks for `--enrich`, so polling it at 1Hz
+costs nothing and works on a project whose backend is unreachable. The one other
+adapter path in this module is `status_for_key`'s fallback for
+`tkt run --status`, taken only when a ticket has no local run state at all.
 """
 from __future__ import annotations
 
@@ -48,9 +50,23 @@ def read_marker(state_dir: Path) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
+    except (ValueError, OSError):     # bad JSON or non-UTF-8 bytes
         return None
     return data if isinstance(data, dict) else None
+
+
+def default_stale_after(config: Config | None) -> int:
+    """Seconds without a beat before a run reads as stalled, when the caller
+    gave none: the 45s floor, or three missed beats for a project that beats
+    slower than that. A fixed window would show every healthy run of a
+    `heartbeat_interval = 60` project as stalled."""
+    if config is None:
+        return DEFAULT_STALE_AFTER
+    try:
+        interval = int(config.run.get("heartbeat_interval", 0) or 0)
+    except (TypeError, ValueError):
+        interval = 0
+    return max(DEFAULT_STALE_AFTER, 3 * interval)
 
 
 # ---- Time + liveness helpers -------------------------------------------------
@@ -146,6 +162,9 @@ def build_row(key: str, marker: dict[str, Any] | None,
     return {
         "key": key,
         "state": resolve_state(marker, heartbeat, now, stale_after),
+        # The window this row was judged against. Roots can differ, so a reader
+        # must not re-derive state from the listing's top-level value.
+        "stale_after": stale_after,
         "phase": phase,
         "phase_name": PHASE_NAMES.get(phase, ""),
         "attempt": h.get("attempt", m.get("attempt")),
@@ -169,32 +188,52 @@ def build_row(key: str, marker: dict[str, Any] | None,
 
 # ---- Collection --------------------------------------------------------------
 
-def roots_for(config: Config, dirs: list[str] | None) -> list[Path]:
-    """Run roots to scan: the loaded config's, or one per --dir project root."""
+def root_configs(config: Config | None,
+                 dirs: list[str] | None) -> list[tuple[Path, Config]]:
+    """(run root, the config that owns it) for each root to scan: the loaded
+    config's, or one per --dir project root.
+
+    `config` may be None only when `dirs` is given — the CLI lets `agents --dir`
+    run from a directory that has no config of its own.
+    """
     if not dirs:
-        return [run_root(config)]
-    out: list[Path] = []
+        if config is None:
+            raise UsageError("agents: no config loaded and no --dir given")
+        return [(run_root(config), config)]
+    out: list[tuple[Path, Config]] = []
     for d in dirs:
         path = Path(d).expanduser()
         cand = path / ".sdlc" / "config.toml"
         if not cand.is_file():
             raise UsageError(f"agents --dir: no .sdlc/config.toml under {path}")
-        root = run_root(Config.load(str(cand)))
-        if root not in out:
-            out.append(root)
+        cfg = Config.load(str(cand))
+        root = run_root(cfg)
+        if root not in [r for r, _ in out]:
+            out.append((root, cfg))
     return out
+
+
+def roots_for(config: Config | None, dirs: list[str] | None) -> list[Path]:
+    """Just the run roots of `root_configs`."""
+    return [root for root, _ in root_configs(config, dirs)]
 
 
 def collect(roots: list[Path], stale_after: int = DEFAULT_STALE_AFTER,
             include_all: bool = False,
-            now: datetime | None = None) -> list[dict[str, Any]]:
-    """One row per run dir across every root, most-active first."""
+            now: datetime | None = None,
+            stale_by_root: dict[Path, int] | None = None) -> list[dict[str, Any]]:
+    """One row per run dir across every root, most-active first.
+
+    `stale_by_root` overrides `stale_after` per root, so projects that beat at
+    different rates can share one listing without the slow one reading stalled.
+    """
     now = now or datetime.now(timezone.utc)
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for root in roots:
         if not root.is_dir():
             continue          # nothing has ever run here; not an error
+        root_stale = (stale_by_root or {}).get(root, stale_after)
         for d in sorted(root.iterdir()):
             if not d.is_dir():
                 continue
@@ -202,7 +241,7 @@ def collect(roots: list[Path], stale_after: int = DEFAULT_STALE_AFTER,
             # a ticket. Hidden unless the caller asks for everything.
             if d.name.startswith("_") and not include_all:
                 continue
-            row = read_run(d, now, stale_after)
+            row = read_run(d, now, root_stale)
             if row["state"] == "idle" and not include_all:
                 continue
             if row["key"] in seen:
@@ -270,10 +309,19 @@ def _print_rows(rows: list[dict[str, Any]]) -> None:
 
 # ---- CLI entry points --------------------------------------------------------
 
-def cmd_agents(config: Config, dirs: list[str] | None, stale_after: int,
+def cmd_agents(config: Config | None, dirs: list[str] | None,
+               stale_after: int | None,
                include_all: bool, do_enrich: bool, as_json: bool) -> int:
-    """Entry point for `tkt agents`."""
-    rows = collect(roots_for(config, dirs), stale_after, include_all)
+    """Entry point for `tkt agents`. `stale_after=None` means "not given": each
+    root then uses the default for its own config's heartbeat_interval."""
+    pairs = root_configs(config, dirs)
+    roots = [root for root, _ in pairs]
+    if stale_after is None:
+        by_root = {root: default_stale_after(cfg) for root, cfg in pairs}
+        stale_after = max(by_root.values(), default=DEFAULT_STALE_AFTER)
+        rows = collect(roots, stale_after, include_all, stale_by_root=by_root)
+    else:
+        rows = collect(roots, stale_after, include_all)
     if do_enrich:
         enrich(config, rows)
     if as_json:
@@ -290,7 +338,7 @@ def cmd_agents(config: Config, dirs: list[str] | None, stale_after: int,
 
 
 def status_for_key(config: Config, key: str,
-                   stale_after: int = DEFAULT_STALE_AFTER,
+                   stale_after: int | None = None,
                    allow_backend: bool = True) -> dict[str, Any]:
     """One run's row, for `tkt run --status KEY`.
 
@@ -300,6 +348,8 @@ def status_for_key(config: Config, key: str,
     resumed in a fresh worktree can still be asked where it got to. `tkt agents`
     never takes that fallback, so polling it stays backend-free.
     """
+    if stale_after is None:
+        stale_after = default_stale_after(config)
     now = datetime.now(timezone.utc)
     state_dir = run_root(config) / key
     if state_dir.is_dir():

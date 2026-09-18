@@ -26,17 +26,19 @@ Pure stdlib, Python 3.11+ (uses `tomllib`). No third-party deps, no build step.
 ./tkt sync-pack --check --dir ../consumer   # is a consumer repo's pack copy current?
 ./tkt agents --json           # state of every agent run (local read, safe to poll)
 
-python3 -m unittest tests.test_run tests.test_agents tests.test_jira_adf
+python3 -m unittest discover -s tests   # whole suite, fully offline
 bash scripts/smoke-agents.sh      # live run -> dead/halted, end to end
 bash scripts/smoke-sync-pack.sh
 ```
 
 There is **no linter config, no Makefile, and no CI** in this repo — nothing runs
 the tests automatically. `tests/` is a stdlib `unittest` suite covering the run
-driver's state machine (`test_run.py`), the `tkt agents` readers (`test_agents.py`),
-and the Jira Markdown→ADF converter (`test_jira_adf.py`); `unittest discover` does
-not work (no `tests/__init__.py`), so name the modules. Nothing under `adapters/`
-is covered: "validation" of an adapter still means running `tkt doctor` / the read
+driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
+cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
+(`test_github_close.py`), and the Jira Markdown→ADF converter (`test_jira_adf.py`).
+Use `discover -s tests`; a bare `discover` from the root finds nothing (no
+`tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
+"validation" of an adapter still means running `tkt doctor` / the read
 verbs live against a real backend (see each provider's "Validation status" in
 `README.md`). The two `scripts/smoke-*.sh` scripts cover `sync-pack` and `agents`
 end to end.
@@ -91,9 +93,11 @@ Two layers, connected only by the verb contract and the normalized schema:
     lives, honouring `[run].state_dir` so repos sharing a board can share a
     run-state root.
   - `agents.py` — the read side: `tkt agents`, plus the row `tkt run --status`
-    prints. Imports from `run.py`, never the reverse. Contract: **no adapter is
-    constructed and no backend call is made** unless the caller passes
-    `--enrich`, so a TUI can poll it once a second. `resolve_state()` holds the
+    prints. Imports from `run.py`, never the reverse. Contract: for `tkt agents`,
+    **no adapter is constructed and no backend call is made** unless the caller
+    passes `--enrich`, so a TUI can poll it once a second. (`status_for_key` has
+    one lazy, non-fatal fallback to the ticket marker comment, used by
+    `run --status` only when there is no local state.) `resolve_state()` holds the
     running/stalled/dead/blocked/halted/idle table.
 - **`adapters/`** — one file per backend, each subclassing `adapters/base.Adapter`.
   - `base.py` is the contract: required `@abstractmethod` verbs (whoami, list, view,
