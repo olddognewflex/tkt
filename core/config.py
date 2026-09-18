@@ -102,14 +102,15 @@ class Config:
 
     # ---- priorities --------------------------------------------------------
 
-    def priorities(self) -> list[str]:
-        """The configured ordered priority list (highest-first), or the default
-        when `priorities` is absent or not a non-empty list. Adapters may map
-        this to a backend's own scheme; see Adapter.priorities()."""
+    def priorities(self, default: list[str] | None = None) -> list[str]:
+        """The configured ordered priority list (highest-first). When
+        `priorities` is absent or not a non-empty list, `default` (a backend's
+        native scheme) or else DEFAULT_PRIORITIES. Adapters may map this to a
+        backend's own scheme; see Adapter.priorities()."""
         val = self._d.get("priorities")
         if isinstance(val, list) and val:
             return [str(p) for p in val]
-        return list(DEFAULT_PRIORITIES)
+        return list(default) if default else list(DEFAULT_PRIORITIES)
 
     # ---- arbitrary lookups (for skills reading build/vcs settings) ---------
 

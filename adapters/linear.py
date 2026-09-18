@@ -204,6 +204,13 @@ class LinearAdapter(Adapter):
             self._me = v.get("displayName") or v.get("name") or v.get("email", "")
         return self._me
 
+    def priorities(self) -> list[str]:
+        """Linear's own labels, highest first, unless the config names a list.
+        The generic default (Highest..Lowest) has no "Urgent", so sorting by it
+        would rank Linear's top priority as unknown."""
+        native = [_PRIORITY_LABEL[n] for n in (1, 2, 3, 4, 0)]
+        return self.config.priorities(default=native)
+
     def list(self, tier=None, query=None):
         q = self.config.query(tier=tier, name=query)
         self._require_team()
@@ -212,7 +219,7 @@ class LinearAdapter(Adapter):
             + _ISSUE_FIELDS + " } } }",
             {"k": self.team_key, "n": self.list_limit})
         tickets = [self._to_ticket(i) for i in data["issues"]["nodes"]]
-        return JqlSubset(q, self.whoami()).run(tickets)
+        return JqlSubset(q, self.whoami(), self.priorities()).run(tickets)
 
     def view(self, key):
         return self._to_ticket(self._fetch_issue(key))

@@ -165,11 +165,16 @@ class OpenKanbanAdapter(Adapter):
     def whoami(self) -> str:
         return self.me or "(openkanban is single-user; set [openkanban].me to label)"
 
+    def priorities(self) -> list[str]:
+        """openkanban stores priority as an int 1..5 with fixed labels, so a
+        configured list cannot match its tickets; always use the fixed order."""
+        return [_PRI_LABEL[n] for n in sorted(_PRI_LABEL)]
+
     def list(self, tier=None, query=None):
         q = self.config.query(tier=tier, name=query)
         store = self._load_store()
         tickets = [self._to_ticket(r) for r in store["tickets"].values()]
-        return JqlSubset(q, self.me).run(tickets)
+        return JqlSubset(q, self.me, self.priorities()).run(tickets)
 
     def view(self, key):
         _, raw = self._get_raw(key)

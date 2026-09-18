@@ -239,8 +239,10 @@ key in env (`[ticketing].auth_env`, default `LINEAR_API_KEY`).
   transition updates the issue's `stateId`.
 - **blocked_by/blocks** use Linear's **native issue relations** (`blocks` direction);
   `resolved` = related issue in a completed/canceled state.
-- **priority** = Linear's `priorityLabel` (`Urgent`/`High`/`Medium`/`Low`); **type**
-  from label convention (`type_label_prefix` or labels matching `[issue_types]`).
+- **priority** = Linear's `priorityLabel` (`Urgent`/`High`/`Medium`/`Low`). With no
+  top-level `priorities` list, `tkt cfg priorities` and `ORDER BY priority` use Linear's own
+  order (`Urgent`, `High`, `Medium`, `Low`, `No priority`), not the generic Highest…Lowest.
+- **type** from label convention (`type_label_prefix` or labels matching `[issue_types]`).
 - **Queries** use the shared tiny JQL subset (`core/query.py`), evaluated
   client-side over a bounded working-set fetch (`[linear].list_limit`, default 100).
 - **No time tracking** — worklog/lane-time are no-ops.
@@ -260,7 +262,9 @@ repo's store source). Fully local, no network.
   `[openkanban].project` = project name or id (from `openkanban list`).
 - **Key** = ticket UUID. **Statuses** are a fixed enum (`backlog`/`in_progress`/
   `done`/`archived`) → a 3-lane board; map roles to those (best for the short
-  todo→in_progress→done flow). **priority** = int 1..5 ↔ Highest…Lowest.
+  todo→in_progress→done flow). **priority** = int 1..5 ↔ Highest…Lowest; that fixed
+  order is also what `tkt cfg priorities` reports and `ORDER BY priority` ranks by, whatever
+  the config's `priorities` says.
 - **No assignee** (single-user) → blank; don't filter queries by assignee.
   **Comments** append to the description under `## Activity`. **Relations** live in
   the ticket `meta` map. **No time tracking** (worklog/lane-time no-op).
@@ -300,6 +304,9 @@ Description...
 Frontmatter is a tiny YAML subset: `key: value`, `[a, b]` list literals, no nesting.
 Queries use a tiny JQL subset (`field = "v" [AND ...] [ORDER BY field DIR]`,
 `currentUser()`, `is EMPTY`) so the same `[queries]` strings read like Jira's.
+`ORDER BY priority` ranks by the priority order (`tkt cfg priorities`), not by
+name, with `DESC` highest first; case is ignored, and a priority that isn't in the
+list, or an empty one, sorts last.
 
 ## Skill pack
 

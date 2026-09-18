@@ -2,9 +2,9 @@
 # Copy to .sdlc/config.toml. tkt reads/writes openkanban's JSON store directly
 # (openkanban has no ticket CLI). Register a project first: `openkanban new <name>`.
 
-# Optional: ordered priority set (highest-first) exposed via `tkt cfg priorities`.
-# Defaults to ["Highest", "High", "Medium", "Low", "Lowest"] when omitted.
-# priorities = ["Highest", "High", "Medium", "Low", "Lowest"]
+# Priorities are fixed on openkanban: stored as 1..5 = Highest, High, Medium,
+# Low, Lowest. A top-level `priorities` list is ignored here; `tkt cfg priorities`
+# and `ORDER BY priority` always use that fixed order.
 
 [ticketing]
 provider = "openkanban"
