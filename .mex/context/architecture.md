@@ -64,7 +64,8 @@ resolution lives in [`get_adapter()`](mex://function:0b2b33f8ea63b124544ed4f7123
   reaches a backend. Depends on `config`, `registry`, and the schema's `to_dict()`.
 - **`core/config.py`** — loads `.sdlc/config.toml` and owns every mapping skills
   depend on: role↔lane, `full_sdlc`/`deliverable` issue-type routing, named queries,
-  priority ordering, `[board.ownership]`, and dotted-path `get()`.
+  priority ordering, `[board.ownership]`, `[board].close_on` (roles whose transition
+  also closes the ticket on backends with a terminal state), and dotted-path `get()`.
 - **`core/registry.py`** — `provider name → (module, class)`, imported lazily so one
   adapter's missing optional dependency cannot break the other four.
 - **`core/schema.py`** — `Ticket` / `Worklog` / `Check` dataclasses plus `to_dict()`.
