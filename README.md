@@ -213,6 +213,17 @@ reachable from the current status (REST mode). A ticket already in the target
 lane counts as success, so retries are safe. If the status can't be
 read, acli's own output decides.
 
+- **blocked_by/blocks** come from `issuelinks`. The link type is matched by
+  `name == "Blocks"`, falling back to the "block" stem appearing in *both* the
+  inward and outward descriptions, with negations excluded — `unblocks`,
+  `non-blocking` and `not blocking`, in any hyphen/space spelling. Direction is read from which side of the link Jira returned, never
+  from the descriptions — those are editable per site, and matching them
+  literally reported no blockers at all on a renamed one. Both branches are
+  English-only: a site running in another language reports no blockers.
+- In **acli mode** `list` carries no `blocked_by` at all (acli search rejects
+  `issuelinks`), so blocker state must be confirmed per ticket with
+  `tkt blockers` — which `select-ticket` does. REST mode returns the full set.
+
 ### github
 Issues = tickets; board status from **Projects v2** (`board="projectv2"`, default) or
 a `Status:` **label** convention (`board="labels"`). All access via the `gh` CLI:
