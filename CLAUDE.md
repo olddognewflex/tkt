@@ -35,8 +35,9 @@ There is **no linter config, no Makefile, and no CI** in this repo — nothing r
 the tests automatically. `tests/` is a stdlib `unittest` suite covering the run
 driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
-(`test_github_close.py`), the after-hours window (`test_schedule.py`), and the
-Jira Markdown→ADF converter (`test_jira_adf.py`).
+(`test_github_close.py`), the after-hours window (`test_schedule.py`), the
+Jira Markdown→ADF converter (`test_jira_adf.py`), and Jira transition
+verification (`test_jira_transition.py`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
 "validation" of an adapter still means running `tkt doctor` / the read

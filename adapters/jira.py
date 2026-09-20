@@ -610,9 +610,55 @@ class JiraAdapter(Adapter):
                    "--out", key, "--in", to, "--type", link_type, "--yes")
 
     def transition(self, key, role):
+        # acli reports an unavailable transition on stdout and still exits 0,
+        # so check=True never fires. Verify the move instead of assuming it.
         lane = self.config.role_to_lane(role)
-        self._acli("jira", "workitem", "transition", "--key", key,
-                   "--status", lane, "--yes")
+        out = self._acli("jira", "workitem", "transition", "--key", key,
+                         "--status", lane, "--yes")
+        low = out.lower()
+        failed = ("✗" in out or "can't be transitioned" in low
+                  or "can’t be transitioned" in low)
+        status = self._current_status(key)
+        # Already in the target lane counts as success: Jira workflows rarely
+        # define a self-transition, and retries must not become hard failures.
+        if status is not None and status.casefold() == lane.casefold():
+            return
+        # An unreadable status never masks a transition acli says worked.
+        if status is None and not failed:
+            return
+        raise ProviderError(self._transition_error(key, lane, status, out))
+
+    def _current_status(self, key: str) -> str | None:
+        """The issue's live status name, or None if it can't be read."""
+        try:
+            if self.have_rest:
+                issue = self._jira("GET", f"/rest/api/3/issue/{key}?fields=status")
+            else:
+                issue = self._acli_json("jira", "workitem", "view", key,
+                                        "--fields", "status")
+            return ((issue.get("fields") or {}).get("status") or {}).get("name") or None
+        except Exception:  # best-effort: a failed read must never fail a move
+            return None
+
+    def _transition_error(self, key: str, lane: str, status: str | None,
+                          acli_out: str) -> str:
+        msg = f"Jira did not move {key} to '{lane}'"
+        msg += f" (still '{status}')." if status else "."
+        detail = acli_out.strip()
+        if detail:
+            msg += f" acli: {detail}"
+        if not self.have_rest:
+            return (msg + " Set CONFLUENCE_SITE/EMAIL/API_TOKEN to list the "
+                    "transitions reachable from here.")
+        try:
+            trans = self._jira("GET", f"/rest/api/3/issue/{key}/transitions")
+            names = [t["to"]["name"] for t in trans.get("transitions", [])]
+        except Exception:  # the listing is a hint; keep the core message
+            return msg
+        where = f"'{status}'" if status else "the current status"
+        reachable = ", ".join(names) or "(none)"
+        return (f"{msg} Reachable from {where}: {reachable}. Fix the Jira "
+                f"workflow or [board.roles] in .sdlc/config.toml.")
 
     def comment(self, key, body):
         # REST accepts ADF, so comments render their Markdown (headings, lists,
