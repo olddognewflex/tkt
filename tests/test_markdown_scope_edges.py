@@ -297,9 +297,13 @@ class ScopeEdges(unittest.TestCase):
 
     def test_missing_board_dir_is_a_provider_error(self):
         """Distinct from an empty board dir, which is simply no tickets: a
-        board_dir that is not there is a misconfiguration and must surface as
-        ProviderError (exit 4), not as an empty candidate list that
-        `select-ticket` would read as "nothing to do"."""
+        board_dir that is not there is a misconfiguration and must raise
+        ProviderError (exit 3 — see core/errors.py; exit 4 is NotFoundError)
+        rather than return an empty list, so the CLI can tell the two apart.
+
+        Adapter-level only. `select-ticket`'s tier loop runs
+        `tkt list ... 2>/dev/null || continue`, which swallows every non-zero
+        exit, so at the skill level this still reads as "no tiers defined"."""
         a = self.adapter(["TKT-1"])
         shutil.rmtree(self.board_dir)
         with self.assertRaises(ProviderError):
