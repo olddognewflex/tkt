@@ -302,6 +302,24 @@ Zero-dependency local board. One `<KEY>.md` per ticket under `[markdown].board_d
 status transitions + worklogs recorded in JSONL sidecars under `[markdown].state_dir`
 (machine-local, derived — the markdown stays human-canonical).
 
+- **A ticket is visible to `list` only if its filename starts with
+  `<project>-`**, where `<project>` is `[ticketing].project`. That is what makes
+  one board dir shareable by several repos: each points `board_dir` at the same
+  place with its own `project`, and every tier query — and `select-ticket` with
+  it — sees only that repo's tickets. The match is a literal, **case-sensitive**
+  prefix, so `tkt-1` is not a `TKT` ticket, and a hand-named file like
+  `fix-login.md` is invisible while a project is set. `tkt doctor` reports how
+  many files match and **fails** when none do, since otherwise a mistyped
+  `project` is indistinguishable from an idle board.
+- Leave `project` unset and `list` enumerates the whole board — the
+  single-project case. Note `create` still mints `TKT-<n>` in that mode (its
+  built-in fallback), so set `project` on any board you share.
+- `view` and the **write verbs** (`transition`, `comment`, `edit`, …) address a
+  ticket by key and stay **unscoped**: a `blocked_by` entry may name another
+  project's ticket, and blocker checks would break if it did not resolve. A repo
+  can therefore write to a ticket it cannot list — deliberate, but worth knowing
+  when a key arrives from an untrusted source.
+
 Ticket file format:
 
 ```markdown
