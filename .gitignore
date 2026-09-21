@@ -7,3 +7,11 @@ __pycache__/
 
 # mex: scaffold is committed; the code graph is generated (rebuild: mex graph)
 .mex/graph.db*
+
+# Editor / OS state
+.vscode/
+.idea/
+.DS_Store
+
+# Subagent scratch memory (agents write here; not repo content)
+.claude/agent-memory/
