@@ -31,13 +31,30 @@ bash scripts/smoke-agents.sh      # live run -> dead/halted, end to end
 bash scripts/smoke-sync-pack.sh
 ```
 
-There is **no linter config, no Makefile, and no CI** in this repo — nothing runs
-the tests automatically. `tests/` is a stdlib `unittest` suite covering the run
+There is **no linter config and no Makefile** in this repo. CI is
+`.github/workflows/ci.yml`, and it needs no credentials — every test stubs its
+transport. On every PR and every push to `main` it runs the suite on Python
+3.11/3.12/3.13 (Linux) and 3.11 (macOS), byte-compiles `core`/`adapters`/`tkt`,
+asserts every *tracked file with a shebang* is still mode `100755`, scaffolds a
+throwaway markdown project and reads a ticket back through a PATH symlink from
+a cwd outside the repo, and runs `scripts/smoke-sync-pack.sh`.
+
+Three deliberate gaps, each documented at its place in the YAML: **Windows is
+not in the matrix** (the suite is POSIX-only — `core/agents.py` probes liveness
+with `os.kill(pid, 0)`, which on Windows *terminates* the target rather than
+being a no-op, and `tests/` also wants an IANA tz database and `#!/bin/sh`);
+**`scripts/smoke-agents.sh` stays local** because it SIGKILLs a live background
+driver; and the exec-bit check covers *this repo's index only* — the mode bits
+`sync-pack` writes into a consumer tree are TKT-24 and are not covered anywhere
+yet. `tests/` is a stdlib `unittest` suite covering the run
 driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
 (`test_github_close.py`), the after-hours window (`test_schedule.py`), the
-Jira Markdown→ADF converter (`test_jira_adf.py`), and Jira transition
-verification (`test_jira_transition.py`).
+Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
+(`test_jira_transition.py`), Jira blocker-link direction (`test_jira_blockers.py`,
+`test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
+`test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`), and
+`tkt --version` (`test_version.py`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
 "validation" of an adapter still means running `tkt doctor` / the read

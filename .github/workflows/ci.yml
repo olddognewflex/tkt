@@ -1,0 +1,127 @@
+name: CI
+
+# Offline by design: every test stubs its transport, so no job needs
+# credentials and no backend can make CI flaky.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # PRs: supersede the previous run. `main`: never — a cancelled run is
+  # neither green nor red, and "green on main" is what branch protection
+  # and bisecting rely on.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor (tomllib). macOS runs the floor as well, since
+        # the suite is developed there.
+        #
+        # No windows-latest: the suite is POSIX-only by construction, and a
+        # Windows job would pass without proving anything. `core/agents.py`
+        # probes liveness with `os.kill(pid, 0)`, which on Windows is not a
+        # no-op — it TerminateProcess()es the target, and `tests/test_agents.py`
+        # passes it `os.getpid()`, so the runner would kill itself and exit 0.
+        # `tests/test_schedule.py` also needs an IANA tz database Windows
+        # lacks, and `tests/test_run.py` drives `#!/bin/sh` stubs through
+        # `shell=True`. README's portability claim is about running the CLI,
+        # not about the suite; holding it properly needs its own ticket.
+        os: [ubuntu-latest]
+        python: ['3.11', '3.12', '3.13']
+        include:
+          - os: macos-latest
+            python: '3.11'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # `discover` without -s finds nothing (no tests/__init__.py).
+      - run: python -m unittest discover -s tests -v
+
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        # GitHub's default is `bash -e {0}` — errexit but NO pipefail, so a
+        # failing command upstream of a pipe is silently swallowed and the
+        # step reads as success. Every check below is a pipeline.
+        shell: bash -euo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Derived from the files themselves, not an allowlist of paths: any
+      # tracked file starting with `#!` must be mode 100755. An enumerated
+      # glob list goes stale silently the first time a script lands outside
+      # it. The mode bit is the one thing a content hash cannot see, and git
+      # runs a non-executable hook silently — i.e. not at all.
+      #
+      # Scope: this repo's own git index. The exec bit on files `sync-pack`
+      # *installs into a consumer tree* is TKT-24 and is NOT covered here.
+      - name: tracked shebang files are executable
+        run: |
+          bad=$(git ls-files -s | while IFS=$'\t' read -r meta path; do
+                  [ "$(head -c2 "$path" 2>/dev/null)" = '#!' ] || continue
+                  [ "${meta%% *}" = 100755 ] || printf '%s %s\n' "${meta%% *}" "$path"
+                done)
+          if [ -n "$bad" ]; then
+            echo "::error::tracked files with a shebang but not mode 100755:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "all tracked shebang files are executable"
+
+      # Byte-compile everything, including modules no test imports.
+      # Measured: breaking `core/toolchain.py` or `core/scaffold.py` leaves
+      # the suite fully green, so a syntax error there ships unnoticed.
+      # (Every adapter, `linear` and `base` included, IS caught by the suite
+      # — checked by breaking each one in turn — so no import loop here.)
+      - name: everything byte-compiles
+        run: python -m compileall -q core adapters tkt
+
+      # A real verb, through a PATH symlink, from a cwd outside the repo:
+      # exercises tkt's own sys.path bootstrap, config discovery and an
+      # adapter. (`--version` alone proves none of that — it is handled at
+      # argparse time and never loads config.)
+      - name: scaffold a project and read it back from a foreign cwd
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          ln -s "$GITHUB_WORKSPACE/tkt" "$RUNNER_TEMP/bin/tkt"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          tkt init --provider markdown --dir "$RUNNER_TEMP/proj" --sample
+          cd "$RUNNER_TEMP"
+          export TKT_CONFIG="$RUNNER_TEMP/proj/.sdlc/config.toml"
+          tkt doctor
+          key=$(basename "$(ls "$RUNNER_TEMP"/proj/.sdlc/board/*.md | head -1)" .md)
+          tkt view "$key" --json | jq -e --arg k "$key" '.key == $k'
+
+      - name: smoke-sync-pack
+        run: bash scripts/smoke-sync-pack.sh
+
+      # scripts/smoke-agents.sh is deliberately NOT here: it SIGKILLs a live
+      # background driver (kill -9 / pkill), which is not safe on a shared
+      # runner. It stays a local-only check.
+      #
+      # TODO(TKT-29): node --test enforcement/*.test.mjs — needs
+      #   actions/setup-node; `enforcement/` does not exist yet.
+      # TODO(TKT-49): the skill-tier lint — does not exist yet.
+      # Neither is stubbed in: a step that globs a nonexistent directory
+      # either fails outright or passes vacuously, and a check that cannot
+      # fail is worse than no check.
