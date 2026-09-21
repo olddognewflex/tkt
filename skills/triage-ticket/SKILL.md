@@ -65,6 +65,28 @@ tkt transition "$KEY" in_progress
 tkt edit "$KEY" --agent-status processing
 ```
 
+### 3b. Create the working branch
+
+Branch as soon as the ticket is in progress — before any file is touched — so
+work cannot start on the default branch. Slug from the summary (lowercase,
+hyphen-separated, a few words). Idempotent: re-running triage on a ticket
+already branched is a no-op.
+
+```shell
+BRANCH=$(tkt cfg vcs.branch_fmt --ticket "$KEY" --slug "<slug-from-summary>")
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
+  git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+fi
+```
+
+This runs for every ticket type. A ticket later routed to
+`complete-deliverable`, or stopped by an external blocker, leaves an unused
+local branch — cheaper than discovering at commit time that the work landed on
+the default branch.
+
+Uncommitted changes carry across `git checkout -b`, so a run that already
+started editing is still recoverable by branching at this point.
+
 ### 4. Start time tracking
 
 Entry time is recorded implicitly by the provider's history/changelog; `tkt
@@ -86,4 +108,5 @@ Provide to the next skill:
 - Summary
 - Acceptance criteria (bullet list)
 - Affected packages
+- The working branch name (created in step 3b)
 - Any blockers/unknowns identified
