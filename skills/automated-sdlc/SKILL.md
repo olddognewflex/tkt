@@ -148,7 +148,9 @@ here because planning is not adversarial.
 
 ### Phase 3: Implement + test (→ `sdlc-executor`)
 
-1. Branch: `git checkout -b "$(tkt cfg vcs.branch_fmt --ticket "$KEY" --slug "<slug>")"`
+1. Branch: already created by `triage-ticket` (Phase 1). Entering this phase
+   directly, without triage, create it first —
+   `git checkout -b "$(tkt cfg vcs.branch_fmt --ticket "$KEY" --slug "<slug>")"`
 2. Implement per plan. **Delegate to `sdlc-executor`**, which is scoped to the repo
    worktree and cannot transition tickets or push. Fallback: implement inline.
 3. After each logical unit, run the configured toolchain:
