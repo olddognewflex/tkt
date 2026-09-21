@@ -21,11 +21,24 @@ class Adapter(ABC):
 
     @abstractmethod
     def list(self, tier: int | None = None, query: str | None = None) -> list[Ticket]:
-        """Return tickets matching a named query (config [queries].tierN / name)."""
+        """Return tickets matching a named query (config [queries].tierN / name).
+
+        **Scoped.** Results must be limited to this project/repo/team —
+        whatever the backend's unit of ownership is. One board is routinely
+        shared by several repos, each with its own config, and callers treat
+        the first result as workable: `select-ticket` auto-selects it. An
+        unscoped `list` therefore makes one repo act on another's ticket.
+        """
 
     @abstractmethod
     def view(self, key: str) -> Ticket:
-        """Return one normalized ticket."""
+        """Return one normalized ticket.
+
+        **Not scoped**, deliberately — unlike `list`. A `blocked_by` entry or
+        a link may name a ticket outside this project, and it has to resolve
+        or blocker checks break. The write verbs address by key and are
+        likewise unscoped.
+        """
 
     @abstractmethod
     def transition(self, key: str, role: str) -> None:

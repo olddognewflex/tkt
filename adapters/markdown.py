@@ -228,11 +228,28 @@ class MarkdownAdapter(Adapter):
         return self.me or "(unset; set [markdown].me)"
 
     def _all_tickets(self) -> list[Ticket]:
+        """Every ticket on this board that belongs to this project.
+
+        One board dir is often shared by several repos, each with its own
+        config (`[markdown].board_dir` pointing at the same place), so
+        enumerating the whole directory hands a repo another project's
+        tickets -- and `select-ticket` would auto-select one. Scope by the
+        key prefix, the same convention `_next_key` already mints against.
+        An unset `[ticketing].project` means "no scoping" and enumerates
+        everything, which is the single-project case.
+
+        `view` stays deliberately unscoped: a blocker or link may point at
+        another project's ticket and must still resolve by key.
+        """
         if not self.board_dir.is_dir():
             raise ProviderError(f"board_dir does not exist: {self.board_dir}")
+        prefix = self.config.project
         out = []
         for path in sorted(self.board_dir.glob("*.md")):
             key = path.stem
+            # `TKT-` rather than `TKT`, so TKTX-1 is not read as a TKT ticket.
+            if prefix and not key.startswith(f"{prefix}-"):
+                continue
             fm, body = self._read_raw(key)
             out.append(self._to_ticket(key, fm, body))
         return out
@@ -271,8 +288,16 @@ class MarkdownAdapter(Adapter):
         prefix = project or self.config.project or "TKT"
         n = 0
         if self.board_dir.is_dir():
-            for path in self.board_dir.glob(f"{prefix}-*.md"):
-                suffix = path.stem[len(prefix) + 1:]
+            # Literal prefix match, the same rule `_all_tickets` applies. A
+            # glob would treat metacharacters in the project as a pattern:
+            # with project `A[BC]`, `glob("A[BC]-*.md")` matches `AB-7.md`
+            # but NOT the literal `A[BC]-1.md`, so the highest existing
+            # number is missed and `create` overwrites a live ticket.
+            for path in self.board_dir.glob("*.md"):
+                stem = path.stem
+                if not stem.startswith(f"{prefix}-"):
+                    continue
+                suffix = stem[len(prefix) + 1:]
                 if suffix.isdigit():
                     n = max(n, int(suffix))
         return f"{prefix}-{n + 1}"
@@ -551,4 +576,17 @@ class MarkdownAdapter(Adapter):
                   self.config.roles.get("done", "MISSING")),
             Check("me set", bool(self.me), self.me or "set [markdown].me for currentUser()"),
         ]
+        # A `project` that matches no key on the board makes every query come
+        # back empty, which reads as an idle board rather than a
+        # misconfiguration. Name it here: `doctor` is the validation surface.
+        prefix = self.config.project
+        if prefix and self.board_dir.is_dir():
+            files = [p.stem for p in self.board_dir.glob("*.md")]
+            matched = [k for k in files if k.startswith(f"{prefix}-")]
+            checks.append(Check(
+                "keys match project prefix",
+                bool(matched) or not files,
+                f"{len(matched)} of {len(files)} *.md start with '{prefix}-'"
+                + ("" if matched or not files else
+                   f" — every ticket is invisible to `list`; found e.g. {files[0]}")))
         return checks
