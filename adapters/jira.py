@@ -307,6 +307,41 @@ def _md_to_adf(text: str) -> dict:
     return {"type": "doc", "version": 1, "content": content}
 
 
+# The "block" stem, but not when it is negated: "unblocks" / "is unblocked by"
+# and "non-blocking dependency" are real custom link types that mean the
+# opposite, and a plain substring test would file them as blockers. Matched
+# against the description with every separator stripped, so the hyphenated and
+# spaced spellings ("non-blocking", "non blocking") collapse onto one pattern.
+_BLOCK_STEM = re.compile(r"(?<!un)(?<!non)(?<!not)block")
+_SEPARATORS = re.compile(r"[^a-z0-9]+")
+
+
+def _has_block_stem(description) -> bool:
+    return bool(_BLOCK_STEM.search(
+        _SEPARATORS.sub("", str(description or "").lower())))
+
+
+def _is_blocks_link(ltype: dict) -> bool:
+    """Is this issue link type the blocks/is-blocked-by relationship?
+
+    The `inward`/`outward` descriptions are editable per Jira site ("blocks"
+    vs "blocking" vs "is blocking"), so matching them literally reports no
+    blockers at all on a customised site. Match the link type `name` instead
+    -- conventionally "Blocks" and left alone on most sites -- and only fall
+    back to the descriptions, on the "block" stem appearing in both, for a
+    site that renamed the type too.
+
+    Jira exposes no truly stable identifier for a link type, so this stays a
+    heuristic with one known limitation: both branches are English-only. A
+    site running in French ("bloque" / "est bloque par") matches neither and
+    reports no blockers, exactly as before this was written.
+    """
+    if str(ltype.get("name") or "").strip().lower() == "blocks":
+        return True
+    return _has_block_stem(ltype.get("inward")) and \
+        _has_block_stem(ltype.get("outward"))
+
+
 class JiraAdapter(Adapter):
     def __init__(self, config):
         super().__init__(config)
@@ -405,16 +440,30 @@ class JiraAdapter(Adapter):
         key = issue.get("key", "")
         issue_type = (f.get("issuetype") or {}).get("name", "")
         desc = _adf_to_text(f.get("description")).strip()
-        blocked_by, blocks = [], []
+        blocked_by, blocks, seen_blockers = [], [], set()
         for link in f.get("issuelinks", []) or []:
-            ltype = link.get("type", {})
-            if "inwardIssue" in link and ltype.get("inward") == "is blocked by":
-                inner = link["inwardIssue"]
+            if not _is_blocks_link(link.get("type") or {}):
+                continue
+            # Direction comes from which side Jira returned, never from the
+            # human-readable inward/outward text: those are editable per site.
+            # Read both sides independently and by value, not by key presence:
+            # `fields.issuelinks` carries one side per entry, but other link
+            # payloads carry both, and an absent side can arrive as an explicit
+            # null rather than a missing key.
+            inner = link.get("inwardIssue") or {}
+            outer = link.get("outwardIssue") or {}
+            # A link payload that carries both sides (not `fields.issuelinks`,
+            # but `GET /issueLink/{id}` and webhooks do) names this issue on
+            # one of them; without the guard a ticket blocks itself forever.
+            if (inner.get("key") and inner["key"] != key
+                    and inner["key"] not in seen_blockers):
+                seen_blockers.add(inner["key"])
                 cat = (((inner.get("fields") or {}).get("status") or {})
                        .get("statusCategory") or {}).get("key", "")
-                blocked_by.append({"key": inner.get("key"), "resolved": cat == "done"})
-            if "outwardIssue" in link and ltype.get("outward") == "blocks":
-                blocks.append(link["outwardIssue"].get("key"))
+                blocked_by.append({"key": inner["key"], "resolved": cat == "done"})
+            if (outer.get("key") and outer["key"] != key
+                    and outer["key"] not in blocks):
+                blocks.append(outer["key"])
         status = (f.get("status") or {}).get("name", "")
         return Ticket(
             key=key,
