@@ -37,7 +37,9 @@ jobs:
         # `tests/test_schedule.py` also needs an IANA tz database Windows
         # lacks, and `tests/test_run.py` drives `#!/bin/sh` stubs through
         # `shell=True`. README's portability claim is about running the CLI,
-        # not about the suite; holding it properly needs its own ticket.
+        # not about the suite. Tracked in TKT-61, which also covers the
+        # underlying bug: that probe is destructive on Windows in `tkt agents`
+        # itself, not just under test.
         os: [ubuntu-latest]
         python: ['3.11', '3.12', '3.13']
         include:
