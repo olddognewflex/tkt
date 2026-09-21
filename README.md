@@ -213,6 +213,13 @@ reachable from the current status (REST mode). A ticket already in the target
 lane counts as success, so retries are safe. If the status can't be
 read, acli's own output decides.
 
+- **Queries are scoped to `[ticketing].project` unconditionally.** Each
+  `[queries]` entry becomes `(project = "KEY") AND (<query>)`, with a trailing
+  `ORDER BY` moved after the parentheses and the key quoted. Both sides are
+  parenthesised so a top-level `OR` in your query can't return other projects'
+  issues. A `project` clause you write yourself is ANDed with the configured
+  one rather than replacing it, so a query cannot span projects today — an
+  opt-out is planned via `[query_scopes]`.
 - **blocked_by/blocks** come from `issuelinks`. The link type is matched by
   `name == "Blocks"`, falling back to the "block" stem appearing in *both* the
   inward and outward descriptions, with negations excluded — `unblocks`,

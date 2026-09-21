@@ -342,6 +342,56 @@ def _is_blocks_link(ltype: dict) -> bool:
         _has_block_stem(ltype.get("outward"))
 
 
+_ORDER_BY = re.compile(r"\border\s+by\b", re.IGNORECASE)
+
+
+def _split_order_by(jql: str) -> tuple[str, str]:
+    """Split a JQL string into (conditions, trailing ORDER BY clause).
+
+    Scans for the last top-level `ORDER BY`, skipping any that sit inside a
+    quoted literal (`summary ~ "order by"`) or inside parentheses, so only
+    the clause that actually terminates the query is peeled off. Returns an
+    empty second element when there is none.
+
+    Known limitation, shared with any quote-tracking scanner: an unclosed
+    quote (a bare apostrophe, say) swallows the rest of the string, so no
+    clause is found and the query is passed through whole. Such input is
+    already invalid JQL, so Jira rejects it either way.
+    """
+    quote = ""
+    depth = 0
+    cut = -1
+    i = 0
+    while i < len(jql):
+        ch = jql[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            # Clamped: a stray `)` is already invalid JQL, but letting depth
+            # go negative would suppress top-level detection for the rest of
+            # the string and turn Jira's "unbalanced parentheses" error into
+            # a confusing "ORDER BY inside parentheses" one.
+            depth = max(0, depth - 1)
+        elif depth == 0 and ch in "oO":
+            m = _ORDER_BY.match(jql, i)
+            if m:
+                cut = i
+                i = m.end()
+                continue
+        i += 1
+    if cut < 0:
+        return jql, ""
+    return jql[:cut], jql[cut:]
+
+
 class JiraAdapter(Adapter):
     def __init__(self, config):
         super().__init__(config)
@@ -536,9 +586,23 @@ class JiraAdapter(Adapter):
         return names or self.config.priorities()
 
     def _full_jql(self, jql: str) -> str:
-        if self.project and "project" not in jql.lower():
-            return f"project = {self.project} AND {jql}"
-        return jql
+        """Scope a query to the configured project.
+
+        The condition is always added when a project is configured: testing
+        for the substring "project" dropped scoping from any query that
+        merely mentioned the word (`summary ~ "project"` searched every
+        project on the site). Both sides are parenthesised so an `OR` in
+        either can't escape the scope, and a trailing `ORDER BY` is peeled
+        off first and re-appended -- prepending in front of it produces
+        invalid JQL when the query is only an `ORDER BY`.
+        """
+        if not self.project:
+            return jql
+        cond = f"project = {json.dumps(self.project)}"
+        body, order = _split_order_by(jql)
+        body = body.strip()
+        clause = f"({cond}) AND ({body})" if body else cond
+        return f"{clause} {order.strip()}".strip() if order else clause
 
     def list(self, tier=None, query=None):
         jql = self._full_jql(self.config.query(tier=tier, name=query))

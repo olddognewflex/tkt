@@ -39,7 +39,11 @@ cancelled    = "Cancelled"
 full_sdlc   = ["Story", "Bug"]
 deliverable = ["Task", "Sub-task", "Sub-Task", "Chore", "Epic", "Spike"]
 
-[queries]                # JQL; `project = DTB AND` is prepended automatically
+# JQL. The project condition is added unconditionally: each query becomes
+# `(project = "DTB") AND (<your query>)`, with any trailing ORDER BY moved
+# after the parentheses. A `project` clause of your own is ANDed with it
+# rather than replacing it, so a query cannot currently span projects.
+[queries]
 tier1 = 'status = "To Do" AND priority = Highest AND assignee = currentUser() ORDER BY created ASC'
 tier2 = 'status = "To Do" AND assignee = currentUser() ORDER BY priority DESC, created ASC'
 tier3 = 'status = "To Do" AND priority = Highest AND assignee is EMPTY ORDER BY created ASC'
