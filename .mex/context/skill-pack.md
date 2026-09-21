@@ -132,8 +132,9 @@ This repo's own `AGENTS.md` has **no** managed block and is hand-maintained.
 
 ## Staleness reporting
 
-`tkt sync-pack --check` reports missing, locally-modified, and out-of-date pack files
-and exits 1. `tkt doctor` folds in
+`tkt sync-pack --check` reports missing, locally-modified, out-of-date, and
+not-executable pack files and exits 1. Executable bits are carried on install and
+repaired on re-sync (git's rule: owner-executable). `tkt doctor` folds in
 [`doctor_check()`](mex://function:12b5420e646ba6ba58f0ac52a4bc1639), which is only a
 non-fatal hint: it returns `None` when there is no manifest, and otherwise an
 always-ok `Check` comparing the manifest's `pack_commit` against the pack checkout's

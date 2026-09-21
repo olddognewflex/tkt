@@ -23,7 +23,7 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 # Expected counts are derived from the pack, not hardcoded, so adding a skill
@@ -155,6 +155,37 @@ if [ "$rc9" = "64" ] && echo "$out9" | grep -q "unknown harness"; then
   pass "case9 unknown harness name rejected with exit 64"
 else
   fail "case9 unknown harness (rc=$rc9): $out9"
+fi
+
+# ---- case 10: the exec bit survives the sync, and is repaired --------------
+# The real pack ships no executable today, so an assertion over it would pass
+# over zero files. Plant one in a copy of the pack and sync from that copy
+# (tkt locates its pack relative to its own script, so the copy is the pack).
+P7="$(mktemp -d)"; C7="$(mktemp -d)"
+git_init "$C7"
+# Copy exactly the working set (tracked + untracked-but-not-ignored), not
+# whatever local clutter sits in the checkout.
+( cd "$PACK" && git ls-files -co --exclude-standard ) \
+  | rsync -a --files-from=- "$PACK/" "$P7/"
+mkdir -p "$P7/skills/zz-exec-probe"
+printf -- '---\nname: zz-exec-probe\ndescription: exec-bit smoke probe\n---\n' \
+  > "$P7/skills/zz-exec-probe/SKILL.md"
+printf '#!/bin/sh\necho probe\n' > "$P7/skills/zz-exec-probe/hook.sh"
+chmod 755 "$P7/skills/zz-exec-probe/hook.sh"
+HOOK="$C7/.claude/skills/zz-exec-probe/hook.sh"
+set +e
+err10="$("$P7/tkt" sync-pack --dir "$C7" 2>&1 >/dev/null)"
+[ -x "$HOOK" ]; fresh=$?
+chmod 644 "$HOOK"                              # right bytes, wrong mode
+out10="$("$P7/tkt" sync-pack --check --dir "$C7" 2>&1)"; rc10=$?
+"$P7/tkt" sync-pack --dir "$C7" >/dev/null 2>&1
+[ -x "$HOOK" ]; repaired=$?
+set -e
+if [ "$fresh" = 0 ] && [ "$rc10" != 0 ] && echo "$out10" | grep -q "not-executable" \
+   && [ "$repaired" = 0 ]; then
+  pass "case10 synced executable keeps +x; lost +x flagged by --check and repaired"
+else
+  fail "case10 exec bit (fresh=$fresh check_rc=$rc10 repaired=$repaired): $out10 ${err10:+[first sync stderr: $err10]}"
 fi
 
 echo

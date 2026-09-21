@@ -11,13 +11,22 @@ Guarantees:
   * Idempotent: a second run with an unchanged pack makes zero changes on disk
     (including the manifest), so `git status` stays clean.
   * Never touches content outside the AGENTS.md marker region it manages.
+  * Carries the executable bit. Content hashes cannot see it and git runs a
+    non-executable hook silently, so an executable pack file is chmod'ed on
+    write, a lost bit is repaired even when the content already matches, and
+    `--check` reports it as `not-executable`. "Executable" is git's rule
+    (owner x); group/other follow the umask, as a checkout would. Bits are
+    only ever added, symlinked destinations are left alone, and a file that
+    cannot be chmod'ed is a warning rather than an aborted sync.
 
 Runs BEFORE config exists (a consumer may sync before `tkt init`), so it never
 calls Config.load(). Stdlib only.
 """
 import hashlib
 import json
+import stat
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -96,6 +105,44 @@ def harness_names() -> list[str]:
 
 def _sha_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
+
+
+def _is_exec(mode: int) -> bool:
+    """Git's rule: a file is executable (100755) iff its owner can run it.
+
+    Not a comparison of the whole rwx triplet: the group/other bits come from
+    whichever umask the pack and the consumer were each checked out under, so
+    they legitimately differ, and a consumer hook at 0o750 is executable to
+    git and would be wrongly flagged.
+    """
+    return bool(mode & stat.S_IXUSR)
+
+
+def _grant_exec(dst: Path) -> bool:
+    """Make `dst` executable the way a git checkout does; True if it changed.
+
+    Content hashes cannot see the mode bit, and git runs a non-executable
+    hook silently — so a consumer would believe it is protected when it is
+    not. Adds x wherever r is already set, so the result respects the umask
+    `dst` was written under (0o644 -> 0o755, 0o600 -> 0o700) instead of
+    producing a mode like 0o711 or 0o751. Only ever adds bits.
+    """
+    mode = dst.stat().st_mode
+    if _is_exec(mode):
+        return False
+    dst.chmod(mode | ((mode & 0o444) >> 2) | stat.S_IXUSR)
+    return True
+
+
+def _try_grant_exec(dst: Path, rel: str, failed: list) -> int:
+    """`_grant_exec`, but a file we cannot chmod (owned by another user, say
+    after a container ran sync-pack) is recorded rather than aborting the
+    whole sync half-way with a traceback. Returns 1 if the mode changed."""
+    try:
+        return int(_grant_exec(dst))
+    except OSError as e:
+        failed.append((rel, e.strerror or str(e)))
+        return 0
 
 
 def _walk(base: Path) -> list[Path]:
@@ -286,14 +333,17 @@ def _splice_block(cur: str | None, block: str) -> str:
 
 # ---- check-mode reporting --------------------------------------------------
 
-def _report_check(missing: list, locally_mod: list, outdated: list) -> None:
-    if not (missing or locally_mod or outdated):
+def _report_check(missing: list, locally_mod: list, outdated: list,
+                  not_exec: list) -> None:
+    if not (missing or locally_mod or outdated or not_exec):
         print("sync-pack --check: pack is in sync")
         return
     for title, items in (
         ("missing", missing),
         ("locally-modified", locally_mod),
         ("out-of-date-vs-pack", outdated),
+        # Content matches but the exec bit was lost — a re-sync repairs it.
+        ("not-executable", not_exec),
     ):
         if items:
             print(f"{title} ({len(items)}):")
@@ -325,6 +375,11 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     missing: list[str] = []
     locally_mod: list[str] = []
     outdated: list[str] = []
+    not_exec: list[str] = []
+    # (relpath, error) for exec bits we could not set. Non-fatal: the rest of
+    # the sync still completes, and `--check` keeps reporting the file.
+    chmod_failed: list[tuple[str, str]] = []
+    modes = 0
     # (relpath, reason) where reason is "modified" (drifted from last sync) or
     # "preexisting" (already on disk but never synced by us).
     warnings: list[tuple[str, str]] = []
@@ -335,6 +390,9 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         new_sha = _sha_bytes(content)
         new_files[rel] = new_sha
         dst = target / rel
+        # A symlinked destination (e.g. `tkt init --link-skills`) resolves to
+        # a file outside the consumer tree; its mode is not ours to change.
+        want_exec = _is_exec(src.stat().st_mode) and not dst.is_symlink()
 
         if check:
             if not dst.exists():
@@ -344,8 +402,12 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             man_sha = old_files.get(rel)
             if man_sha is not None and cur_sha != man_sha:
                 locally_mod.append(rel)
+            # A file both out of date and non-executable reports once, as
+            # out-of-date: the re-sync that fixes the content also sets the bit.
             if cur_sha != new_sha:
                 outdated.append(rel)
+            elif want_exec and not _is_exec(dst.stat().st_mode):
+                not_exec.append(rel)
             continue
 
         if dst.exists():
@@ -360,9 +422,17 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             elif cur_sha != man_sha:
                 warnings.append((rel, "modified"))
             if cur_sha == new_sha:
-                continue  # idempotent no-touch
+                # Content already matches, but still repair a lost exec bit:
+                # every consumer synced before modes were carried has the
+                # right bytes and the wrong mode, and a content-only
+                # comparison would skip it forever.
+                if want_exec:
+                    modes += _try_grant_exec(dst, rel, chmod_failed)
+                continue
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(content)
+        if want_exec:
+            _try_grant_exec(dst, rel, chmod_failed)
         writes += 1
 
     # AGENTS.md managed block.
@@ -387,8 +457,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                 if cur_region_sha != block_sha:
                     outdated.append(f"{AGENTS_REL} (tkt-pack block)")
         print(f"harnesses: {', '.join(selected)}")
-        _report_check(missing, locally_mod, outdated)
-        return 1 if (missing or locally_mod or outdated) else 0
+        _report_check(missing, locally_mod, outdated, not_exec)
+        return 1 if (missing or locally_mod or outdated or not_exec) else 0
 
     # write mode for AGENTS.md
     if cur_agents is not None:
@@ -407,6 +477,9 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             print(f"warning: pre-existing file overwritten: {rel}")
         else:
             print(f"warning: {rel} was locally modified since last sync — overwriting")
+    for rel, err in chmod_failed:
+        print(f"warning: could not make {rel} executable ({err}) — git will not "
+              f"run it; fix its ownership and re-run sync-pack", file=sys.stderr)
 
     # Rewrite the manifest only when the material (non-timestamp) content
     # changed; otherwise leave it byte-for-byte identical so re-runs stay clean.
@@ -428,10 +501,12 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
     if added:
         print(f"harnesses added: {', '.join(added)}")
-    if writes == 0 and not warnings and not wrote_manifest:
+    if writes == 0 and modes == 0 and not warnings and not wrote_manifest:
         print(f"sync-pack: up to date ({len(new_files)} entries) at {target}")
     else:
         summary = f"sync-pack: {writes} file(s) written to {target}"
+        if modes:
+            summary += f", {modes} exec bit(s) repaired"
         if warnings:
             summary += f", {len(warnings)} pre-existing/locally-modified overwritten"
         print(summary)

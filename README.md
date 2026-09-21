@@ -127,7 +127,8 @@ the full guide.
 - Updating: `git pull` the pack clone, re-run `tkt sync-pack` per consumer repo;
   `tkt sync-pack --check` reports drift. Re-runs are idempotent, and locally
   modified pack files are overwritten with a warning — customize upstream in the
-  pack, not in consumers.
+  pack, not in consumers. Executable bits are carried and a lost one is repaired
+  (only ever added, never stripped); see `docs/install.md`.
 
 ## Verb contract
 
