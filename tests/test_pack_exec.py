@@ -120,16 +120,12 @@ class ExecBit(unittest.TestCase):
         self.sync()
         self.assertTrue(is_exec(md))
 
-    def test_repair_adds_bits_and_never_strips_others(self):
-        """The repair must OR the source's bits in, not overwrite the mode.
-
-        Only reachable when chmod actually runs: the source is user-exec only
-        (0o744) and the consumer's copy has group/other exec but lost the
-        user bit (0o655). Adding gives 0o755; overwriting the exec bits
-        would give 0o744 and silently strip the consumer's g+x/o+x. (A
-        non-executable source returns before chmod, so it cannot tell the
-        two apart — which is why the test above does not cover this.)
-        """
+    def test_repair_ignores_the_sources_group_and_other_bits(self):
+        """A user-only-executable source (0o744) repairs the same way a 0o755
+        one does: only the owner bit decides "executable", and the grant
+        follows the destination's own r bits. So a consumer copy at 0o655
+        goes to 0o755 — keeping its group/other x rather than being cut back
+        to the source's 0o744."""
         self.hook_src.chmod(0o744)
         self.sync()
         self.hook_dst.chmod(0o655)
@@ -215,6 +211,35 @@ class ExecBit(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(outside.stat().st_mode), 0o644)
         _, out = self.sync(check=True)
         self.assertNotIn("not-executable", out)
+
+    def test_symlinked_parent_directory_is_not_followed(self):
+        """The `tkt init --link-skills` shape: the skill *directory* is a
+        symlink, so `hook.sh` is a plain file whose parent resolves outside
+        the consumer tree. A leaf-only `is_symlink()` check misses it and
+        chmod changes the outside file; it must be left alone."""
+        shared = self.tmp / "shared" / "demo"
+        shared.mkdir(parents=True)
+        for f in ("SKILL.md", "hook.sh"):
+            (shared / f).write_bytes((self.hook_src.parent / f).read_bytes())
+        (shared / "hook.sh").chmod(0o644)
+        (self.consumer / ".claude" / "skills").mkdir(parents=True)
+        (self.consumer / ".claude" / "skills" / "demo").symlink_to(shared)
+        self.sync()
+        self.assertEqual(stat.S_IMODE((shared / "hook.sh").stat().st_mode), 0o644)
+        _, out = self.sync(check=True)
+        self.assertNotIn("not-executable", out)
+
+    def test_a_failed_repair_is_not_reported_as_up_to_date(self):
+        """If the only change needed is a repair that fails, saying "up to
+        date" contradicts the `--check` run that follows it."""
+        self.sync()
+        self.hook_dst.chmod(0o644)
+        with mock.patch.object(Path, "chmod",
+                               side_effect=PermissionError(1, "Operation not permitted")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            _, out = self.sync()
+        self.assertNotIn("up to date", out)
+        self.assertIn("could NOT be set", out)
 
     def test_out_of_date_and_non_executable_reports_once_as_out_of_date(self):
         """Deliberate: the re-sync that fixes the content also sets the bit,

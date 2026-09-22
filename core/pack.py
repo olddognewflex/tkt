@@ -16,7 +16,8 @@ Guarantees:
     write, a lost bit is repaired even when the content already matches, and
     `--check` reports it as `not-executable`. "Executable" is git's rule
     (owner x); group/other follow the umask, as a checkout would. Bits are
-    only ever added, symlinked destinations are left alone, and a file that
+    only ever added, a destination that resolves outside the consumer tree
+    (a symlinked file or parent directory) is left alone, and a file that
     cannot be chmod'ed is a warning rather than an aborted sync.
 
 Runs BEFORE config exists (a consumer may sync before `tkt init`), so it never
@@ -132,6 +133,13 @@ def _grant_exec(dst: Path) -> bool:
         return False
     dst.chmod(mode | ((mode & 0o444) >> 2) | stat.S_IXUSR)
     return True
+
+
+def _within(dst: Path, target: Path) -> bool:
+    """True when `dst`, with every symlink in its path resolved, is inside
+    `target` (already resolved). Works for a not-yet-created leaf: resolve
+    is non-strict, so its existing parents are still followed."""
+    return dst.resolve().is_relative_to(target)
 
 
 def _try_grant_exec(dst: Path, rel: str, failed: list) -> int:
@@ -390,9 +398,12 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         new_sha = _sha_bytes(content)
         new_files[rel] = new_sha
         dst = target / rel
-        # A symlinked destination (e.g. `tkt init --link-skills`) resolves to
-        # a file outside the consumer tree; its mode is not ours to change.
-        want_exec = _is_exec(src.stat().st_mode) and not dst.is_symlink()
+        # Only change modes on files that really live in the consumer tree.
+        # Checking `dst.is_symlink()` is not enough: `tkt init --link-skills`
+        # symlinks whole skill *directories*, so a leaf that is a plain file
+        # can still resolve through a symlinked parent to a file outside the
+        # tree, and chmod would follow it there.
+        want_exec = _is_exec(src.stat().st_mode) and _within(dst, target)
 
         if check:
             if not dst.exists():
@@ -501,12 +512,17 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
     if added:
         print(f"harnesses added: {', '.join(added)}")
-    if writes == 0 and modes == 0 and not warnings and not wrote_manifest:
+    # A failed repair is not "up to date": `--check` would report the file
+    # as not-executable straight after.
+    if (writes == 0 and modes == 0 and not warnings and not wrote_manifest
+            and not chmod_failed):
         print(f"sync-pack: up to date ({len(new_files)} entries) at {target}")
     else:
         summary = f"sync-pack: {writes} file(s) written to {target}"
         if modes:
             summary += f", {modes} exec bit(s) repaired"
+        if chmod_failed:
+            summary += f", {len(chmod_failed)} exec bit(s) could NOT be set"
         if warnings:
             summary += f", {len(warnings)} pre-existing/locally-modified overwritten"
         print(summary)
