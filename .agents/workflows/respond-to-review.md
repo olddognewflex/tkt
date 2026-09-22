@@ -17,7 +17,7 @@ Read PR review comments, address each with code changes or replies, push fixes, 
    gh pr view "$PR" --repo "$REPO" --json reviews,reviewRequests,comments,reviewDecision
    ```
 2. Categorize: change request → fix; question → reply; suggestion → apply if valid; nit → apply.
-3. Make changes and reply on threads.
+3. Make changes. Post answers and fix summaries on the comment's own thread: `gh api "repos/$(tkt cfg vcs.repo)/pulls/$PR/comments/<root-comment-id>/replies" -f body=...` (`gh pr comment` only for a question with no thread).
 4. Commit and push:
    ```shell
    // turbo

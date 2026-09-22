@@ -13,7 +13,7 @@ Read PR review comments, address each with code changes or replies, push fixes, 
    gh api --paginate "repos/$OWNER/$NAME/pulls/$PR/comments?per_page=100"
    ```
 2. Categorize: change request → fix; question → reply; suggestion → apply if valid; nit → apply; blocker → must fix.
-3. Make changes and reply on threads.
+3. Make changes. Post answers and fix summaries on the comment's own thread: `gh api "repos/$OWNER/$NAME/pulls/$PR/comments/<root-comment-id>/replies" -f body=...` (`gh pr comment` only for a question with no thread).
 4. Commit and push:
    ```shell
    git add -A && git commit -m "fix(<scope>): address review feedback" && git push
