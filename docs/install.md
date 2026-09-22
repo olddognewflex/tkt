@@ -116,12 +116,23 @@ git add -A && git commit -m "chore: update SDLC skill pack"
 Check for drift without writing anything:
 
 ```sh
-tkt sync-pack --check    # lists missing / locally-modified / out-of-date files; exit 1 if any
+tkt sync-pack --check    # lists missing / locally-modified / out-of-date / not-executable; exit 1 if any
 ```
 
-`--check` reports three buckets: **missing** (pack file not installed here),
-**locally-modified** (installed file changed since the last sync), and
-**out-of-date-vs-pack** (installed file differs from the current pack).
+`--check` reports four buckets: **missing** (pack file not installed here),
+**locally-modified** (installed file changed since the last sync),
+**out-of-date-vs-pack** (installed file differs from the current pack), and
+**not-executable** (content matches, but the pack file is executable and the
+installed copy is not — a re-sync repairs it).
+
+**Executable bits are carried.** An executable pack file is installed executable,
+and a lost bit is repaired even when the content already matches. "Executable"
+follows git's rule — the owner can run it — and group/other bits follow your
+umask, as a checkout would. Bits are only ever added: if the pack makes a file
+non-executable later, installed copies keep their bit. A file sync-pack cannot
+chmod (owned by another user) produces a warning rather than aborting, and
+`--check` keeps reporting it. Note that a consumer repo with
+`core.fileMode=false` will not record the bit in git, however sync-pack sets it.
 
 **Overwrite-and-warn.** A normal `tkt sync-pack` restores installed pack files to
 the pack's version. If a file was locally modified since the last sync, it is

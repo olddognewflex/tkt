@@ -76,7 +76,8 @@ jobs:
       # runs a non-executable hook silently — i.e. not at all.
       #
       # Scope: this repo's own git index. The exec bit on files `sync-pack`
-      # *installs into a consumer tree* is TKT-24 and is NOT covered here.
+      # installs into a *consumer* tree is covered by smoke-sync-pack case 10
+      # (run below) and tests/test_pack_exec.py.
       - name: tracked shebang files are executable
         run: |
           bad=$(git ls-files -s | while IFS=$'\t' read -r meta path; do

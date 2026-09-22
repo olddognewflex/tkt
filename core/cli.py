@@ -197,8 +197,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dir", default=".",
                     help="consumer repo to install the pack into (default cwd)")
     sp.add_argument("--check", action="store_true",
-                    help="report-only: list missing/locally-modified/out-of-date "
-                         "pack files and exit 1 if any; writes nothing")
+                    help="report-only: list missing/locally-modified/out-of-date/"
+                         "not-executable pack files and exit 1 if any; writes nothing")
 
     sp = add("run")
     sp.add_argument("key", nargs="?", default=None,

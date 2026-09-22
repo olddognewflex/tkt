@@ -166,8 +166,11 @@ run with an unchanged pack leaves `git status` clean).
 
 In a consumer repo it also maintains a generated block inside that repo's
 `AGENTS.md`, delimited by markers — content outside the markers is preserved
-verbatim. `tkt sync-pack --check` reports missing/locally-modified/out-of-date
-pack files and exits 1; `tkt doctor` folds the same check in.
+verbatim. `tkt sync-pack --check` reports missing/locally-modified/out-of-date/
+not-executable pack files and exits 1. Executable pack files are installed
+executable, and a lost bit is repaired on re-sync. `tkt doctor` does **not** run
+this check: it only reports whether the pack checkout has moved since the last
+sync (`pack_commit`), as a non-fatal hint.
 
 ### Harness selection
 

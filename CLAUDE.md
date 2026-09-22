@@ -45,17 +45,21 @@ with `os.kill(pid, 0)`, which on Windows *terminates* the target rather than
 being a no-op — TKT-61, a live bug in `tkt agents` itself, not only under
 test — and `tests/` also wants an IANA tz database and `#!/bin/sh`);
 **`scripts/smoke-agents.sh` stays local** because it SIGKILLs a live background
-driver; and the exec-bit check covers *this repo's index only* — the mode bits
-`sync-pack` writes into a consumer tree are TKT-24 and are not covered anywhere
-yet. `tests/` is a stdlib `unittest` suite covering the run
+driver; and the exec-bit check covers *this repo's index only*. The mode bits
+`sync-pack` writes into a *consumer* tree are covered separately, by
+`smoke-sync-pack.sh` case 10 and `tests/test_pack_exec.py` — both plant their own
+executable, since the real pack ships none today. `tests/` is a stdlib
+`unittest` suite covering the run
 driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
 (`test_github_close.py`), the after-hours window (`test_schedule.py`), the
 Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
 (`test_jira_transition.py`), Jira blocker-link direction (`test_jira_blockers.py`,
 `test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
-`test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`), and
-`tkt --version` (`test_version.py`).
+`test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`),
+markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`),
+`sync-pack`'s exec-bit handling (`test_pack_exec.py`), and `tkt --version`
+(`test_version.py`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
 "validation" of an adapter still means running `tkt doctor` / the read
