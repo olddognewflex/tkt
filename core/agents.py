@@ -35,6 +35,10 @@ STATES = ("running", "stalled", "dead", "blocked", "halted", "idle")
 
 _ISO = "%Y-%m-%dT%H:%M:%SZ"
 
+# On Windows `os.kill(pid, 0)` is not a probe: any signal other than
+# CTRL_C_EVENT/CTRL_BREAK_EVENT calls TerminateProcess() on the target.
+_WINDOWS = os.name == "nt"
+
 
 # ---- Local state readers -----------------------------------------------------
 
@@ -96,6 +100,8 @@ def _pid_alive(pid: Any, host: Any) -> bool | None:
         return None
     if not isinstance(pid, int) or pid <= 0:
         return None
+    if _WINDOWS:
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -105,6 +111,64 @@ def _pid_alive(pid: Any, host: Any) -> bool | None:
     except OSError:
         return None
     return True
+
+
+_STILL_ACTIVE = 259            # GetExitCodeProcess: process has not exited
+_ERROR_ACCESS_DENIED = 5
+_ERROR_INVALID_PARAMETER = 87  # OpenProcess: no process with that pid
+
+
+def _pid_alive_windows(pid: int) -> bool | None:
+    """`_pid_alive` for Windows: open the process read-only and ask it."""
+    if pid > 0xFFFFFFFF:
+        return None          # not a Windows pid; ctypes would truncate it
+    try:
+        exit_code, error = _win_query_process(pid)
+    except (OSError, AttributeError):
+        return None          # kernel32 unusable: unknown, never fatal
+    if exit_code is None:
+        if error == _ERROR_INVALID_PARAMETER:
+            return False
+        if error == _ERROR_ACCESS_DENIED:
+            return True      # alive, just owned by another user
+        return None
+    # A process that really exited with 259 reads as alive; Windows offers
+    # no cheaper way to tell, and "stalled" is the safe side to err on.
+    return exit_code == _STILL_ACTIVE
+
+
+def _win_query_process(pid: int) -> tuple[int | None, int]:
+    """(exit code, 0) for an openable process, else (None, Win32 error).
+
+    (None, 0) means the process opened but its exit code could not be read.
+
+    The only ctypes code in the module, kept apart so tests can stand in
+    for kernel32 on any platform.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL,
+                                     wintypes.DWORD)
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE,
+                                            ctypes.POINTER(wintypes.DWORD))
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+
+    process_query_limited_information = 0x1000
+    handle = kernel32.OpenProcess(process_query_limited_information,
+                                  False, pid)
+    if not handle:
+        return None, ctypes.get_last_error()
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return None, 0   # the process exists; its state is unknown
+        return code.value, 0
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 # ---- State resolution --------------------------------------------------------

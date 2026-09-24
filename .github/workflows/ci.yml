@@ -29,17 +29,15 @@ jobs:
         # 3.11 is the floor (tomllib). macOS runs the floor as well, since
         # the suite is developed there.
         #
-        # No windows-latest: the suite is POSIX-only by construction, and a
-        # Windows job would pass without proving anything. `core/agents.py`
-        # probes liveness with `os.kill(pid, 0)`, which on Windows is not a
-        # no-op — it TerminateProcess()es the target, and `tests/test_agents.py`
-        # passes it `os.getpid()`, so the runner would kill itself and exit 0.
-        # `tests/test_schedule.py` also needs an IANA tz database Windows
-        # lacks, and `tests/test_run.py` drives `#!/bin/sh` stubs through
-        # `shell=True`. README's portability claim is about running the CLI,
-        # not about the suite. Tracked in TKT-61, which also covers the
-        # underlying bug: that probe is destructive on Windows in `tkt agents`
-        # itself, not just under test.
+        # No windows-latest, by decision (TKT-61): the CLI runs on Windows,
+        # the suite does not. `tests/test_schedule.py` needs an IANA tz
+        # database Windows lacks, and `tests/test_run.py` drives `#!/bin/sh`
+        # stubs through `shell=True`, so a Windows job would pass without
+        # proving anything. The one Windows-specific code path, the liveness
+        # probe in `core/agents.py` (`os.kill(pid, 0)` would terminate the
+        # target there), is covered on every OS here by
+        # `tests/test_agents.py`'s TestWindowsLivenessProbe, which stubs
+        # kernel32.
         os: [ubuntu-latest]
         python: ['3.11', '3.12', '3.13']
         include:
