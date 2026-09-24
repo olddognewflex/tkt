@@ -262,7 +262,7 @@ func TestJSONRoundTrip(t *testing.T) {
         input User
     }{
         {"zero value", User{}},
-        {"unicode name", User{Name: ""}},
+        {"unicode name", User{Name: "Zoë 张伟 مريم 👩🏽‍💻"}},
         {"null-byte in string", User{Name: "foo\x00bar"}},
         {"max-length name", User{Name: strings.Repeat("a", 10000)}},
     }

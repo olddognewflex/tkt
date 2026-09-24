@@ -52,7 +52,19 @@ test('GET /users returns user list fragment', async () => {
 `HX-Trigger` response headers tell the client to fire events. These are part of
 the contract — test them explicitly.
 
+The header takes two forms: JSON (`{"userAdded": {...}}`, event plus data) or
+plain comma-separated event names (`userAdded, refreshUserList`). Calling
+`JSON.parse` on the plain form throws, so parse the way htmx does:
+
 ```typescript
+// Same split rule as htmx: JSON only when the value starts with '{'
+function parseHxTrigger(raw: string): Record<string, unknown> {
+  if (raw.trimStart().startsWith('{')) return JSON.parse(raw);
+  return Object.fromEntries(
+    raw.split(',').map((n) => n.trim()).filter(Boolean).map((n) => [n, null]),
+  );
+}
+
 test('POST /users triggers userAdded event', async () => {
   const response = await handler(apiGatewayEvent({
     method: 'POST',
@@ -66,8 +78,10 @@ test('POST /users triggers userAdded event', async () => {
 
   expect(response.statusCode).toBe(201);
 
-  // HX-Trigger can be a string (event name) or JSON (event + data)
-  const trigger = JSON.parse(response.headers['HX-Trigger']);
+  // userAdded carries data, so it must use the JSON form
+  const raw = String(response.headers?.['HX-Trigger'] ?? '');
+  expect(raw.trimStart().startsWith('{')).toBe(true);
+  const trigger = parseHxTrigger(raw);
   expect(trigger).toHaveProperty('userAdded');
   expect(trigger.userAdded).toMatchObject({ id: expect.any(String) });
 });
@@ -81,7 +95,8 @@ test('DELETE /users/:id triggers userList refresh', async () => {
 
   expect(response.statusCode).toBe(200);
   // After delete, the response should trigger a list refresh
-  expect(response.headers['HX-Trigger']).toContain('refreshUserList');
+  const trigger = parseHxTrigger(String(response.headers?.['HX-Trigger'] ?? ''));
+  expect(trigger).toHaveProperty('refreshUserList');
 });
 ```
 
