@@ -11,7 +11,7 @@ Find the right ticket to work next. All ticketing access goes through `tkt`.
 1. Verify `tkt doctor` passes.
 2. Identify current user: `tkt whoami`.
 3. Run tiers 1–5 from `.sdlc/config.toml [queries]` until one returns selectable tickets.
-4. Filter out blocked tickets with `tkt blockers KEY --json`.
+4. Filter out blocked tickets with `tkt blockers KEY --json`. Skip a tier only when it is undefined (`tkt cfg queries.tierN` exits 4); any other `tkt` failure stops selection with its error — never skip a failed tier or report nothing to work on. A candidate whose blocker check fails is excluded with a warning, never treated as unblocked.
 5. Auto-select Tier 1/2 assigned work; recommend Tier 3/4/5 and wait for human pick.
 
 After-hours deferral (optional): `tkt schedule --json` reports `label` and `in_window` for the `[schedule]` table (exit 2 = misconfigured: fail closed and defer); ask it in the same step that partitions the candidates. During business hours, candidates carrying the label are deferred — Tier 1/2 auto-select prefers non-deferred candidates, falling back to a deferred one only when no other exists (note it — deploy holds until after hours); Tier 3/4/5 never hard-filter — sort deferred last and mark the After-hours? column.

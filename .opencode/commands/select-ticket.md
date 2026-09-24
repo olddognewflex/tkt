@@ -8,7 +8,7 @@ Discover and select the next ticket to work on: $ARGUMENTS
 2. Identify current user: `tkt whoami`.
 3. Run tiers 1–5 from `.sdlc/config.toml [queries]` until one returns selectable tickets:
    - `tkt list --tier N --json`
-   - Filter out blocked tickets with `tkt blockers KEY --json`.
+   - Filter out blocked tickets with `tkt blockers KEY --json`. Skip a tier only when it is undefined (`tkt cfg queries.tierN` exits 4); any other `tkt` failure stops selection with its error — never skip a failed tier or report nothing to work on. A candidate whose blocker check fails is excluded with a warning, never treated as unblocked.
 4. If Tier 1 or 2 (assigned work): auto-select the first candidate, emit `SELECTED: <KEY>`, and proceed to `triage-ticket`.
 5. If Tier 3/4/5: print up to 5 ranked recommendations and wait for a human pick.
 
