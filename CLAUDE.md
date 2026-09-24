@@ -40,10 +40,12 @@ throwaway markdown project and reads a ticket back through a PATH symlink from
 a cwd outside the repo, and runs `scripts/smoke-sync-pack.sh`.
 
 Three deliberate gaps, each documented at its place in the YAML: **Windows is
-not in the matrix** (the suite is POSIX-only — `core/agents.py` probes liveness
-with `os.kill(pid, 0)`, which on Windows *terminates* the target rather than
-being a no-op — TKT-61, a live bug in `tkt agents` itself, not only under
-test — and `tests/` also wants an IANA tz database and `#!/bin/sh`);
+not in the matrix** (decided in TKT-61: the CLI supports Windows, the suite
+does not — `tests/` wants an IANA tz database and `#!/bin/sh`). The one
+Windows-only code path, `core/agents.py`'s liveness probe, avoids
+`os.kill(pid, 0)` there (it would *terminate* the target) and asks kernel32
+via ctypes instead; `TestWindowsLivenessProbe` covers it on every OS by
+stubbing `_win_query_process`;
 **`scripts/smoke-agents.sh` stays local** because it SIGKILLs a live background
 driver; and the exec-bit check covers *this repo's index only*. The mode bits
 `sync-pack` writes into a *consumer* tree are covered separately, by

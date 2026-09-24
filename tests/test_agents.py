@@ -15,9 +15,11 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core import agents
 from core.agents import (
     DEFAULT_STALE_AFTER, build_row, collect, human_age, read_marker, read_run,
     resolve_state, roots_for, status_for_key,
@@ -76,6 +78,67 @@ def _mkrun(root: Path, key: str, marker=None, heartbeat=None, stop=False) -> Pat
     if stop:
         (d / "STOP").touch()
     return d
+
+
+class TestWindowsLivenessProbe(unittest.TestCase):
+    """TKT-61: on Windows `os.kill(pid, 0)` terminates the target, so the
+    probe must never reach it there. kernel32 is stubbed, so this runs on
+    any platform."""
+
+    def setUp(self):
+        self.queried = []
+        self.result = (agents._STILL_ACTIVE, 0)
+
+        def query(pid):
+            self.queried.append(pid)
+            return self.result
+
+        self.enterContext(mock.patch.object(agents, "_WINDOWS", True))
+        self.enterContext(mock.patch.object(agents, "_win_query_process", query))
+        self.kill = self.enterContext(mock.patch.object(
+            agents.os, "kill", side_effect=AssertionError("os.kill on Windows")))
+
+    def _hb(self, pid: int, host: str = HERE) -> dict:
+        return {"beat": _iso(NOW - timedelta(seconds=600)),
+                "pid": pid, "host": host}
+
+    def test_stale_beat_live_process_is_stalled_and_untouched(self):
+        self.assertEqual(
+            resolve_state(None, self._hb(os.getpid()), NOW), "stalled")
+        self.assertEqual(self.queried, [os.getpid()])
+        self.kill.assert_not_called()
+
+    def test_exited_process_is_dead(self):
+        self.result = (0, 0)
+        self.assertEqual(resolve_state(None, self._hb(4242), NOW), "dead")
+        self.kill.assert_not_called()
+
+    def test_win32_answers(self):
+        for result, want in (((agents._STILL_ACTIVE, 0), True),
+                             ((1, 0), False),
+                             ((None, agents._ERROR_INVALID_PARAMETER), False),
+                             ((None, agents._ERROR_ACCESS_DENIED), True),
+                             ((None, 6), None),
+                             ((None, 0), None)):
+            with self.subTest(result=result):
+                self.result = result
+                self.assertIs(agents._pid_alive(4242, HERE), want)
+        self.kill.assert_not_called()
+
+    def test_unusable_kernel32_is_unknown_not_fatal(self):
+        def broken(pid):
+            raise OSError("kernel32 not found")
+        with mock.patch.object(agents, "_win_query_process", broken):
+            self.assertIsNone(agents._pid_alive(4242, HERE))
+            self.assertEqual(resolve_state(None, self._hb(4242), NOW), "stalled")
+
+    def test_pid_beyond_dword_is_not_queried(self):
+        self.assertIsNone(agents._pid_alive(2**32 + 4242, HERE))
+        self.assertEqual(self.queried, [])
+
+    def test_other_host_is_not_queried(self):
+        self.assertIsNone(agents._pid_alive(4242, "elsewhere"))
+        self.assertEqual(self.queried, [])
 
 
 class TestResolveState(unittest.TestCase):

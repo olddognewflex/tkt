@@ -7,7 +7,8 @@ normalizes every backend into one JSON shape. Skills never touch `acli`/`gh`/RES
 
 This is a **standalone, portable package** — clone it once and point any project at
 it. Nothing here is specific to a single repo or backend. Requires Python 3.11+
-(uses stdlib `tomllib`); no third-party deps. Runs on macOS, Linux, and Windows.
+(uses stdlib `tomllib`); no third-party deps. The CLI runs on macOS, Linux, and
+Windows; the test suite (`tests/`) is POSIX-only.
 
 Status: core + `jira`, `markdown`, `github`, `linear`, and `openkanban` adapters,
 plus the **full** ported SDLC skill pack — 14 skills + the ticket-researcher agent
