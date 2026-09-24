@@ -68,7 +68,7 @@ while : ; do
           nodes {
             id isResolved path line
             comments(first:100) {
-              nodes { id databaseId author{login} body }
+              nodes { id fullDatabaseId author{login} body }
             }
           }
         } } } }' \
@@ -81,7 +81,10 @@ done
 
 Build a mapping of unresolved threads:
 `thread_id → {path, line, comment_id, body, author}`. Step 6 drives resolution off
-it, so a thread you can't map is a thread you must not resolve.
+it, so a thread you can't map is a thread you must not resolve. `comment_id` is
+the `fullDatabaseId` of the thread's **root** (first) comment: every in-thread
+reply below posts to it, and GitHub rejects a reply addressed to another reply.
+(Not `databaseId`: that 32-bit field is deprecated and overflows on current ids.)
 
 ### 2. Categorize each comment
 
@@ -103,6 +106,17 @@ For each `addressed` thread: make the code change and verify it builds/tests
 SHA, which doesn't exist until step 5.
 
 ### 4. Reply to questions
+
+Answer on the question's own thread, so the answer sits with the thread step 6
+resolves:
+
+```shell
+gh api "repos/$OWNER/$NAME/pulls/$PR/comments/<comment-id>/replies" \
+  -f body="<answer>"
+```
+
+Only a question with no review thread (asked in the PR conversation or a review
+summary) gets a top-level reply, quoting what it answers:
 
 ```shell
 gh pr comment "$PR" --repo "$REPO" --body "Re: <question> — <answer>"
@@ -135,7 +149,8 @@ For each thread categorized `addressed` or `question`:
      -f body="Fixed in \`$SHA\`: updated \`<file>\` — <one-line change summary>"
    ```
 
-   Questions were already answered in step 4; go straight to resolving.
+   Questions were already answered on their thread in step 4; go straight to
+   resolving.
 
 3. **Resolve the thread:**
 
@@ -204,8 +219,9 @@ Re-fetch after each push. Exit only when **all** hold:
 - `reviewDecision == APPROVED` (a pending/`REVIEW_REQUIRED` state is NOT enough)
 - No new comments in the last poll
 
-Cap at **5** cycles. If a bot repeats the same nit after 2 attempts, reply with a
-one-line "won't fix" justification and resolve the thread.
+Cap at **5** cycles. If a bot repeats the same nit after 2 attempts, reply on its
+thread (`pulls/$PR/comments/<comment-id>/replies`, as in step 4) with a one-line
+"won't fix" justification and resolve the thread.
 
 ### 10. If stuck after 5 cycles
 

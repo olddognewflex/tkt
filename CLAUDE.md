@@ -58,7 +58,9 @@ Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
 `test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
 `test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`),
 markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`),
-`sync-pack`'s exec-bit handling (`test_pack_exec.py`), and `tkt --version`
+`sync-pack`'s exec-bit handling (`test_pack_exec.py`), `respond-to-review`
+replying in-thread across the skill and every mirror
+(`test_respond_to_review.py`), and `tkt --version`
 (`test_version.py`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
