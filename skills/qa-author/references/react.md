@@ -161,10 +161,11 @@ await user.paste('not-a-phone-number');
 await user.click(submitButton);
 expect(screen.getByText(/invalid phone/i)).toBeInTheDocument();
 
-// Unicode in text inputs
-await user.type(screen.getByLabelText(/name/i), '');
+// Unicode in text inputs: diacritic, CJK, RTL, ZWJ emoji
+const unicodeName = 'Zoë 张伟 مريم 👩🏽‍💻';
+await user.type(screen.getByLabelText(/name/i), unicodeName);
 // Verify it renders correctly, doesn't crash, doesn't truncate
-expect(screen.getByLabelText(/name/i)).toHaveValue('');
+expect(screen.getByLabelText(/name/i)).toHaveValue(unicodeName);
 ```
 
 ### Accessibility assertions
