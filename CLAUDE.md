@@ -54,7 +54,8 @@ executable, since the real pack ships none today. `tests/` is a stdlib
 `unittest` suite covering the run
 driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
-(`test_github_close.py`), the after-hours window (`test_schedule.py`), the
+(`test_github_close.py`), GitHub projectv2 repo scoping
+(`test_github_scope.py`), the after-hours window (`test_schedule.py`), the
 Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
 (`test_jira_transition.py`), Jira blocker-link direction (`test_jira_blockers.py`,
 `test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
