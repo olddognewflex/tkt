@@ -46,6 +46,7 @@ class GithubAdapter(Adapter):
         self.repo = gh.get("repo") or (config.vcs.get("repo") if config.vcs else "")
         if not self.repo:
             raise ConfigError("github needs a repo ([github].repo or [vcs].repo)")
+        self._repo_name = _name_with_owner(self.repo)
         self.project_owner = gh.get("project_owner", "@me")
         self.project_number = str(gh.get("project_number", "")) if gh.get("project_number") else ""
         self.status_field = gh.get("status_field", "Status")
@@ -194,6 +195,20 @@ class GithubAdapter(Adapter):
         data = self._gh_json(*args)
         return data.get("items", [])
 
+    def _repo_items(self, query: str | None = None) -> list[dict]:
+        """This repo's items only. A Project can span repos, and issue numbers
+        repeat across them, so every number lookup must go through here."""
+        return [i for i in self._project_items(query) if self._in_repo(i)]
+
+    def _in_repo(self, item: dict) -> bool:
+        content = item.get("content", {}) or {}
+        repo = content.get("repository") or ""
+        if not repo:
+            # Fall back to the URL: https://github.com/<owner>/<repo>/issues/<n>
+            parts = (content.get("url") or "").split("/")
+            repo = "/".join(parts[3:5]) if len(parts) > 4 else ""
+        return _name_with_owner(repo) == self._repo_name
+
     @staticmethod
     def _item_status(item: dict, status_field: str) -> str:
         for k in (status_field, status_field.lower(), "status"):
@@ -217,7 +232,7 @@ class GithubAdapter(Adapter):
                                      transitions=transitions)
 
     def _find_item_id(self, number: str) -> str:
-        for item in self._project_items():
+        for item in self._repo_items():
             content = item.get("content", {}) or {}
             if str(content.get("number")) == str(number):
                 return item.get("id")
@@ -235,7 +250,7 @@ class GithubAdapter(Adapter):
     def list(self, tier=None, query=None):
         q = self.config.query(tier=tier, name=query)
         if self.board == "projectv2":
-            items = self._project_items(query=q)
+            items = self._repo_items(query=q)
             opt_names = self._project()["option_names"]
             return [self._item_to_ticket(i, transitions=opt_names)
                     for i in items if (i.get("content", {}) or {}).get("type") == "Issue"]
@@ -250,7 +265,7 @@ class GithubAdapter(Adapter):
                               "--json", self._ISSUE_FIELDS)
         if self.board == "projectv2":
             status = ""
-            for item in self._project_items():
+            for item in self._repo_items():
                 if str((item.get("content", {}) or {}).get("number")) == str(key):
                     status = self._item_status(item, self.status_field)
                     break
@@ -375,6 +390,12 @@ class GithubAdapter(Adapter):
                                     f"#{self.project_number}, {len(proj['options'])} options"))
                 checks.append(Check("status options cover board roles", not missing,
                                     "missing: " + ", ".join(missing) if missing else "all mapped"))
+                # A repo that matches none of the items would list as an idle
+                # board, which is indistinguishable from a mistyped repo.
+                items = self._project_items()
+                mine = sum(1 for i in items if self._in_repo(i))
+                checks.append(Check("project items in repo", mine > 0 or not items,
+                                    f"{mine} of {len(items)} items are in {self.repo}"))
             except (ProviderError, ConfigError) as e:
                 checks.append(Check("project reachable", False, str(e)))
         else:
@@ -385,6 +406,14 @@ class GithubAdapter(Adapter):
             checks.append(Check("timetracking is none", False,
                                 f"set [timetracking].provider='none' — GitHub has no time tracking (got '{tt}')"))
         return checks
+
+
+def _name_with_owner(repo: str) -> str:
+    """`owner/name`, lowercased, from any `--repo` spelling gh accepts
+    (`owner/name`, `HOST/owner/name`, a URL), tolerating `.git` and slashes."""
+    parts = [p for p in repo.strip().split("/") if p]
+    name = "/".join(parts[-2:]).lower()
+    return name[:-4] if name.endswith(".git") else name
 
 
 def _extract_acceptance(body: str) -> list[str]:

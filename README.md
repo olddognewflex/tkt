@@ -245,6 +245,18 @@ scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode
   `resolved` = referenced issue closed.
 - **Queries are GitHub-native**, not JQL: projectv2 → Projects filter syntax
   (`gh project item-list --query`); labels → issue search (`gh issue list --search`).
+- **`list` is scoped to `[github].repo`.** Labels mode searches that repo only.
+  In projectv2 mode a Project can span repos, so items from other repos are
+  dropped client-side (matched on the item's repository, case-insensitively).
+  The same repo match applies wherever an item is found by issue number (the
+  status `view` shows, the item `transition` moves), because numbers repeat
+  across repos. Draft issues and pull requests are never listed. `tkt doctor`
+  fails if the Project has items but none are in the repo (a mistyped repo would
+  otherwise look like an idle board). `repo` may be `owner/name` or any spelling
+  `gh --repo` accepts (`HOST/owner/name`, a trailing `.git`).
+- `view` and the **write verbs** address an issue by number in `[github].repo`.
+  A `Blocked by #N` reference resolves in the same repo; cross-repo references
+  are not parsed.
 - **No time tracking** — `worklog`/`lane-time` are no-ops; set
   `[timetracking].provider = "none"`.
 - **Closing issues** — a board status is only a label or project field; the issue
