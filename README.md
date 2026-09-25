@@ -15,6 +15,21 @@ plus the **full** ported SDLC skill pack — 14 skills + the ticket-researcher a
 (see "Skill pack"). Adding another backend is just a new `adapters/*.py`
 implementing the verb contract; no skill changes.
 
+## The centrepiece: `automated-sdlc`
+
+[`automated-sdlc`](skills/automated-sdlc/SKILL.md) is the skill the rest of this
+repo exists to serve. It runs the whole pipeline, from "what should I work on?" to
+"shipped": select, triage, route by type, plan, implement, self-review, open PR,
+CI loop, review loop, preview, a human QA gate, then deploy. It does this by
+orchestrating the other pack skills, with explicit human gates and lane-time
+annotation. Every ticketing and board call goes through `tkt`, so the same
+pipeline runs unchanged on Jira, GitHub, Linear, openkanban, or a markdown board.
+
+![How automated-sdlc ships a ticket](docs/automated-sdlc-graphic.png)
+
+Run it unattended with [`tkt run`](#unattended-runs) and watch it with
+[`tkt agents`](#watching-runs--tkt-agents).
+
 ## Install
 
 ### macOS / Linux
@@ -367,10 +382,13 @@ list, or an empty one, sorts last.
 ## Skill pack
 
 `skills/` holds the provider-agnostic SDLC skills (ported from the Jira-coupled
-originals — every ticketing/board call now goes through `tkt`):
+originals — every ticketing/board call now goes through `tkt`). The
+**`automated-sdlc`** orchestrator is the entry point; the rest are the stages it
+drives, and each can also be run on its own:
 
 | Skill | Role |
 | --- | --- |
+| **`automated-sdlc`** | **orchestrator: the end-to-end pipeline across all of the below** |
 | `select-ticket` | pick next ticket (tiered queries + blocker filter) |
 | `triage-ticket` | read + move to `in_progress` |
 | `plan-ticket` | structured implementation plan |
@@ -384,7 +402,6 @@ originals — every ticketing/board call now goes through `tkt`):
 | `resume-from-revise` | re-enter the loop after a human revise fix |
 | `check-blockers` | classify blocked tickets, recommend unblocks |
 | `hotfix-revert` | fast-track prod revert (uses `tkt create`/`link`) |
-| `automated-sdlc` | orchestrator across all of the above |
 
 Tickets labeled after-hours (optional `[schedule]` config table, evaluated by
 `tkt schedule`) are deferred by `select-ticket` during business hours. `deploy-ready`
