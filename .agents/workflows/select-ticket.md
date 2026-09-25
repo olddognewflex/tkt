@@ -21,7 +21,7 @@ Find the right ticket to work next. All ticketing access goes through `tkt`.
    // turbo
    tkt list --tier N --json
    ```
-4. Filter out blocked tickets with `tkt blockers KEY --json`.
+4. Filter out blocked tickets with `tkt blockers KEY --json`. Skip a tier only when it is undefined (`tkt cfg queries.tierN` exits 4); any other `tkt` failure stops selection with its error — never skip a failed tier or report nothing to work on. A candidate whose blocker check fails is excluded with a warning, never treated as unblocked.
 5. **Tier 1/2** (assigned): auto-select, emit `SELECTED: <KEY>`, proceed to `triage-ticket`.
 6. **Tier 3/4/5** (unassigned/backlog): print up to 5 ranked recommendations and wait for human pick.
 

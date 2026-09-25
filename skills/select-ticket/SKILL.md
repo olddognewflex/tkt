@@ -1,6 +1,6 @@
 ---
 name: select-ticket
-description: 'Discover and select the next ticket to work on, respecting priority, assignee, and blockers. Provider-agnostic via tkt. Auto-selects when the candidate is unambiguous; otherwise returns recommendations for human pick.'
+description: 'Discover and select the next ticket to work on, respecting priority, assignee, and blockers. Provider-agnostic via tkt. Auto-selects when the candidate is unambiguous; otherwise returns recommendations for human pick. Stops with tkt's error if the board cannot be read.'
 allowed-tools: [Bash, Read]
 model_tier: cheap
 ---
@@ -36,6 +36,9 @@ Tier 5: Backlog                                       → recommend for promotio
 ```
 
 A project that doesn't define a given tier query simply skips it (see Steps).
+Any other `tkt` failure **stops** selection with `tkt`'s error: skipping a tier
+that failed would silently pick from a lower tier, or report "nothing to work
+on" for a board that could not be read.
 
 **After-hours deferral (optional):** when the config defines a `[schedule]` table,
 candidates carrying its after-hours label are deferred during business hours, as
@@ -57,36 +60,79 @@ variable is needed.
 ### 2. Run tiers in order until one returns selectable tickets
 
 ```shell
-TKT=tkt   # or the repo path, e.g. ~/Development/tkt/tkt
+TKT=${TKT:-tkt}   # or the repo path, e.g. ~/Development/tkt/tkt
 
 # Clear the previous run's selection first: step 3 reads these files, and a
 # stale pair would auto-select a ticket from an earlier run.
 rm -f /tmp/tkt_tier /tmp/tkt_candidates.json
 
-# is_blocked KEY -> prints "1" if the ticket has unresolved blockers.
-is_blocked() { [ "$("$TKT" blockers "$1" --json | jq 'length')" -gt 0 ] && echo 1; }
+# JSON goes to jq through printf, never echo: zsh's and dash's echo expand the
+# `\n` escapes inside JSON strings and hand jq invalid JSON.
 
+# blocker_state KEY -> "clear", "blocked", or "unknown". Unknown (tkt failed,
+# or printed something other than a JSON array) is never read as unblocked.
+blocker_state() {
+  B=$("$TKT" blockers "$1" --json) || { echo unknown; return; }
+  case "$(printf '%s\n' "$B" | jq -r 'if type == "array" then length else "x" end' 2>/dev/null)" in
+    0) echo clear ;;
+    ''|x) echo unknown ;;
+    *) echo blocked ;;
+  esac
+}
+
+stop() { echo "STOP: $1" >&2; FAILED=1; }
+
+FAILED=""
 for N in 1 2 3 4 5; do
-  # A defined-but-empty tier exits 0 with []; an undefined tier exits non-zero.
-  OUT=$("$TKT" list --tier "$N" --json 2>/dev/null) || continue
-  [ "$(echo "$OUT" | jq 'length')" -gt 0 ] || continue
+  # Skip a tier only when it is not defined: `tkt cfg` exits 4 for a missing
+  # key. Anything else (a bad config, a backend error) stops selection.
+  RC=0; ERR=$("$TKT" cfg "queries.tier$N" 2>&1 >/dev/null) || RC=$?
+  [ "$RC" -eq 4 ] && continue
+  if [ "$RC" -ne 0 ]; then
+    [ -n "$ERR" ] && printf '%s\n' "$ERR" >&2
+    stop "tkt cfg failed (exit $RC) reading tier $N"; break
+  fi
+  # tkt's own error reaches stderr; a failed tier is not an empty one.
+  if ! OUT=$("$TKT" list --tier "$N" --json); then
+    stop "tkt list --tier $N failed (see the error above)"; break
+  fi
+  if ! LEN=$(printf '%s\n' "$OUT" | jq 'if type == "array" then length else error end' 2>/dev/null) \
+      || [ -z "$LEN" ]; then
+    stop "tkt list --tier $N did not return a JSON array"; break
+  fi
+  [ "$LEN" -gt 0 ] || continue
 
   # Filter blockers per-candidate via `tkt blockers` (authoritative on every
   # backend — some list paths don't carry link data via the ticketing backend).
-  SELECTABLE='[]'
-  for K in $(echo "$OUT" | jq -r '.[].key'); do
-    [ -n "$(is_blocked "$K")" ] && continue
-    SELECTABLE=$(echo "$OUT" | jq --arg k "$K" --argjson acc "$SELECTABLE" \
+  SELECTABLE='[]'; UNKNOWN=""
+  for K in $(printf '%s\n' "$OUT" | jq -r '.[].key'); do
+    case "$(blocker_state "$K")" in
+      clear) ;;
+      blocked) continue ;;
+      *) echo "WARNING: could not check blockers for $K; excluding it" >&2
+         UNKNOWN=1; continue ;;
+    esac
+    SELECTABLE=$(printf '%s\n' "$OUT" | jq --arg k "$K" --argjson acc "$SELECTABLE" \
       '$acc + [.[] | select(.key == $k)]')
   done
-  [ "$(echo "$SELECTABLE" | jq 'length')" -gt 0 ] || continue
+  if [ "$(printf '%s\n' "$SELECTABLE" | jq 'length')" -eq 0 ]; then
+    # Falling through would pass over tickets that may well be workable.
+    if [ -n "$UNKNOWN" ]; then
+      stop "tier $N has candidates whose blockers could not be checked"; break
+    fi
+    continue
+  fi
 
   echo "TIER=$N"
   echo "$N" > /tmp/tkt_tier       # the next step may run in a fresh shell
-  echo "$SELECTABLE" > /tmp/tkt_candidates.json
+  printf '%s\n' "$SELECTABLE" > /tmp/tkt_candidates.json
   break
 done
+[ -z "$FAILED" ]                  # exit non-zero after a STOP
 ```
+
+**On `STOP:`** report `tkt`'s error and stop. Do not run step 3, and do not
+report "nothing to work on": the board was not read.
 
 `tkt blockers` returns only **unresolved** blockers (a blocker that's Done is
 dropped), so a non-empty result means genuinely blocked.
@@ -108,8 +154,8 @@ fresh shell: it reads the tier and candidates from Step 2's files and asks
   TIER=$(cat /tmp/tkt_tier 2>/dev/null) || TIER=""   # empty = step 2 found nothing
   # Exit 2 = [schedule] is misconfigured: fail closed and defer, loudly.
   if SCHED=$("$TKT" schedule --json); then
-    AH_LABEL=$(echo "$SCHED" | jq -r '.label // ""')
-    IN_WINDOW=$(echo "$SCHED" | jq -r '.in_window')
+    AH_LABEL=$(printf '%s\n' "$SCHED" | jq -r '.label // ""')
+    IN_WINDOW=$(printf '%s\n' "$SCHED" | jq -r '.in_window')
   else
     echo "WARNING: [schedule] is misconfigured (see above); deferring after-hours tickets" >&2
     AH_LABEL=$("$TKT" cfg schedule.after_hours_label 2>/dev/null) || AH_LABEL=""
@@ -125,14 +171,14 @@ fresh shell: it reads the tier and candidates from Step 2's files and asks
   fi
 
   if [ "$TIER" = "1" ] || [ "$TIER" = "2" ]; then
-    KEY=$(echo "$NORMAL" | jq -r '.[0].key // empty')
+    KEY=$(printf '%s\n' "$NORMAL" | jq -r '.[0].key // empty')
     if [ -z "$KEY" ]; then
       # every candidate is after-hours: work may start now; deploy-ready holds
       # the actual deploy until outside business hours.
-      KEY=$(echo "$DEFERRED" | jq -r '.[0].key // empty')
+      KEY=$(printf '%s\n' "$DEFERRED" | jq -r '.[0].key // empty')
       [ -n "$KEY" ] && echo "NOTE: $KEY is after-hours; deploy will hold during business hours"
-    elif [ "$(echo "$DEFERRED" | jq 'length')" -gt 0 ]; then
-      echo "DEFERRED: $(echo "$DEFERRED" | jq -r '[.[].key] | join(", ")') (after-hours, in business hours)"
+    elif [ "$(printf '%s\n' "$DEFERRED" | jq 'length')" -gt 0 ]; then
+      echo "DEFERRED: $(printf '%s\n' "$DEFERRED" | jq -r '[.[].key] | join(", ")') (after-hours, in business hours)"
     fi
     if [ -n "$KEY" ]; then echo "SELECTED: $KEY"; fi
   fi
@@ -164,3 +210,4 @@ to To Do before work starts."
 
 - `SELECTED: <KEY>` (auto path) → proceed to `triage-ticket`
 - OR a recommendation table with a clear "waiting for pick" message
+- OR `STOP:` with `tkt`'s error: selection could not read the board
