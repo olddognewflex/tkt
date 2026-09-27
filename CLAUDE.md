@@ -63,6 +63,7 @@ Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
 `test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
 `test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`),
 markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`),
+markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
 `sync-pack`'s exec-bit handling (`test_pack_exec.py`), `respond-to-review`
 replying in-thread across the skill and every mirror
 (`test_respond_to_review.py`), and `tkt --version`

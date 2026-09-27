@@ -75,7 +75,7 @@ separate harness-specific files).
 | `tkt lane-time [KEY] --role ROLE [--keys K1:role,K2:role] [--read-only]` | log time for a closed lane interval; batch via `--keys` |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket (adapter-opt-in) |
 | `tkt apply [KEY] --file PATH` \| `--new --file PATH` \| `--template` | create/update from a full ticket markdown doc (`-` reads stdin) |
-| `tkt edit KEY [--summary/--body/--priority/--assignee/--add-label/--remove-label/--due/--scheduled/--completed/--agent-status]` | field-level update |
+| `tkt edit KEY [--summary/--body/--priority/--assignee/--add-label/--remove-label/--due/--scheduled/--completed/--agent-status]` | field-level update; `--body` replaces the whole body, like `create --body` (comments kept) |
 | `tkt link KEY --to OTHER --type T` | link tickets (adapter-opt-in) |
 | `tkt lane ROLE` | resolve role → provider lane name |
 | `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
