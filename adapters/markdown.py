@@ -275,10 +275,19 @@ class MarkdownAdapter(Adapter):
     def comment(self, key, body):
         fm, doc = self._read_raw(key)
         stamp = f"- {_iso(_now())} {self.me or 'agent'}: {body}"
-        if "## Comments" in doc:
-            doc = doc.rstrip() + "\n" + stamp + "\n"
-        else:
+        # Append inside the Comments section, which need not be the last one:
+        # `edit --body` restores only that section, so a stamp written past
+        # it would be lost.
+        bounds = ticketdoc.section_bounds(doc, "comments")
+        if bounds is None:
             doc = doc.rstrip() + "\n\n## Comments\n" + stamp + "\n"
+        else:
+            lines = doc.splitlines()
+            end = bounds[1]
+            while end > bounds[0] + 1 and not lines[end - 1].strip():
+                end -= 1
+            lines.insert(end, stamp)
+            doc = "\n".join(lines).rstrip() + "\n"
         self._write_raw(key, fm, doc)
 
     def blockers(self, key):
@@ -405,31 +414,17 @@ class MarkdownAdapter(Adapter):
         self._write_raw(key, fm, body)
 
     @staticmethod
-    def _split_body(doc: str) -> tuple[str, str, str]:
-        """Split a ticket body into (summary, description, rest).
+    def _split_body(doc: str) -> tuple[str, str]:
+        """Split a ticket body into (summary, body).
 
-        summary = the first `# ` heading; description = the prose between it and
-        the first `## ` section; rest = that first `## ` section onward
-        (Acceptance, Comments, ...), preserved verbatim so an edit doesn't drop
-        acceptance criteria or the comment log."""
-        summary = ""
-        desc_lines: list[str] = []
-        rest_lines: list[str] = []
-        seen_summary = False
-        in_rest = False
-        for line in doc.splitlines():
+        summary = the first `# ` heading; body = everything after it (prose,
+        Acceptance, Comments, ...), so a summary-only edit keeps it verbatim."""
+        lines = doc.splitlines()
+        for i, line in enumerate(lines):
             s = line.strip()
-            if in_rest:
-                rest_lines.append(line)
-            elif not seen_summary and s.startswith("# "):
-                summary = s[2:].strip()
-                seen_summary = True
-            elif s.startswith("## "):
-                in_rest = True
-                rest_lines.append(line)
-            else:
-                desc_lines.append(line)
-        return summary, "\n".join(desc_lines).strip(), "\n".join(rest_lines).strip()
+            if s.startswith("# "):
+                return s[2:].strip(), "\n".join(lines[i + 1:]).strip()
+        return "", doc.strip()
 
     def edit(self, key, summary=None, body=None, priority=None, assignee=None,
              add_labels=None, remove_labels=None,
@@ -480,14 +475,23 @@ class MarkdownAdapter(Adapter):
         # Only rebuild the body when summary/description actually change, so a
         # pure frontmatter edit leaves the markdown (and its Comments) untouched.
         if summary is not None or body is not None:
-            cur_summary, cur_desc, rest = self._split_body(doc)
+            cur_summary, cur_body = self._split_body(doc)
             new_summary = cur_summary if summary is None else summary
-            new_desc = cur_desc if body is None else body
+            new_body = cur_body
+            if body is not None:
+                # `--body` replaces the whole body, as `create` writes it.
+                # Backend-managed sections (Comments) are restored from the
+                # stored ticket, as `apply` does, so the log survives.
+                new_body = body
+                for name in ticketdoc.MANAGED_SECTIONS:
+                    canon = ticketdoc.extract_section(cur_body, name)
+                    new_body = ticketdoc.strip_section(new_body, name)
+                    if canon:
+                        new_body = (f"{new_body.rstrip()}\n\n{canon}"
+                                    if new_body.strip() else canon)
             doc = f"# {new_summary}\n"
-            if new_desc:
-                doc += f"\n{new_desc}\n"
-            if rest:
-                doc += f"\n{rest}\n"
+            if new_body:
+                doc += f"\n{new_body}\n"
 
         self._write_raw(key, fm, doc)
         return self.view(key)

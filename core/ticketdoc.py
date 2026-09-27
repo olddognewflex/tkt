@@ -98,13 +98,22 @@ def body_without_summary(body: str) -> str:
     return "\n".join(out).strip()
 
 
-def _section_bounds(body: str, name_lower: str) -> tuple[int, int] | None:
+def section_bounds(body: str, name_lower: str) -> tuple[int, int] | None:
     """(start, end) line indices for the `## <name>` section — end exclusive,
-    bounded by the next `## ` heading or EOF — or None if absent."""
+    bounded by the next `## ` heading or EOF — or None if absent. A `## `
+    line inside a ``` or ~~~ fence is content, not a heading."""
     lines = body.splitlines()
     start = None
+    fence = ""
     for i, line in enumerate(lines):
         s = line.strip()
+        if fence:
+            if s.startswith(fence):
+                fence = ""
+            continue
+        if s.startswith(("```", "~~~")):
+            fence = s[:3]
+            continue
         if start is None:
             if s.startswith("## ") and s[3:].strip().lower().startswith(name_lower):
                 start = i
@@ -117,7 +126,7 @@ def _section_bounds(body: str, name_lower: str) -> tuple[int, int] | None:
 
 def extract_section(body: str, name_lower: str) -> str | None:
     """The full `## <name>` section text (heading included), or None."""
-    bounds = _section_bounds(body, name_lower)
+    bounds = section_bounds(body, name_lower)
     if bounds is None:
         return None
     lines = body.splitlines()
@@ -125,12 +134,11 @@ def extract_section(body: str, name_lower: str) -> str | None:
 
 
 def strip_section(body: str, name_lower: str) -> str:
-    """`body` with the `## <name>` section removed (no-op if absent)."""
-    bounds = _section_bounds(body, name_lower)
-    if bounds is None:
-        return body
-    lines = body.splitlines()
-    return "\n".join(lines[:bounds[0]] + lines[bounds[1]:]).strip()
+    """`body` with every `## <name>` section removed (no-op if absent)."""
+    while (bounds := section_bounds(body, name_lower)) is not None:
+        lines = body.splitlines()
+        body = "\n".join(lines[:bounds[0]] + lines[bounds[1]:]).strip()
+    return body
 
 
 TEMPLATE = """\
