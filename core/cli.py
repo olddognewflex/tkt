@@ -4,12 +4,12 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .config import Config
 from .errors import ConfigError, TktError, UsageError
 from .registry import get_adapter
-from .schema import Ticket
+from .schema import ActivityEvent, Ticket
 
 
 def _print_ticket_human(t: Ticket) -> None:
@@ -42,6 +42,15 @@ def _print_ticket_list(tickets: list[Ticket], as_json: bool) -> None:
     for t in tickets:
         blocked = " [BLOCKED]" if t.unresolved_blockers() else ""
         print(f"{t.key}  {t.priority:<8} {t.status:<16} {t.summary}{blocked}")
+
+
+def _activity_line(e: ActivityEvent) -> str:
+    if e.kind == "change":
+        what = f"{e.field}: {e.from_ or '-'} -> {e.to or '-'}"
+    else:
+        first = (e.body.splitlines() or [""])[0]
+        what = f"{e.kind}: {first[:80]}"
+    return f"{e.timestamp}  {e.key}  {e.actor or '-'}  {what}"
 
 
 class _VersionAction(argparse.Action):
@@ -100,6 +109,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("view")
     sp.add_argument("key")
+
+    sp = add("activity")
+    sp.add_argument("--query", required=True, help="named query from [queries]")
+    sp.add_argument("--since", required=True,
+                    help="inclusive start, ISO-8601 date or datetime; no "
+                         "offset means UTC")
+    sp.add_argument("--until", default=None,
+                    help="exclusive end, same format (default: now)")
 
     sp = add("transition")
     sp.add_argument("key")
@@ -253,6 +270,31 @@ def _validate_date(flag: str, value: str | None) -> str | None:
     return value
 
 
+def _validate_instant(flag: str, value: str) -> datetime:
+    """ISO-8601 date or datetime -> aware UTC datetime. A value without an
+    offset (a bare date is its midnight) is read as UTC, not local time, so
+    the same command means the same window on every machine."""
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        raise UsageError(f"{flag}: invalid timestamp '{value}', expected an "
+                         f"ISO-8601 date or datetime (e.g. 2026-09-27 or "
+                         f"2026-09-27T06:00:00Z)")
+    except OverflowError:       # e.g. 0001-01-01T00:00+01:00 is before year 1 UTC
+        raise UsageError(f"{flag}: '{value}' is out of range in UTC")
+
+
+def _event_order(e: ActivityEvent) -> tuple:
+    """Sort key: time, then evidence_id with its numeric parts compared as
+    numbers, so change item :2 precedes :10."""
+    parts = tuple((0, int(p), "") if p.isdigit() else (1, 0, p)
+                  for p in e.evidence_id.split(":"))
+    return (e.timestamp, parts)
+
+
 # Recognized agent execution states. Validated up front so a typo can't write a
 # value the board's badge mapping won't recognize. "" clears the field.
 AGENT_STATES = ("idle", "processing", "waiting", "done", "blocked")
@@ -387,6 +429,16 @@ def main(argv: list[str]) -> int:
                 return cmd_stop(config, args.key)
             return cmd_status(config, args.key)
 
+        # Validated before the adapter is built, so a typo fails fast.
+        if args.verb == "activity":
+            config.query(name=args.query)     # unknown name: exit 4, no backend
+            since = _validate_instant("--since", args.since)
+            until = (_validate_instant("--until", args.until)
+                     if args.until is not None else datetime.now(timezone.utc))
+            if since >= until:
+                raise UsageError(f"--since must be before --until "
+                                 f"({since.isoformat()} >= {until.isoformat()})")
+
         adapter = get_adapter(config)
 
         if args.verb == "whoami":
@@ -402,6 +454,18 @@ def main(argv: list[str]) -> int:
                 print(json.dumps(t.to_dict(), indent=2))
             else:
                 _print_ticket_human(t)
+
+        elif args.verb == "activity":
+            report = adapter.activity(args.query, since, until)
+            # Canonical timestamps are fixed width, so string order is time order.
+            report.events.sort(key=_event_order)
+            if args.json:
+                print(json.dumps(report.to_dict(), indent=2))
+            elif not report.events:
+                print("(no activity)")
+            else:
+                for e in report.events:
+                    print(_activity_line(e))
 
         elif args.verb == "transition":
             adapter.transition(args.key, args.role)

@@ -158,6 +158,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | `tkt whoami` | current user id | string |
 | `tkt list --tier N` / `--query NAME` | run named query from `[queries]` | ticket list / `--json` array |
 | `tkt view KEY` | one ticket | normalized ticket / `--json` |
+| `tkt activity --query NAME --since ISO [--until ISO]` | comments + field changes on the query's tickets in `[since, until)`. ISO date or datetime; no offset = UTC; `--until` defaults to now. Events sorted by time, then `evidence_id`. Tickets are picked by the query's *current* matches, so one that has since left the query's status isn't scanned; use a broader query for retrospectives. jira only today; other backends exit 3. | one line per event / `--json` report (below) |
 | `tkt transition KEY ROLE` | move to lane mapped from ROLE | `KEY -> Lane` |
 | `tkt comment KEY BODY` | post activity comment | confirmation |
 | `tkt blockers KEY` | unresolved blockers only | list / `--json` |
@@ -213,6 +214,28 @@ name, and `tkt transition KEY review` to move.
 }
 ```
 
+### Activity report (`tkt activity --json`)
+
+```json
+{
+  "query": "active", "since": "2026-09-20T00:00:00.000Z",
+  "until": "2026-09-21T00:00:00.000Z", "tickets": ["TKT-1"],
+  "events": [
+    {"evidence_id": "jira:change:10200:0", "key": "TKT-1", "kind": "change",
+     "timestamp": "2026-09-20T08:00:00.000Z", "actor": "Ann", "actor_id": "5b10...",
+     "field": "status", "from": "To Do", "to": "In Progress", "body": "",
+     "url": "https://site/browse/TKT-1"},
+    {"evidence_id": "jira:comment:10001", "key": "TKT-1", "kind": "comment",
+     "timestamp": "2026-09-20T10:00:00.000Z", "actor": "Ann", "actor_id": "5b10...",
+     "field": "", "from": null, "to": null, "body": "ship it",
+     "url": "https://site/browse/TKT-1?focusedCommentId=10001"}
+  ]
+}
+```
+
+`tickets` lists every key scanned, so "no events" is distinguishable from "no
+tickets". Timestamps are UTC with millisecond precision, fixed width.
+
 `type_class` is resolved from `[issue_types]` (`full_sdlc` vs `deliverable`) — this is
 what `automated-sdlc` Phase 1.5 branches on, now provider-independent.
 
@@ -244,6 +267,15 @@ read, acli's own output decides.
   from the descriptions — those are editable per site, and matching them
   literally reported no blockers at all on a renamed one. Both branches are
   English-only: a site running in another language reports no blockers.
+- **activity** needs REST. JQL date literals resolve in the Jira user's
+  timezone, so the search asks for `updated >=` a day before `--since`
+  (ANDed with the named query, scoped like `list`, all pages) and the exact
+  window is enforced per event. Comments are read newest-first and the
+  changelog backward from its tail, each stopping once past `--since`.
+  Comment *edits* are not events; only creation time counts. Missing
+  `total` fields, comments posted mid-walk (deduped by id) and a comment
+  page served out of order (exit 3) are all handled. The named query is
+  evaluated against current state: widen it for a retrospective.
 - In **acli mode** `list` carries no `blocked_by` at all (acli search rejects
   `issuelinks`), so blocker state must be confirmed per ticket with
   `tkt blockers` — which `select-ticket` does. REST mode returns the full set.

@@ -5,10 +5,11 @@ return — never on a concrete provider.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from core.config import Config
 from core.errors import ProviderError
-from core.schema import Check, Ticket, Worklog
+from core.schema import ActivityReport, Check, Ticket, Worklog
 
 
 class Adapter(ABC):
@@ -153,6 +154,16 @@ class Adapter(ABC):
         """Link `key` to `to` with a provider link type (e.g. 'is blocked by',
         'blocks', 'relates to', 'Fixes', 'duplicates')."""
         raise ProviderError(f"link not supported by provider '{self.config.provider}'")
+
+    def activity(self, query: str, since: datetime, until: datetime) -> ActivityReport:
+        """Comments and field changes on the tickets a named query matches,
+        in the half-open window [since, until) of aware datetimes. Read-only.
+
+        Each event's `timestamp` is canonical UTC (`schema.iso_utc`) and its
+        `evidence_id` is stable across calls, so a skill can cite it. An
+        event whose provider timestamp can't be parsed raises rather than
+        being dropped: a silent gap reads as "nothing happened"."""
+        raise ProviderError(f"activity not supported by provider '{self.config.provider}'")
 
     def edit(
         self,

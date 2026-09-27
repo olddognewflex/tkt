@@ -18,10 +18,11 @@ import re
 import subprocess
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from core.errors import ProviderError
-from core.schema import Check, Ticket, Worklog, human_duration
+from core.schema import (ActivityEvent, ActivityReport, Check, Ticket, Worklog,
+                         human_duration, iso_utc)
 
 from .base import Adapter
 
@@ -32,6 +33,21 @@ def _now() -> datetime:
 
 def _parse_iso(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def _parse_jira_ts(value, what: str) -> datetime:
+    """A Jira REST timestamp (`2026-09-27T06:28:36.123+0000`) as an aware
+    datetime. Anything unparseable, or without an offset, raises: dropping
+    the event would silently hide activity, and guessing a zone could move
+    it across a window bound."""
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            dt = None
+        if dt is not None and dt.tzinfo is not None:
+            return dt
+    raise ProviderError(f"Jira returned an unparseable timestamp for {what}: {value!r}")
 
 
 def _adf_to_text(node) -> str:
@@ -784,6 +800,149 @@ class JiraAdapter(Adapter):
 
     def blockers(self, key):
         return self.view(key).unresolved_blockers()
+
+    # ---- activity ----------------------------------------------------------
+
+    _ACTIVITY_PAGE = 100
+
+    def activity(self, query, since, until):
+        # Resolve the query first: a mistyped name is the more useful error.
+        body, order = _split_order_by(self.config.query(name=query))
+        if not self.have_rest:
+            raise ProviderError(
+                "activity needs the Jira REST API (set CONFLUENCE_SITE/EMAIL/"
+                "API_TOKEN); acli cannot read comment or changelog history")
+        # JQL date literals resolve in the Jira user's timezone, not UTC, so
+        # the search floor sits a day early to catch every ticket touched in
+        # the window; the exact bounds are enforced per event below. Clamped
+        # so a --since at the start of year 1 can't overflow.
+        floor = since.astimezone(timezone.utc).date()
+        if floor > date.min:
+            floor -= timedelta(days=1)
+        cond = f'updated >= "{floor.isoformat()}"'
+        if body.strip():
+            cond = f"({body.strip()}) AND {cond}"
+        keys = self._search_keys(self._full_jql(f"{cond} {order}".strip()))
+        events: list[ActivityEvent] = []
+        for key in keys:
+            events += self._comment_events(key, since, until)
+            events += self._change_events(key, since, until)
+        return ActivityReport(query=query, since=iso_utc(since),
+                              until=iso_utc(until), tickets=keys, events=events)
+
+    def _search_keys(self, jql: str) -> list[str]:
+        """Every key matching `jql`, across all pages (`list` reads one)."""
+        from urllib.parse import urlencode
+
+        keys, token = [], None
+        while True:
+            params = {"jql": jql, "fields": "summary", "maxResults": 100}
+            if token:
+                params["nextPageToken"] = token
+            data = self._jira("GET", f"/rest/api/3/search/jql?{urlencode(params)}")
+            keys += [i["key"] for i in data.get("issues", []) if i.get("key")]
+            nxt = data.get("nextPageToken")
+            if data.get("isLast") or not nxt or nxt == token:
+                return keys
+            token = nxt
+
+    def _activity_event(self, key, kind, eid, at, author, **kw) -> ActivityEvent:
+        a = author or {}
+        return ActivityEvent(
+            evidence_id=eid, key=key, kind=kind, timestamp=iso_utc(at),
+            actor=a.get("displayName") or a.get("emailAddress") or "",
+            actor_id=a.get("accountId") or "", **kw)
+
+    @staticmethod
+    def _last_page(page: dict, rows: list, size: int) -> bool:
+        """End of a paged listing, judged without `total` (Jira omits it on
+        some endpoints and versions): an explicit isLast, or a short page."""
+        return not rows or page.get("isLast") is True or len(rows) < size
+
+    def _comment_events(self, key, since, until) -> list[ActivityEvent]:
+        """Comments in [since, until). Read newest-first, so the walk ends at
+        the first comment older than the window instead of paging a long
+        thread from its start.
+
+        Offsets are live: a comment posted mid-walk shifts every row down one
+        and the next page repeats a row, hence the dedupe on id. The order is
+        verified, not trusted: served oldest-first, the early stop would
+        return nothing at all rather than fail."""
+        out, seen, start, prev = [], set(), 0, None
+        while True:
+            page = self._jira(
+                "GET", f"/rest/api/3/issue/{key}/comment?orderBy=-created"
+                       f"&startAt={start}&maxResults={self._ACTIVITY_PAGE}")
+            rows = page.get("comments") or []
+            stamped = [(c, _parse_jira_ts(c.get("created"),
+                                          f"{key} comment {c.get('id')}"))
+                       for c in rows]
+            for c, at in stamped:
+                if prev is not None and at > prev:
+                    raise ProviderError(
+                        f"Jira returned {key} comments out of order (newest-"
+                        f"first requested); refusing to guess the window")
+                prev = at
+            for c, at in stamped:
+                cid = c.get("id")
+                if at < since:
+                    return out
+                if at >= until or cid in seen:
+                    continue
+                seen.add(cid)
+                out.append(self._activity_event(
+                    key, "comment", f"jira:comment:{cid}", at, c.get("author"),
+                    body=_adf_to_text(c.get("body")).strip(),
+                    url=f"https://{self._site_for_url()}/browse/{key}"
+                        f"?focusedCommentId={cid}"))
+            start += len(rows)
+            size = int(page.get("maxResults") or self._ACTIVITY_PAGE)
+            total = page.get("total")
+            if (self._last_page(page, rows, size)
+                    or (total is not None and start >= int(total))):
+                return out
+
+    def _change_events(self, key, since, until) -> list[ActivityEvent]:
+        """Changelog items in [since, until). Jira pages the changelog
+        oldest-first, so the first page doubles as the probe for `total` and
+        the walk then runs backward from the tail, ending at the first
+        history older than the window: a long-lived ticket costs a page or
+        two, not its whole history. Without a `total` there is no tail to
+        jump to, so every page is read forward first."""
+        def fetch(start):
+            return self._jira(
+                "GET", f"/rest/api/3/issue/{key}/changelog"
+                       f"?startAt={start}&maxResults={self._ACTIVITY_PAGE}")
+
+        first = fetch(0)
+        # The server may cap maxResults below what was asked; page by what
+        # it actually used or the tail offset lands mid-page.
+        size = max(int(first.get("maxResults") or self._ACTIVITY_PAGE), 1)
+        if first.get("total") is None:
+            pages, start = [first], 0
+            while not self._last_page(pages[-1], pages[-1].get("values") or [], size):
+                start += len(pages[-1]["values"])
+                pages.append(fetch(start))
+            walk = iter(reversed(pages))
+        else:
+            tail = (max(int(first["total"]) - 1, 0) // size) * size
+            walk = (first if s == 0 else fetch(s) for s in range(tail, -1, -size))
+        out: list[ActivityEvent] = []
+        for page in walk:
+            for h in reversed(page.get("values") or []):
+                hid = h.get("id")
+                at = _parse_jira_ts(h.get("created"), f"{key} change {hid}")
+                if at < since:
+                    return out
+                if at >= until:
+                    continue
+                for i, it in enumerate(h.get("items") or []):
+                    out.append(self._activity_event(
+                        key, "change", f"jira:change:{hid}:{i}", at, h.get("author"),
+                        field=it.get("field") or "", from_=it.get("fromString"),
+                        to=it.get("toString"),
+                        url=f"https://{self._site_for_url()}/browse/{key}"))
+        return out
 
     # ---- time tracking (ported from annotate_lane_time) --------------------
 
