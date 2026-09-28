@@ -121,6 +121,23 @@ half-open window `[since, until)`:
   query's status (e.g. moved from "In Progress" to "Done") is not scanned.
   For a retrospective, use a broader query (e.g. one without a status filter).
 
+### Query scopes
+
+Named queries (`[queries]`) are scoped to the configured project by default.
+An optional `[query_scopes]` table marks individual queries (by name or
+`tierN`) as `"global"` so they span projects, e.g. "everything assigned to me
+across the org":
+
+```toml
+[query_scopes]
+mine_all = "global"    # any key not listed is "project"
+```
+
+Only the Jira adapter applies it today; other backends ignore it. A key
+that is not a defined query, or a value other than `"project"` or `"global"`,
+is a config error (exit 2) on the next Jira query, and `tkt doctor` reports it
+on every backend.
+
 ### Exit codes
 
 Branch on these — errors always go to stderr with a non-zero exit:

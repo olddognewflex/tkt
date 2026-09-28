@@ -13,6 +13,10 @@ from .errors import ConfigError, NotFoundError
 DEFAULT_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"]
 
 
+# `[query_scopes]` values: "project" (default) keeps a query in the
+# configured project; "global" lets it span projects (backend permitting).
+QUERY_SCOPES = ("project", "global")
+
 class Config:
     def __init__(self, data: dict[str, Any], path: Path):
         self.path = path
@@ -99,6 +103,33 @@ class Config:
                 f"{', '.join(sorted(self.queries)) or '(none)'}"
             )
         return self.queries[name]
+
+    def query_scopes(self) -> dict[str, str]:
+        """The validated `[query_scopes]` table (empty when absent). Every key
+        must name a defined `[queries]` entry (tiers are `tierN` queries) and
+        every value must be a known scope: a misspelled key would otherwise
+        leave the intended query silently project-scoped."""
+        table = self._d.get("query_scopes", {})
+        if not isinstance(table, dict):
+            raise ConfigError("[query_scopes] must be a table of query = scope")
+        for key, val in table.items():
+            if key not in self.queries:
+                raise ConfigError(
+                    f"[query_scopes].{key}: no such query. Defined: "
+                    f"{', '.join(sorted(self.queries)) or '(none)'}")
+            if val not in QUERY_SCOPES:
+                raise ConfigError(
+                    f"[query_scopes].{key} = {val!r}: must be one of "
+                    f"{', '.join(repr(s) for s in QUERY_SCOPES)}")
+        return table
+
+    def query_scope(self, tier: int | None = None, name: str | None = None) -> str:
+        """`"project"` (the default) or `"global"` for a named query. The
+        whole table is validated on every lookup (see `query_scopes`), so a
+        bad entry anywhere fails loudly; `tkt doctor` reports it up front."""
+        if tier is not None:
+            name = f"tier{tier}"
+        return self.query_scopes().get(name, "project")
 
     # ---- priorities --------------------------------------------------------
 

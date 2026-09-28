@@ -72,6 +72,10 @@ deploy_ready = 'status:"Ready for Deploy"'
 # tier1 = 'is:open is:issue assignee:@me label:"Status: Todo" label:"Priority: Highest"'
 # tier2 = 'is:open is:issue assignee:@me label:"Status: Todo"'
 
+# [query_scopes]              # optional: "project" (default) | "global" per query/tierN.
+# mine_all = "global"         # Honoured by the Jira adapter only; this backend
+#                             # ignores it. `tkt doctor` still flags a bad entry.
+
 [vcs]
 provider       = "github"
 repo           = "your-org/your-repo"

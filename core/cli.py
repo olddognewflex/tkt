@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from .config import Config
 from .errors import ConfigError, TktError, UsageError
 from .registry import get_adapter
-from .schema import ActivityEvent, Ticket
+from .schema import ActivityEvent, Check, Ticket
 
 
 def _print_ticket_human(t: Ticket) -> None:
@@ -434,6 +434,7 @@ def main(argv: list[str]) -> int:
         # Validated before the adapter is built, so a typo fails fast.
         if args.verb == "activity":
             config.query(name=args.query)     # unknown name: exit 4, no backend
+            config.query_scope(name=args.query)   # bad [query_scopes]: exit 2
             since = _validate_instant("--since", args.since)
             until = (_validate_instant("--until", args.until)
                      if args.until is not None else datetime.now(timezone.utc))
@@ -582,6 +583,14 @@ def main(argv: list[str]) -> int:
 
         elif args.verb == "doctor":
             checks = adapter.doctor()
+            # Config-level, so every backend reports a bad table, not just
+            # the adapters that apply it.
+            if "query_scopes" in config._d:
+                try:
+                    n = len(config.query_scopes())
+                    checks = checks + [Check("query scopes", True, f"{n} set")]
+                except ConfigError as e:
+                    checks = checks + [Check("query scopes", False, str(e))]
             from .pack import doctor_check
             pack_c = doctor_check(config)
             if pack_c is not None:
