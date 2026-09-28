@@ -623,20 +623,18 @@ class JiraAdapter(Adapter):
     def list(self, tier=None, query=None):
         jql = self._full_jql(self.config.query(tier=tier, name=query))
         if self.have_rest:
-            from urllib.parse import urlencode
-
             fields = "priority,assignee,summary,issuelinks,labels,components,issuetype,status"
-            qs = urlencode({"jql": jql, "fields": fields, "maxResults": 25})
-            data = self._jira("GET", f"/rest/api/3/search/jql?{qs}")
-            return [self._to_ticket(i) for i in data.get("issues", [])]
+            return [self._to_ticket(i) for i in self._search_issues(jql, fields)]
         # acli search only allows navigable fields — it rejects issuelinks /
         # components, and never returns issuelinks regardless. So list results
         # in acli mode carry no blocked_by; callers needing blocker state must
         # confirm per-ticket via `tkt blockers` (which uses acli `view`, where
         # issuelinks ARE available). REST mode (above) returns the full set.
+        # `--paginate` fetches every match; a `--limit` would silently drop
+        # candidates past it, as the old 25 did.
         fields = "priority,assignee,summary,labels,issuetype,status"
         issues = self._acli_json("jira", "workitem", "search", "--jql", jql,
-                                 "--fields", fields, "--limit", "25")
+                                 "--fields", fields, "--paginate")
         return [self._to_ticket(i) for i in (issues or [])]
 
     def view(self, key):
@@ -830,21 +828,74 @@ class JiraAdapter(Adapter):
         return ActivityReport(query=query, since=iso_utc(since),
                               until=iso_utc(until), tickets=keys, events=events)
 
-    def _search_keys(self, jql: str) -> list[str]:
-        """Every key matching `jql`, across all pages (`list` reads one)."""
+    _SEARCH_PAGE = 100
+    _SEARCH_MAX_PAGES = 1000
+
+    def _search_issues(self, jql: str, fields: str) -> list[dict]:
+        """Every issue matching `jql`, across all pages, first occurrence
+        kept. Handles both search contracts: token-based (`nextPageToken`)
+        and legacy offset-based (`startAt`/`maxResults`/`total`/`isLast`).
+        A page carrying neither ends the walk. A server that claims more
+        (`isLast: false`) but gives no way to fetch it, or serves a page
+        with nothing new, raises instead of returning a silent partial
+        list; so does a walk past `_SEARCH_MAX_PAGES`."""
         from urllib.parse import urlencode
 
-        keys, token = [], None
-        while True:
-            params = {"jql": jql, "fields": "summary", "maxResults": 100}
+        out, ids, token, start = [], set(), None, 0
+        for _ in range(self._SEARCH_MAX_PAGES):
+            params = {"jql": jql, "fields": fields, "maxResults": self._SEARCH_PAGE}
             if token:
                 params["nextPageToken"] = token
+            elif start:
+                params["startAt"] = start
             data = self._jira("GET", f"/rest/api/3/search/jql?{urlencode(params)}")
-            keys += [i["key"] for i in data.get("issues", []) if i.get("key")]
+            rows = data.get("issues") or []
+            fresh = 0
+            for i in rows:
+                ident = i.get("id") or i.get("key")
+                if ident in ids:
+                    continue
+                ids.add(ident)
+                out.append(i)
+                fresh += 1
+            if not rows or data.get("isLast") is True:
+                return out
+            if not fresh:
+                raise ProviderError(
+                    "Jira search is not advancing: a page returned no new "
+                    "issues (the server may be ignoring the page token/offset)")
             nxt = data.get("nextPageToken")
-            if data.get("isLast") or not nxt or nxt == token:
-                return keys
-            token = nxt
+            if nxt:
+                token = nxt
+                continue
+            if "startAt" not in data and "total" not in data:
+                if data.get("isLast") is False:
+                    raise ProviderError(
+                        "Jira search says more results exist (isLast: false) "
+                        "but sent no nextPageToken or offset to fetch them")
+                return out
+            # Advance from the offset actually requested, never the echoed
+            # startAt: a server that ignores the param would pin it forever.
+            start += len(rows)
+            try:
+                total = data.get("total")
+                total = None if total is None else int(total)
+                size = int(data.get("maxResults") or self._SEARCH_PAGE)
+            except (TypeError, ValueError):
+                raise ProviderError(
+                    f"Jira search returned a malformed total/maxResults: "
+                    f"{data.get('total')!r}/{data.get('maxResults')!r}")
+            if total is not None:
+                if start >= total:
+                    return out
+            elif "isLast" not in data and len(rows) < size:
+                return out
+        raise ProviderError(
+            f"Jira search exceeded {self._SEARCH_MAX_PAGES} pages; narrow the query")
+
+    def _search_keys(self, jql: str) -> list[str]:
+        """Every key matching `jql`, across all pages."""
+        return [i["key"] for i in self._search_issues(jql, "summary") if i.get("key")]
 
     def _activity_event(self, key, kind, eid, at, author, **kw) -> ActivityEvent:
         a = author or {}
