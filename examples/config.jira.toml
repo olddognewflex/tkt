@@ -108,8 +108,19 @@ standard = "claude-sonnet-5"
 deep     = "claude-opus-5"
 
 [timetracking]
-provider = "tempo"        # none | jira-worklog | tempo
-billable = false
+# none | jira-worklog | tempo. Both non-"none" providers post a Jira worklog
+# over REST and mark non-billable time with a native `billing` worklog
+# property, in the same request. "tempo" additionally sets Tempo's own
+# billableSeconds to 0 (needs TEMPO_API_TOKEN).
+# CAVEAT: Tempo reports billable time from billableSeconds and ignores the
+# Jira property. If your org reports billable hours out of Tempo, keep
+# "tempo": switching to "jira-worklog" makes every agent worklog show as
+# billable in Tempo.
+# acli-only projects (no REST token) cannot post worklogs: use "none".
+provider = "tempo"
+billable = false     # default for `tkt worklog`; --billable/--no-billable override
+# Informational: the adapter always reads TEMPO_API_TOKEN, and only under
+# provider = "tempo".
 auth_env = ["TEMPO_API_TOKEN"]
 
 [docs]

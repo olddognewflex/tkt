@@ -7,15 +7,18 @@ Auth (env names declared in config [ticketing].auth_env, defaults shown):
     CONFLUENCE_SITE       e.g. yourcompany.atlassian.net
     CONFLUENCE_EMAIL
     CONFLUENCE_API_TOKEN
-    TEMPO_API_TOKEN       optional; required to mark worklogs non-billable
+    TEMPO_API_TOKEN       only for [timetracking].provider = "tempo", to set
+                          Tempo's own billableSeconds to 0
 """
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import os
 import re
 import subprocess
+import sys
 import time
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -681,7 +684,7 @@ class JiraAdapter(Adapter):
         elif priority:
             print(f"tkt: priority '{priority}' not set on {key} — acli can't set "
                   f"priority and no REST token is configured. Set it manually.",
-                  flush=True)
+                  file=sys.stderr, flush=True)
         return self.view(key)
 
     def apply_template(self):
@@ -1014,19 +1017,36 @@ class JiraAdapter(Adapter):
             start += page.get("maxResults", 100)
         return entries
 
-    def _post_worklog(self, key: str, secs: int, started: str, note: str) -> str:
-        wl = self._jira("POST", f"/rest/api/3/issue/{key}/worklog", {
+    # Jira worklog entity property marking time non-billable. Sent in the
+    # create request, so the marker exists iff the worklog does. It is
+    # metadata: neither Jira's UI/reports nor Tempo interpret it (Tempo reads
+    # its own billableSeconds), hence the Tempo round-trip under "tempo".
+    _TIMETRACKING_PROVIDERS = ("none", "jira-worklog", "tempo")
+
+    NON_BILLABLE_PROPERTY = {"key": "billing",
+                             "value": {"billable": False, "type": "non-billable"}}
+
+    def _post_worklog(self, key: str, secs: int, started: str, note: str,
+                      billable: bool = False) -> str:
+        payload = {
             "timeSpentSeconds": secs,
             "started": started,
             "comment": {"type": "doc", "version": 1, "content": [
                 {"type": "paragraph", "content": [{"type": "text", "text": note}]}]},
-        })
+        }
+        if not billable:
+            payload["properties"] = [copy.deepcopy(self.NON_BILLABLE_PROPERTY)]
+        wl = self._jira("POST", f"/rest/api/3/issue/{key}/worklog", payload)
         return str(wl["id"])
 
     def _mark_non_billable(self, wl_id: str, secs: int, note: str) -> None:
+        """Tempo only: the native property already marks the Jira worklog,
+        but Tempo reporting reads its own billableSeconds."""
+        if self.config.timetracking.get("provider", "none") != "tempo":
+            return
         if not self.tempo_token:
             print(f"tkt: TEMPO_API_TOKEN not set; worklog {wl_id} left at Tempo "
-                  f"default (billable).", flush=True)
+                  f"default (billable).", file=sys.stderr, flush=True)
             return
         for attempt in range(5):
             try:
@@ -1048,7 +1068,7 @@ class JiraAdapter(Adapter):
             except Exception as e:  # noqa: BLE001 — best-effort, retried
                 if attempt == 4:
                     print(f"tkt: failed to set worklog {wl_id} non-billable: {e}",
-                          flush=True)
+                          file=sys.stderr, flush=True)
                 else:
                     time.sleep(2 ** attempt)
 
@@ -1065,7 +1085,7 @@ class JiraAdapter(Adapter):
         entered_str = max(times)
         secs = max(int((_now() - _parse_iso(entered_str)).total_seconds()), 60)
         body = f"Lane: {lane}. {note or 'Recorded by tkt.'}"
-        wl_id = self._post_worklog(key, secs, entered_str, body)
+        wl_id = self._post_worklog(key, secs, entered_str, body, billable=billable)
         if not billable:
             self._mark_non_billable(wl_id, secs, body)
         return Worklog(key=key, role=from_role, lane=lane, seconds=secs,
@@ -1092,7 +1112,8 @@ class JiraAdapter(Adapter):
             return Worklog(key=key, role=role, lane=lane, seconds=secs,
                            human=human_duration(secs))
         body = f"Lane: {lane}. Recorded retroactively by tkt."
-        wl_id = self._post_worklog(key, secs, last_in, body)
+        # Retroactive lane time is always non-billable.
+        wl_id = self._post_worklog(key, secs, last_in, body, billable=False)
         self._mark_non_billable(wl_id, secs, body)
         return Worklog(key=key, role=role, lane=lane, seconds=secs,
                        human=human_duration(secs), worklog_id=wl_id, note="retroactive")
@@ -1114,12 +1135,24 @@ class JiraAdapter(Adapter):
                 acli_ok = "unknown" not in who
                 checks.append(Check("auth: acli session", acli_ok,
                                     f"{who} (no REST token — reads via acli, "
-                                    f"transitions list + worklog unavailable)"))
+                                    f"transitions list unavailable)"))
             except ProviderError as e:
                 checks.append(Check("auth: acli session", False, str(e)))
         checks.append(Check("roles configured", bool(self.config.roles),
                             f"{len(self.config.roles)} roles"))
         tt = self.config.timetracking.get("provider", "none")
+        if tt not in self._TIMETRACKING_PROVIDERS:
+            # An unknown value would post worklogs but skip Tempo, the
+            # "green doctor, billable in Tempo" failure this check prevents.
+            checks.append(Check("timetracking provider", False,
+                                f"{tt!r} is not one of "
+                                f"{', '.join(self._TIMETRACKING_PROVIDERS)}"))
+        if tt != "none":
+            # Posting a worklog (and its non-billable marker) needs REST;
+            # acli cannot write one.
+            checks.append(Check("worklog (REST)", self.have_rest,
+                                f"provider={tt}" if self.have_rest else
+                                f"provider={tt} needs CONFLUENCE_SITE/EMAIL/API_TOKEN"))
         if tt == "tempo":
             checks.append(Check("tempo token (for non-billable)",
                                 bool(self.tempo_token),
