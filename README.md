@@ -276,6 +276,12 @@ read, acli's own output decides.
   `total` fields, comments posted mid-walk (deduped by id) and a comment
   page served out of order (exit 3) are all handled. The named query is
   evaluated against current state: widen it for a retrospective.
+- **list** returns every match. REST mode pages the search until it is
+  exhausted, under either response contract (token-based `nextPageToken`
+  or legacy `startAt`/`total`/`isLast`). acli mode passes `--paginate`. A server
+  that claims more results but won't page, or keeps serving the same
+  issues, exits 3 rather than returning a partial list. Offset paging can
+  still miss an issue that leaves the query mid-walk.
 - In **acli mode** `list` carries no `blocked_by` at all (acli search rejects
   `issuelinks`), so blocker state must be confirmed per ticket with
   `tkt blockers` — which `select-ticket` does. REST mode returns the full set.
