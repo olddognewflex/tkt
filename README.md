@@ -162,7 +162,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | `tkt transition KEY ROLE` | move to lane mapped from ROLE | `KEY -> Lane` |
 | `tkt comment KEY BODY` | post activity comment | confirmation |
 | `tkt blockers KEY` | unresolved blockers only | list / `--json` |
-| `tkt worklog KEY --from-role ROLE [--note T] [--billable]` | log time since entry into ROLE's lane → now | worklog / `--json`; no-op if `[timetracking].provider="none"` |
+| `tkt worklog KEY --from-role ROLE [--note T] [--billable\|--no-billable]` | log time since entry into ROLE's lane → now; unflagged, billable follows `[timetracking].billable` (default false) | worklog / `--json`; no-op if `[timetracking].provider="none"` |
 | `tkt lane-time KEY --role ROLE` | log time for an already-exited lane (entry→exit) | worklog / `--json` |
 | `tkt lane-time --keys K1:ROLE[,K2:ROLE,...] [--read-only]` | batch lane-time (one call, N keys) | JSON array of worklogs |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
@@ -244,8 +244,26 @@ what `automated-sdlc` Phase 1.5 branches on, now provider-independent.
 ### jira
 Ports the original acli + Jira REST + Tempo logic. Auth via env named in
 `[ticketing].auth_env` (`CONFLUENCE_SITE/EMAIL/API_TOKEN`, plus `TEMPO_API_TOKEN`
-for non-billable worklogs). `worklog`/`lane-time` page the full changelog and patch
-Tempo exactly as the old `annotate_lane_time` helper did.
+under `[timetracking].provider = "tempo"`). `worklog`/`lane-time` page the full
+changelog and post the worklog over REST (`doctor` reports `worklog (REST)` red
+without REST credentials).
+
+- **Non-billable time** (the default; retroactive `lane-time` is always
+  non-billable) is marked natively: the worklog create request carries a
+  `billing` entity property `{"billable": false, "type": "non-billable"}`, so
+  the marker exists exactly when the worklog does. The property is metadata
+  for your own reporting or integrations: Jira itself does not interpret it.
+  Only under
+  `provider = "tempo"` does tkt also make the Tempo round-trip that sets
+  Tempo's `billableSeconds` to 0; `jira-worklog` never calls Tempo and needs
+  no Tempo token.
+- **Caveat:** Tempo derives billable time from its own `billableSeconds`,
+  not from the Jira property. An org that reports billable hours out of Tempo
+  must keep `provider = "tempo"`; switching to `jira-worklog` makes every
+  agent worklog show as billable in Tempo.
+- acli-only projects (no REST token) cannot post worklogs; set
+  `[timetracking].provider = "none"`. `doctor` flags any provider other than
+  `none`, `jira-worklog` or `tempo`.
 
 `transition` does not trust acli's exit code (acli exits 0 on an unavailable
 transition). It re-reads the status afterwards and fails with the transitions

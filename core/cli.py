@@ -133,7 +133,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("key")
     sp.add_argument("--from-role", required=True, dest="from_role")
     sp.add_argument("--note", default="")
-    sp.add_argument("--billable", action="store_true")
+    # Tri-state: unset falls back to [timetracking].billable (default false).
+    sp.add_argument("--billable", action=argparse.BooleanOptionalAction,
+                    default=None)
 
     sp = add("lane-time")
     sp.add_argument("key", nargs="?")
@@ -487,8 +489,11 @@ def main(argv: list[str]) -> int:
                     print(f"{b['key']}  (unresolved)")
 
         elif args.verb == "worklog":
+            billable = args.billable
+            if billable is None:
+                billable = bool(adapter.config.timetracking.get("billable", False))
             wl = adapter.worklog(
-                args.key, args.from_role, note=args.note, billable=args.billable
+                args.key, args.from_role, note=args.note, billable=billable
             )
             if args.json:
                 print(json.dumps(wl.to_dict(), indent=2))

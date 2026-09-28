@@ -62,6 +62,8 @@ Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
 (`test_jira_transition.py`), `tkt activity` on Jira (window bounds,
 timestamp parsing, comment/changelog pagination; `test_jira_activity.py`)
 and its CLI window validation, ordering and output (`test_activity_cli.py`),
+Jira non-billable worklogs (native property, Tempo only under
+`provider = "tempo"`, the `worklog (REST)` doctor row; `test_jira_worklog.py`),
 Jira `list` paging every search result under both the token and
 offset contracts (`test_jira_search.py`),
 Jira blocker-link direction (`test_jira_blockers.py`,

@@ -72,7 +72,7 @@ separate harness-specific files).
 | `tkt transition KEY ROLE` | move ticket to role's lane |
 | `tkt comment KEY BODY` | post activity comment |
 | `tkt blockers KEY --json` | unresolved blockers only |
-| `tkt worklog KEY --from-role ROLE [--note T] [--billable]` | log time since entry → now |
+| `tkt worklog KEY --from-role ROLE [--note T] [--billable\|--no-billable]` | log time since entry → now |
 | `tkt lane-time [KEY] --role ROLE [--keys K1:role,K2:role] [--read-only]` | log time for a closed lane interval; batch via `--keys` |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket (adapter-opt-in) |
 | `tkt apply [KEY] --file PATH` \| `--new --file PATH` \| `--template` | create/update from a full ticket markdown doc (`-` reads stdin) |
