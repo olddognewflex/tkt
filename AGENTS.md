@@ -57,7 +57,7 @@ separate harness-specific files).
      tracking)").
 
 6. **Optional verbs are opt-in per adapter.**
-   - `create`, `apply`, `edit`, and `link` raise a "not supported"
+   - `create`, `apply`, `edit`, `link`, and `activity` raise a "not supported"
      `ProviderError` on backends that don't implement them. Branch on the exit
      code (3) rather than assuming availability.
 
@@ -68,6 +68,7 @@ separate harness-specific files).
 | `tkt whoami` | current user id |
 | `tkt list --tier N` \| `--query NAME` | run named query from config (one is required) |
 | `tkt view KEY --json` | normalized ticket |
+| `tkt activity --query NAME --since ISO [--until ISO] --json` | comments + field changes on the query's tickets in `[since, until)`; each event has a stable `evidence_id` to cite (adapter-opt-in: jira) |
 | `tkt transition KEY ROLE` | move ticket to role's lane |
 | `tkt comment KEY BODY` | post activity comment |
 | `tkt blockers KEY --json` | unresolved blockers only |
@@ -102,6 +103,23 @@ separate harness-specific files).
   can't write a state the board's badge mapping won't recognize. The adapter
   stamps `agent_status_at` whenever the state actually changes; re-asserting
   the same state leaves the stamp alone.
+
+### Activity semantics
+
+`tkt activity` reports what happened on a named query's tickets in the
+half-open window `[since, until)`:
+
+- `--since` / `--until` take an ISO-8601 date or datetime. A value without an
+  offset is **UTC** (a bare date is its UTC midnight), not local time.
+  `--until` defaults to now; `since` must be before `until` (else exit 64).
+- Events are sorted by `timestamp` (canonical UTC, `...T06:28:36.123Z`), then
+  `evidence_id`. `kind` is `comment` (with `body`) or `change` (with `field`,
+  `from`, `to`). Quote `evidence_id` when a skill cites what it saw.
+- An unparseable backend timestamp is exit 3, never a silently dropped event.
+- Tickets are chosen by the named query evaluated against their **current**
+  state, not their state during the window: a ticket that has since left the
+  query's status (e.g. moved from "In Progress" to "Done") is not scanned.
+  For a retrospective, use a broader query (e.g. one without a status filter).
 
 ### Exit codes
 

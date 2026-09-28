@@ -59,7 +59,10 @@ cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
 skipping a tier, run against a stub `tkt` under every available shell
 (`test_select_ticket.py`), the after-hours window (`test_schedule.py`), the
 Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
-(`test_jira_transition.py`), Jira blocker-link direction (`test_jira_blockers.py`,
+(`test_jira_transition.py`), `tkt activity` on Jira (window bounds,
+timestamp parsing, comment/changelog pagination; `test_jira_activity.py`)
+and its CLI window validation, ordering and output (`test_activity_cli.py`),
+Jira blocker-link direction (`test_jira_blockers.py`,
 `test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
 `test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`),
 markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`),
@@ -87,8 +90,8 @@ Two layers, connected only by the verb contract and the normalized schema:
     on either side of the verb. `init`/`sync-pack`/`lane`/`cfg` are handled **before**
     loading an adapter (`init` and `sync-pack` run before any config exists; `lane`/`cfg`
     are pure config reads). Exception: `cfg priorities` is backend-aware, so it does
-    load an adapter. Input validation for dates and `--agent-status` lives here so a
-    typo fails before it reaches a backend.
+    load an adapter. Input validation for dates, `--agent-status` and the
+    `activity` window lives here so a typo fails before it reaches a backend.
   - `config.py` — loads `.sdlc/config.toml`. Discovery order: `--config` → `$TKT_CONFIG`
     → nearest `.sdlc/config.toml` walking up from cwd. Owns role↔lane mapping, the
     `close_on` terminal roles, issue-type routing (`full_sdlc` vs `deliverable`), named
@@ -143,7 +146,7 @@ Two layers, connected only by the verb contract and the normalized schema:
 - **`adapters/`** — one file per backend, each subclassing `adapters/base.Adapter`.
   - `base.py` is the contract: required `@abstractmethod` verbs (whoami, list, view,
     transition, comment, blockers, worklog, lane_time, doctor) plus **optional** verbs
-    (`create`, `apply`, `edit`, `link`) that default to a clear "not supported"
+    (`create`, `apply`, `edit`, `link`, `activity`) that default to a clear "not supported"
     `ProviderError` so a backend opts in without breaking instantiation.
   - Implementations: `jira.py` (acli + Jira REST + Tempo), `github.py` (Issues + Projects v2
     or `Status:` labels, all via `gh`), `linear.py` (GraphQL), `openkanban.py` (local JSON
@@ -169,7 +172,7 @@ Adapters that can't store a field leave it at its default rather than faking it.
 ## Adding a provider
 
 1. Implement `adapters/base.Adapter` in `adapters/<name>.py` (all abstract verbs;
-   `create`/`apply`/`edit`/`link` only if the backend supports them).
+   `create`/`apply`/`edit`/`link`/`activity` only if the backend supports them).
 2. Register it in `core/registry.py`'s `_PROVIDERS`.
 3. Add `examples/config.<name>.toml`.
 

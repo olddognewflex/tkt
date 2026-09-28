@@ -4,6 +4,7 @@ The whole point of tkt: a skill reads this shape and never knows whether the
 backend was Jira, GitHub, Linear, qi, or a markdown file.
 """
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -69,6 +70,49 @@ class Check:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class ActivityEvent:
+    """One thing that happened on a ticket: a comment or a field change."""
+    evidence_id: str                 # stable, provider-scoped: "jira:comment:<id>"
+    key: str
+    kind: str                        # "comment" | "change"
+    timestamp: str                   # canonical UTC, see iso_utc()
+    actor: str = ""                  # display name; "" when the provider has none
+    actor_id: str = ""               # provider account id
+    field: str = ""                  # changes only: which field moved
+    from_: str | None = None         # changes only; "from" in JSON
+    to: str | None = None            # changes only
+    body: str = ""                   # comments only, plain text
+    url: str = ""                    # deep link to the event, else the ticket
+
+    def to_dict(self) -> dict[str, Any]:
+        # `from` is a keyword, so the attribute carries a trailing underscore
+        # that the JSON shape does not.
+        return {k.rstrip("_"): v for k, v in asdict(self).items()}
+
+
+@dataclass
+class ActivityReport:
+    """`tkt activity`: events on a named query's tickets in [since, until)."""
+    query: str
+    since: str                       # canonical UTC, inclusive
+    until: str                       # canonical UTC, exclusive
+    tickets: list[str] = field(default_factory=list)  # every key scanned
+    events: list[ActivityEvent] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"query": self.query, "since": self.since, "until": self.until,
+                "tickets": list(self.tickets),
+                "events": [e.to_dict() for e in self.events]}
+
+
+def iso_utc(dt: datetime) -> str:
+    """An aware datetime as `YYYY-MM-DDTHH:MM:SS.mmmZ`. Fixed width, so the
+    strings sort in time order; milliseconds because that is Jira's grain."""
+    return (dt.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"))
 
 
 def human_duration(seconds: int) -> str:
