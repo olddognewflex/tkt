@@ -49,6 +49,10 @@ blocked = 'status = "Blocked" AND assignee = currentUser()'
 blocked_team = 'status = "Blocked"'
 deploy_ready = 'status = "Ready for Deploy"'
 
+# [query_scopes]              # optional: "project" (default) | "global" per query/tierN.
+# mine_all = "global"         # Honoured by the Jira adapter only; this backend
+#                             # ignores it. `tkt doctor` still flags a bad entry.
+
 [vcs]
 provider       = "github"
 repo           = "your-org/your-repo"

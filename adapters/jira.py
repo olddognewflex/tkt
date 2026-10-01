@@ -604,8 +604,9 @@ class JiraAdapter(Adapter):
         names = [p.get("name", "") for p in (data or []) if p.get("name")]
         return names or self.config.priorities()
 
-    def _full_jql(self, jql: str) -> str:
-        """Scope a query to the configured project.
+    def _full_jql(self, jql: str, scope: str = "project") -> str:
+        """Scope a query to the configured project, unless `scope` is
+        "global" (`[query_scopes]`), which leaves the JQL as written.
 
         The condition is always added when a project is configured: testing
         for the substring "project" dropped scoping from any query that
@@ -615,7 +616,7 @@ class JiraAdapter(Adapter):
         off first and re-appended -- prepending in front of it produces
         invalid JQL when the query is only an `ORDER BY`.
         """
-        if not self.project:
+        if not self.project or scope == "global":
             return jql
         cond = f"project = {json.dumps(self.project)}"
         body, order = _split_order_by(jql)
@@ -624,7 +625,8 @@ class JiraAdapter(Adapter):
         return f"{clause} {order.strip()}".strip() if order else clause
 
     def list(self, tier=None, query=None):
-        jql = self._full_jql(self.config.query(tier=tier, name=query))
+        jql = self._full_jql(self.config.query(tier=tier, name=query),
+                             self.config.query_scope(tier=tier, name=query))
         if self.have_rest:
             fields = "priority,assignee,summary,issuelinks,labels,components,issuetype,status"
             return [self._to_ticket(i) for i in self._search_issues(jql, fields)]
@@ -823,7 +825,8 @@ class JiraAdapter(Adapter):
         cond = f'updated >= "{floor.isoformat()}"'
         if body.strip():
             cond = f"({body.strip()}) AND {cond}"
-        keys = self._search_keys(self._full_jql(f"{cond} {order}".strip()))
+        keys = self._search_keys(self._full_jql(f"{cond} {order}".strip(),
+                                                self.config.query_scope(name=query)))
         events: list[ActivityEvent] = []
         for key in keys:
             events += self._comment_events(key, since, until)

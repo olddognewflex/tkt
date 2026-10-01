@@ -35,6 +35,10 @@ deliverable = ["Task", "Chore", "Spike"]
 tier1 = 'status = "To Do" AND priority = Highest AND assignee = currentUser() ORDER BY priority DESC'
 tier2 = 'status = "To Do" AND assignee = currentUser() ORDER BY priority DESC'
 
+# [query_scopes]              # optional: "project" (default) | "global" per query/tierN.
+# mine_all = "global"         # Honoured by the Jira adapter only; this backend
+#                             # ignores it. `tkt doctor` still flags a bad entry.
+
 [vcs]
 provider   = "github"
 repo           = "your-org/your-repo"

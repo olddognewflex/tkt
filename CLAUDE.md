@@ -69,6 +69,8 @@ offset contracts (`test_jira_search.py`),
 Jira blocker-link direction (`test_jira_blockers.py`,
 `test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
 `test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`),
+`[query_scopes]` per-query project/global scope and Jira honouring it
+(`test_query_scopes.py`),
 markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`),
 markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
 `sync-pack`'s exec-bit handling (`test_pack_exec.py`), `respond-to-review`
@@ -99,7 +101,8 @@ Two layers, connected only by the verb contract and the normalized schema:
   - `config.py` — loads `.sdlc/config.toml`. Discovery order: `--config` → `$TKT_CONFIG`
     → nearest `.sdlc/config.toml` walking up from cwd. Owns role↔lane mapping, the
     `close_on` terminal roles, issue-type routing (`full_sdlc` vs `deliverable`), named
-    queries, the backend-agnostic priority ordering, and dotted-path `get()`.
+    queries and their `[query_scopes]` (project | global), the
+    backend-agnostic priority ordering, and dotted-path `get()`.
   - `registry.py` — `provider name → (module, class)`, **lazy-imported** so one adapter's
     missing optional dep can't break the others.
   - `schema.py` — `Ticket` / `Worklog` / `Check` dataclasses + `to_dict()` (the JSON shape).
