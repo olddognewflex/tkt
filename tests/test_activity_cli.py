@@ -58,7 +58,7 @@ class NoActivity(Adapter):
     """A backend that implements only the required verbs."""
 
     def whoami(self): return ""
-    def list(self, tier=None, query=None): return []
+    def list(self, tier=None, query=None, all_projects=False): return []
     def view(self, key): raise NotImplementedError
     def transition(self, key, role): pass
     def comment(self, key, body): pass

@@ -21,7 +21,8 @@ class Adapter(ABC):
         """Return the current user's canonical id for this provider."""
 
     @abstractmethod
-    def list(self, tier: int | None = None, query: str | None = None) -> list[Ticket]:
+    def list(self, tier: int | None = None, query: str | None = None,
+             all_projects: bool = False) -> list[Ticket]:
         """Return tickets matching a named query (config [queries].tierN / name).
 
         **Should be scoped.** Results should be limited to this
@@ -36,6 +37,13 @@ class Adapter(ABC):
         owner-level Project, which can span repos (TKT-62). Scoped today:
         jira (`_full_jql`), markdown (key prefix), openkanban (per-project
         store), linear (`team_key`), github `labels` mode (`--repo`).
+
+        `all_projects=True` drops that scoping for one call -- the shared-board
+        view (`tkt list --all-projects`). Honoured by markdown (no key-prefix
+        filter) and jira (JQL left global); every other backend accepts it and
+        ignores it, since its unit of ownership is the store/team/repo itself.
+        It is a view for humans: nothing that acts on the first result may
+        pass it.
         """
 
     @abstractmethod

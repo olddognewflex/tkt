@@ -211,7 +211,8 @@ class LinearAdapter(Adapter):
         native = [_PRIORITY_LABEL[n] for n in (1, 2, 3, 4, 0)]
         return self.config.priorities(default=native)
 
-    def list(self, tier=None, query=None):
+    def list(self, tier=None, query=None, all_projects=False):
+        # `all_projects` is a no-op: the team is the unit of ownership.
         q = self.config.query(tier=tier, name=query)
         self._require_team()
         data = self._gql(

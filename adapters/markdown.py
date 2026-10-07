@@ -227,7 +227,7 @@ class MarkdownAdapter(Adapter):
     def whoami(self) -> str:
         return self.me or "(unset; set [markdown].me)"
 
-    def _all_tickets(self) -> list[Ticket]:
+    def _all_tickets(self, all_projects: bool = False) -> list[Ticket]:
         """Every ticket on this board that belongs to this project.
 
         One board dir is often shared by several repos, each with its own
@@ -236,17 +236,24 @@ class MarkdownAdapter(Adapter):
         tickets -- and `select-ticket` would auto-select one. Scope by the
         key prefix, the same convention `_next_key` already mints against.
         An unset `[ticketing].project` means "no scoping" and enumerates
-        everything, which is the single-project case.
+        everything, which is the single-project case. `all_projects=True`
+        does the same on demand (`tkt list --all-projects`), whatever the
+        configured project.
 
         `view` stays deliberately unscoped: a blocker or link may point at
         another project's ticket and must still resolve by key.
         """
         if not self.board_dir.is_dir():
             raise ProviderError(f"board_dir does not exist: {self.board_dir}")
-        prefix = self.config.project
+        prefix = "" if all_projects else self.config.project
         out = []
         for path in sorted(self.board_dir.glob("*.md")):
             key = path.stem
+            # A shared board collects strays the prefix filter used to hide
+            # (a `*.md` directory, editor dotfiles). Skipped only on the
+            # all-projects path, so the scoped path is unchanged.
+            if all_projects and (not path.is_file() or key.startswith(".")):
+                continue
             # `TKT-` rather than `TKT`, so TKTX-1 is not read as a TKT ticket.
             if prefix and not key.startswith(f"{prefix}-"):
                 continue
@@ -254,9 +261,10 @@ class MarkdownAdapter(Adapter):
             out.append(self._to_ticket(key, fm, body))
         return out
 
-    def list(self, tier=None, query=None):
+    def list(self, tier=None, query=None, all_projects=False):
         q = self.config.query(tier=tier, name=query)
-        return JqlSubset(q, self.me, self.priorities()).run(self._all_tickets())
+        return JqlSubset(q, self.me, self.priorities()).run(
+            self._all_tickets(all_projects=all_projects))
 
     def view(self, key):
         fm, body = self._read_raw(key)

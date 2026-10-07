@@ -182,7 +182,7 @@ Consequences:
 | Verb | Reads | Writes | Notes |
 |---|---|---|---|
 | `whoami` | `[markdown].me` | — | Returns `me`, or a hint if unset. |
-| `list [--tier N] [--query name]` | every `*.md` in `board_dir` | — | Loads all tickets, then runs the JQL-subset query (`core/query.py`). |
+| `list [--tier N] [--query name] [--all-projects]` | every `*.md` in `board_dir` | — | Loads this project's tickets (key prefix `PROJECT-`), then runs the JQL-subset query (`core/query.py`). `--all-projects` drops the prefix filter: every ticket on a shared board. |
 | `view KEY` | `board/KEY.md` | — | Normalized ticket. `--json` for the machine shape skills parse. |
 | `transition KEY role` | `board/KEY.md` | rewrites frontmatter `status`; appends history | No-op if already in that lane. |
 | `comment KEY "text"` | `board/KEY.md` | appends a bullet under `## Comments` | Creates the section if missing. Author = `me` (or `agent`). |
@@ -256,8 +256,9 @@ per-repo VCS. The trick is absolute paths in `[markdown]`:
 - Walk-up discovery (cwd → parents for `.sdlc/config.toml`) means running `tkt`
   inside a repo finds that repo's config (→ correct VCS/prefix) while all configs
   write to the one board.
-- An optional root view config at the workspace root (e.g. `project = "INBOX"`)
-  lets `tkt list` from there show every repo's tickets.
+- To see every repo's tickets at once, run `tkt list --query all --all-projects`
+  from any repo: `list` is scoped to the configured `project` prefix, so a root
+  config with `project = "INBOX"` shows only `INBOX-` tickets.
 - With many repos, a small generator script that rewrites each repo's config
   from a single table keeps them in sync — it should rewrite configs only and
   never touch board contents.

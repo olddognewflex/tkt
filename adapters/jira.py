@@ -624,9 +624,15 @@ class JiraAdapter(Adapter):
         clause = f"({cond}) AND ({body})" if body else cond
         return f"{clause} {order.strip()}".strip() if order else clause
 
-    def list(self, tier=None, query=None):
-        jql = self._full_jql(self.config.query(tier=tier, name=query),
-                             self.config.query_scope(tier=tier, name=query))
+    def list(self, tier=None, query=None, all_projects=False):
+        # `--all-projects` forces the global scope for this one call,
+        # overriding a project-scoped `[query_scopes]` entry.
+        # Still resolve the configured scope, so a malformed table errors
+        # the same way with or without the flag.
+        scope = self.config.query_scope(tier=tier, name=query)
+        if all_projects:
+            scope = "global"
+        jql = self._full_jql(self.config.query(tier=tier, name=query), scope)
         if self.have_rest:
             fields = "priority,assignee,summary,issuelinks,labels,components,issuetype,status"
             return [self._to_ticket(i) for i in self._search_issues(jql, fields)]
