@@ -247,7 +247,8 @@ class GithubAdapter(Adapter):
 
     _ISSUE_FIELDS = "number,title,body,state,url,labels,assignees"
 
-    def list(self, tier=None, query=None):
+    def list(self, tier=None, query=None, all_projects=False):
+        # `all_projects` is a no-op: scoped by `--repo` / the Project itself.
         q = self.config.query(tier=tier, name=query)
         if self.board == "projectv2":
             items = self._repo_items(query=q)

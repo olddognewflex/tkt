@@ -156,7 +156,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | Command | Does | Output |
 | --- | --- | --- |
 | `tkt whoami` | current user id | string |
-| `tkt list --tier N` / `--query NAME` | run named query from `[queries]` | ticket list / `--json` array |
+| `tkt list --tier N` / `--query NAME` `[--all-projects]` | run named query from `[queries]`; `--all-projects` drops project scoping (shared-board view) | ticket list / `--json` array |
 | `tkt view KEY` | one ticket | normalized ticket / `--json` |
 | `tkt activity --query NAME --since ISO [--until ISO]` | comments + field changes on the query's tickets in `[since, until)`. ISO date or datetime; no offset = UTC; `--until` defaults to now. Events sorted by time, then `evidence_id`. Tickets are picked by the query's *current* matches, so one that has since left the query's status isn't scanned; use a broader query for retrospectives. jira only today; other backends exit 3. | one line per event / `--json` report (below) |
 | `tkt transition KEY ROLE` | move to lane mapped from ROLE | `KEY -> Lane` |
