@@ -256,9 +256,17 @@ per-repo VCS. The trick is absolute paths in `[markdown]`:
 - Walk-up discovery (cwd → parents for `.sdlc/config.toml`) means running `tkt`
   inside a repo finds that repo's config (→ correct VCS/prefix) while all configs
   write to the one board.
-- To see every repo's tickets at once, run `tkt list --query all --all-projects`
-  from any repo: `list` is scoped to the configured `project` prefix, so a root
-  config with `project = "INBOX"` shows only `INBOX-` tickets.
+- To see every repo's tickets at once, add an unfiltered named query — `all`
+  is not built in, and `tkt init` only defines `tier1`/`tier2`:
+
+  ```toml
+  [queries]
+  all = 'ORDER BY priority DESC'   # no filter; just an ordering
+  ```
+
+  then run `tkt list --query all --all-projects` from any repo. Without
+  `--all-projects`, `list` is scoped to the configured `project` prefix, so a
+  root config with `project = "INBOX"` shows only `INBOX-` tickets.
 - With many repos, a small generator script that rewrites each repo's config
   from a single table keeps them in sync — it should rewrite configs only and
   never touch board contents.
