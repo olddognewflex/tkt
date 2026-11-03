@@ -69,9 +69,9 @@ Pick the closest existing adapter as your model:
    everything, then filter — this is the entire body of the markdown adapter's `list`:
 
    ```python
-   def list(self, tier=None, query=None):
+   def list(self, tier=None, query=None, all_projects=False):
        q = self.config.query(tier=tier, name=query)
-       return JqlSubset(q, self.me).run(self._all_tickets())
+       return JqlSubset(q, self.me).run(self._all_tickets(all_projects=all_projects))
    ```
 
    [`JqlSubset`](mex://class:fbc5744b1d32dabff9e21874d9b044cd) supports `=`, `!=`,

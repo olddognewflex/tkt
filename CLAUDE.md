@@ -72,6 +72,8 @@ Jira blocker-link direction (`test_jira_blockers.py`,
 `[query_scopes]` per-query project/global scope and Jira honouring it
 (`test_query_scopes.py`),
 markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`),
+`tkt list --all-projects` dropping project scoping on markdown and Jira
+and being accepted by every adapter (`test_list_all_projects.py`),
 markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
 `sync-pack`'s exec-bit handling (`test_pack_exec.py`), `respond-to-review`
 replying in-thread across the skill and every mirror

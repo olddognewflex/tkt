@@ -170,7 +170,8 @@ class OpenKanbanAdapter(Adapter):
         configured list cannot match its tickets; always use the fixed order."""
         return [_PRI_LABEL[n] for n in sorted(_PRI_LABEL)]
 
-    def list(self, tier=None, query=None):
+    def list(self, tier=None, query=None, all_projects=False):
+        # `all_projects` is a no-op: the store is already per-project.
         q = self.config.query(tier=tier, name=query)
         store = self._load_store()
         tickets = [self._to_ticket(r) for r in store["tickets"].values()]

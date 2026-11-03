@@ -46,6 +46,7 @@ never through a backend API directly.
 | `tkt whoami` | current user id |
 | `tkt list --tier N` | run tiered query from config |
 | `tkt list --query NAME` | run named query from config |
+| `tkt list ... --all-projects` | every project on a shared board (view only) |
 | `tkt view KEY --json` | normalized ticket JSON |
 | `tkt transition KEY ROLE` | move ticket to role's lane |
 | `tkt comment KEY BODY` | post activity comment |

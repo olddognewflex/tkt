@@ -66,7 +66,7 @@ separate harness-specific files).
 | Command | Purpose |
 |---------|---------|
 | `tkt whoami` | current user id |
-| `tkt list --tier N` \| `--query NAME` | run named query from config (one is required) |
+| `tkt list --tier N` \| `--query NAME` `[--all-projects]` | run named query from config (one is required); `--all-projects` drops project scoping |
 | `tkt view KEY --json` | normalized ticket |
 | `tkt activity --query NAME --since ISO [--until ISO] --json` | comments + field changes on the query's tickets in `[since, until)`; each event has a stable `evidence_id` to cite (adapter-opt-in: jira) |
 | `tkt transition KEY ROLE` | move ticket to role's lane |
@@ -137,6 +137,12 @@ Only the Jira adapter applies it today; other backends ignore it. A key
 that is not a defined query, or a value other than `"project"` or `"global"`,
 is a config error (exit 2) on the next Jira query, and `tkt doctor` reports it
 on every backend.
+
+`tkt list --all-projects` forces the global scope for one call, whatever
+`[query_scopes]` says: every ticket on a shared markdown board (no key-prefix
+filter) or every project on Jira; other backends accept it and ignore it. It
+is a view for humans only -- skills that act on the first result (e.g.
+`select-ticket`) must not pass it, or one repo picks up another's ticket.
 
 ### Exit codes
 

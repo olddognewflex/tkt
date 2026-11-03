@@ -106,6 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
     g = sp.add_mutually_exclusive_group(required=True)
     g.add_argument("--tier", type=int)
     g.add_argument("--query")
+    sp.add_argument("--all-projects", action="store_true",
+                    help="drop project scoping for this call: every ticket on "
+                         "a shared board (markdown, jira; no-op elsewhere)")
 
     sp = add("view")
     sp.add_argument("key")
@@ -448,7 +451,10 @@ def main(argv: list[str]) -> int:
             print(adapter.whoami())
 
         elif args.verb == "list":
-            tickets = adapter.list(tier=args.tier, query=args.query)
+            # Pass the flag only when set, so an adapter still on the
+            # pre-`all_projects` signature keeps working without it.
+            kw = {"all_projects": True} if args.all_projects else {}
+            tickets = adapter.list(tier=args.tier, query=args.query, **kw)
             _print_ticket_list(tickets, args.json)
 
         elif args.verb == "view":
