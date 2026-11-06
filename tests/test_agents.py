@@ -407,6 +407,32 @@ class TestStatusForKey(unittest.TestCase):
             self.assertIsNone(row["phase"])
 
 
+class TestEnrich(unittest.TestCase):
+    """`--enrich` reads board fields only; rows have no use for children, so
+    it must not make the extra call jira/github need to find them."""
+
+    def test_views_without_children(self):
+        from core.schema import Ticket
+
+        class FakeAdapter:
+            def __init__(self):
+                self.calls = []
+
+            def view(self, key, **kw):
+                self.calls.append((key, kw))
+                return Ticket(key=key, summary="s", status="In Progress",
+                              status_role="in_progress", url="u")
+
+        fake = FakeAdapter()
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Config.load(str(_write_config(Path(tmp))))
+            with mock.patch("core.registry.get_adapter", return_value=fake):
+                rows = agents.enrich(config, [{"key": "TKT-1"}])
+        self.assertEqual(fake.calls, [("TKT-1", {"children": False})])
+        self.assertEqual(rows[0]["summary"], "s")
+        self.assertEqual(rows[0]["status_role"], "in_progress")
+
+
 class TestHumanAge(unittest.TestCase):
     def test_formats(self):
         for secs, want in ((None, "-"), (0, "0s"), (59, "59s"), (60, "1m"),

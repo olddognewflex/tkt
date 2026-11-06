@@ -26,6 +26,11 @@ Shape (frontmatter optional; body is GitHub-flavored markdown):
 `apply` owns the frontmatter (except `status`, which only `transition` changes so
 lane history stays correct) and the whole body EXCEPT backend-managed sections
 (`MANAGED_SECTIONS`), which are preserved verbatim from the stored ticket.
+
+A backend maps only the keys it can store and ignores the rest. `children:
+[KEY, ...]` is one such key: markdown stores it, while backends that derive
+children from their own parent links (jira, github, linear) ignore it, so it
+is deliberately not in the shared `TEMPLATE`.
 """
 from __future__ import annotations
 

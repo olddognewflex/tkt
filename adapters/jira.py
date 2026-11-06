@@ -504,7 +504,8 @@ class JiraAdapter(Adapter):
 
     # ---- normalization -----------------------------------------------------
 
-    def _to_ticket(self, issue: dict, transitions: list[str] | None = None) -> Ticket:
+    def _to_ticket(self, issue: dict, transitions: list[str] | None = None,
+                   children: list[str] | None = None) -> Ticket:
         f = issue.get("fields", {})
         key = issue.get("key", "")
         issue_type = (f.get("issuetype") or {}).get("name", "")
@@ -557,6 +558,7 @@ class JiraAdapter(Adapter):
             components=[c.get("name") for c in (f.get("components") or [])],
             blocked_by=blocked_by,
             blocks=blocks,
+            children=[c for c in dict.fromkeys(children or []) if c != key],
             transitions=transitions or [],
         )
 
@@ -648,16 +650,41 @@ class JiraAdapter(Adapter):
                                  "--fields", fields, "--paginate")
         return [self._to_ticket(i) for i in (issues or [])]
 
-    def view(self, key):
+    def view(self, key, *, children: bool = True):
+        # `children=False` is for internal callers that only need links or
+        # fields (`blockers`, `create`): it skips the extra children search.
         if self.have_rest:
             issue = self._jira("GET", f"/rest/api/3/issue/{key}?fields=*all")
             trans = self._jira("GET", f"/rest/api/3/issue/{key}/transitions")
             names = [t["to"]["name"] for t in trans.get("transitions", [])]
-            return self._to_ticket(issue, transitions=names)
+            return self._to_ticket(issue, transitions=names, children=(
+                self._children(issue.get("key") or key) if children else None))
         # acli read: full fields (default view omits priority/links), but no
         # available-transitions list (acli can't enumerate them).
         issue = self._acli_json("jira", "workitem", "view", key, "--fields", "*all")
-        return self._to_ticket(issue, transitions=[])
+        return self._to_ticket(issue, transitions=[], children=(
+            self._children(issue.get("key") or key) if children else None))
+
+    def _children(self, key: str) -> list[str]:
+        """Keys of `key`'s direct children: an Epic's issues, or a task's
+        sub-tasks (both are `parent` in JQL). One extra search, so `view`
+        only; `list` leaves `children` empty. Deliberately not scoped
+        through `_full_jql`: an Epic's children may live in other projects.
+        """
+        jql = f"parent = {json.dumps(key)}"
+        if self.have_rest:
+            rows = self._search_issues(jql, "key")
+        else:
+            # No `--fields key`: acli answers it with null entries. The
+            # default field set always carries the key.
+            rows = self._acli_json("jira", "workitem", "search", "--jql", jql,
+                                   "--limit", "100")
+            if isinstance(rows, dict):
+                # Tolerate a wrapped result, as `create` does.
+                rows = rows.get("issues") or []
+        keys = [r["key"] for r in (rows or [])
+                if isinstance(r, dict) and r.get("key")]
+        return [k for k in dict.fromkeys(keys) if k != key]
 
     def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
         proj = project or self.project
@@ -693,7 +720,7 @@ class JiraAdapter(Adapter):
             print(f"tkt: priority '{priority}' not set on {key} — acli can't set "
                   f"priority and no REST token is configured. Set it manually.",
                   file=sys.stderr, flush=True)
-        return self.view(key)
+        return self.view(key, children=False)  # brand new: it has none
 
     def apply_template(self):
         from core import ticketdoc
@@ -724,7 +751,7 @@ class JiraAdapter(Adapter):
             if labels and self.have_rest:
                 self._jira("PUT", f"/rest/api/3/issue/{created.key}",
                            {"fields": {"labels": labels}})
-                return self.view(created.key)
+                return self.view(created.key, children=False)  # brand new
             return created
 
         # update — patch fields via REST (acli can't set description/priority).
@@ -808,7 +835,7 @@ class JiraAdapter(Adapter):
         self._acli("jira", "workitem", "comment", "create", "--key", key, "--body", body)
 
     def blockers(self, key):
-        return self.view(key).unresolved_blockers()
+        return self.view(key, children=False).unresolved_blockers()
 
     # ---- activity ----------------------------------------------------------
 

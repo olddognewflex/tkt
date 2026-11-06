@@ -2,7 +2,7 @@
 
 Issues are tickets (key = identifier like ENG-123). Board lanes = Linear workflow
 states (transition updates the issue's state). Blockers use Linear's native issue
-relations. No CLI — talks GraphQL over urllib.
+relations; children are its native sub-issues. No CLI — talks GraphQL over urllib.
 
 Auth: a Linear API key in env (named in [ticketing].auth_env, default LINEAR_API_KEY).
 Personal API keys go in the Authorization header verbatim (no "Bearer").
@@ -46,6 +46,7 @@ _ISSUE_FIELDS = """
   labels { nodes { name } }
   relations { nodes { type relatedIssue { identifier state { type } } } }
   inverseRelations { nodes { type issue { identifier state { type } } } }
+  children { nodes { identifier } }
 """
 
 
@@ -154,9 +155,16 @@ class LinearAdapter(Adapter):
         blocks = [r["relatedIssue"]["identifier"]
                   for r in (issue.get("relations", {}) or {}).get("nodes", [])
                   if r.get("type") == "blocks" and r.get("relatedIssue")]
+        key = issue.get("identifier", "")
+        # Native sub-issues. `children` is a connection; a null/absent one
+        # (older payloads, partial responses) is no children, not an error.
+        children = list(dict.fromkeys(
+            c["identifier"]
+            for c in ((issue.get("children") or {}).get("nodes") or [])
+            if c and c.get("identifier") and c["identifier"] != key))
         assignee = issue.get("assignee") or {}
         return Ticket(
-            key=issue.get("identifier", ""),
+            key=key,
             type=issue_type,
             summary=issue.get("title", ""),
             description=issue.get("description", "") or "",
@@ -171,6 +179,7 @@ class LinearAdapter(Adapter):
             components=[],
             blocked_by=blocked_by,
             blocks=blocks,
+            children=children,
             transitions=transitions or list(self._state_map_safe()),
         )
 
@@ -222,7 +231,8 @@ class LinearAdapter(Adapter):
         tickets = [self._to_ticket(i) for i in data["issues"]["nodes"]]
         return JqlSubset(q, self.whoami(), self.priorities()).run(tickets)
 
-    def view(self, key):
+    def view(self, key, *, children: bool = True):
+        # `children` is ignored: the sub-issues come with the issue query.
         return self._to_ticket(self._fetch_issue(key))
 
     def transition(self, key, role):

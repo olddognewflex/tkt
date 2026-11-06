@@ -39,6 +39,11 @@ class Ticket:
     # blocked_by entries: {"key": str, "resolved": bool}
     blocked_by: list[dict[str, Any]] = field(default_factory=list)
     blocks: list[str] = field(default_factory=list)
+    # Keys of this ticket's direct children (sub-tasks, an Epic's issues,
+    # sub-issues), de-duplicated, never this ticket's own key. Adapters that
+    # need an extra backend call to find them (jira, github) fill it on
+    # `view` only; `list` leaves it [].
+    children: list[str] = field(default_factory=list)
     transitions: list[str] = field(default_factory=list)  # available next lanes
 
     def unresolved_blockers(self) -> list[dict[str, Any]]:

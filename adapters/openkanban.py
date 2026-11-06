@@ -19,7 +19,8 @@ Model notes:
   - No assignee field (single-user local tool) -> assignee is always "". Don't filter
     queries by assignee.
   - No comments field -> `comment` appends to the description under "## Activity".
-  - No relations -> blocked_by/blocks stored in the ticket `meta` map.
+  - No relations -> blocked_by/blocks/children stored in the ticket `meta` map
+    (comma-separated keys; children via `link --type child`).
   - No time tracking -> worklog/lane-time are no-ops.
   - priority is an int 1..5 (1=highest); normalized to a label here.
 
@@ -122,8 +123,12 @@ class OpenKanbanAdapter(Adapter):
         meta = raw.get("meta", {}) or {}
         blocked_ids = [x for x in (meta.get("blocked_by", "").split(",")) if x]
         blocks_ids = [x for x in (meta.get("blocks", "").split(",")) if x]
+        key = raw.get("id", "")
+        children = [x for x in dict.fromkeys(
+                        c.strip() for c in (meta.get("children", "") or "").split(","))
+                    if x and x != key]
         return Ticket(
-            key=raw.get("id", ""),
+            key=key,
             type=self._type_from_labels(raw.get("labels", []) or []),
             summary=raw.get("title", ""),
             description=raw.get("description", "") or "",
@@ -138,6 +143,7 @@ class OpenKanbanAdapter(Adapter):
             components=[],
             blocked_by=[{"key": b, "resolved": self._is_done(b)} for b in blocked_ids],
             blocks=blocks_ids,
+            children=children,
             transitions=sorted(set(self.config.roles.values())),
         )
 
@@ -177,7 +183,8 @@ class OpenKanbanAdapter(Adapter):
         tickets = [self._to_ticket(r) for r in store["tickets"].values()]
         return JqlSubset(q, self.me, self.priorities()).run(tickets)
 
-    def view(self, key):
+    def view(self, key, *, children: bool = True):
+        # `children` is ignored: they are in `meta`, read with the ticket.
         _, raw = self._get_raw(key)
         return self._to_ticket(raw)
 
@@ -233,7 +240,8 @@ class OpenKanbanAdapter(Adapter):
         meta = raw.setdefault("meta", {})
         lt = link_type.strip().lower()
         bucket = "blocked_by" if lt in ("is blocked by", "depends on") else \
-                 "blocks" if lt == "blocks" else None
+                 "blocks" if lt == "blocks" else \
+                 "children" if lt in ("child", "has child") else None
         if bucket is None:
             # record other relation types in meta verbatim
             meta[link_type] = to
