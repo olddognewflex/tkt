@@ -322,7 +322,9 @@ def enrich(config: Config, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     adapter = get_adapter(config)
     for row in rows:
         try:
-            t = adapter.view(row["key"])
+            # Rows carry no children, so skip the extra call some
+            # backends need for them.
+            t = adapter.view(row["key"], children=False)
         except TktError:
             continue          # a run dir can outlive its ticket
         row.update(

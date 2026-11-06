@@ -55,6 +55,7 @@ assignee: raymond
 labels: [api, auth]
 blocked_by: [TKT-2]
 blocks: []
+children: [TKT-4, TKT-5]
 ---
 # One-line summary
 
@@ -92,6 +93,7 @@ Recognised keys and how the adapter maps them into the normalized ticket:
 | `components`  | `components` | List. |
 | `blocked_by`  | `blocked_by` | List of keys. Each is expanded to `{key, resolved}`, where `resolved` is true iff that ticket's `status` equals the `done` lane. |
 | `blocks`      | `blocks` | List of keys. Informational (the inverse edge). |
+| `children`    | `children` | List of keys: the ticket's direct children. De-duplicated, and the ticket's own key is dropped. Set by hand, by `tkt apply`, or by `tkt link KEY --to CHILD --type child`. Informational: nothing writes the inverse edge, and there is no `parent` key. Omit it when there are none; `tkt apply --new` only writes it when non-empty. |
 | `links`       | — | List of `"<type>:<KEY>"` strings, written by `tkt link` for non-block link types. |
 
 Any other key you add is preserved on write but ignored by normalization. A
@@ -188,7 +190,7 @@ Consequences:
 | `comment KEY "text"` | `board/KEY.md` | appends a bullet under `## Comments` | Creates the section if missing. Author = `me` (or `agent`). |
 | `blockers KEY` | `board/KEY.md` + each blocker's file | — | Returns only *unresolved* blockers. |
 | `create --type T --summary S [...]` | board_dir | new `board/KEY.md` + initial history | Auto-keys `PREFIX-N` (next integer). Starts in the `todo` (else `backlog`) lane. |
-| `link KEY --to KEY2 --type "is blocked by"` | `board/KEY.md` | updates `blocked_by`/`blocks`/`links` | Only the source file is edited; the inverse edge is not auto-written. |
+| `link KEY --to KEY2 --type "is blocked by"` | `board/KEY.md` | updates `blocked_by`/`blocks`/`children`/`links` | `--type child` (or `has child`) appends KEY2 to `children`. Only the source file is edited; the inverse edge is not auto-written. |
 | `worklog KEY from_role` | history | appends to `worklog.jsonl` | Duration = now − last entry into that lane (min 60s). No-op shape if timetracking `none`. |
 | `lane_time KEY role` | history | appends to `worklog.jsonl` | Retroactive: time between entering the lane and the next exit. |
 | `doctor` | config + board_dir | — | Checks board_dir exists, roles configured, `done` mapped, `me` set. |

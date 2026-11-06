@@ -392,6 +392,9 @@ class StubRestJira(StubJira):
         if path.endswith("/transitions"):
             return {"transitions": [{"id": str(i), "name": n, "to": {"name": n}}
                                     for i, n in enumerate(self.transitions_available)]}
+        if path.startswith("/rest/api/3/search/jql?"):
+            # view()'s children search (TKT-19): no children here.
+            return {"issues": [], "isLast": True}
         if path.startswith("/rest/api/3/issue/"):
             return self.issue_payload
         raise AssertionError(f"unexpected REST call {method} {path}")
@@ -413,6 +416,9 @@ class StubAcliJira(StubJira):
         self.calls.append(args)
         if args[:3] == ("jira", "workitem", "view"):
             return json.dumps(self.issue_payload)
+        if args[:3] == ("jira", "workitem", "search"):
+            # view()'s children search (TKT-19): no children here.
+            return "[]"
         raise AssertionError(f"unexpected acli call {args}")
 
     def _jira(self, method, path, body=None):
@@ -456,7 +462,9 @@ class AcliPayloadShape(unittest.TestCase):
         a.view("PROJ-1")
         self.assertEqual(a.calls,
                          [("jira", "workitem", "view", "PROJ-1",
-                           "--fields", "*all", "--json")])
+                           "--fields", "*all", "--json"),
+                          ("jira", "workitem", "search", "--jql",
+                           'parent = "PROJ-1"', "--limit", "100", "--json")])
 
     def test_acli_nested_status_category_resolves_a_done_blocker(self):
         link = {"type": dict(BLOCKS),

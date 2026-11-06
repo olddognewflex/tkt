@@ -47,13 +47,18 @@ class Adapter(ABC):
         """
 
     @abstractmethod
-    def view(self, key: str) -> Ticket:
+    def view(self, key: str, *, children: bool = True) -> Ticket:
         """Return one normalized ticket.
 
         **Not scoped**, deliberately — unlike `list`. A `blocked_by` entry or
         a link may name a ticket outside this project, and it has to resolve
         or blocker checks break. The write verbs address by key and are
         likewise unscoped.
+
+        `children=False` is for callers that don't read `Ticket.children`:
+        an adapter that needs an extra backend call to find children (jira,
+        github) skips it and leaves `children` empty. Adapters that get
+        children with the ticket itself ignore the flag.
         """
 
     @abstractmethod

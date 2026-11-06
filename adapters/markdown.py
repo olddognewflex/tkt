@@ -18,6 +18,7 @@ Each ticket file:
     labels: [api, auth]
     blocked_by: [TKT-2]
     blocks: []
+    children: [TKT-4, TKT-5]
     ---
     # One-line summary
 
@@ -185,6 +186,14 @@ class MarkdownAdapter(Adapter):
         blocks = fm.get("blocks", []) or []
         if isinstance(blocks, str):
             blocks = [blocks]
+        # Direct children, from frontmatter (hand-edited, `apply`, or `link
+        # --type child`). Informational only: nothing writes the inverse
+        # `parent` edge, so a child file does not name its parent.
+        children_raw = fm.get("children", []) or []
+        if isinstance(children_raw, str):
+            children_raw = [children_raw]
+        children = [k for k in dict.fromkeys(str(c) for c in children_raw)
+                    if k and k != key]
 
         def _date(name: str) -> str | None:
             v = fm.get(name)
@@ -211,6 +220,7 @@ class MarkdownAdapter(Adapter):
             components=list(fm.get("components", []) or []),
             blocked_by=blocked_by,
             blocks=list(blocks),
+            children=children,
             transitions=sorted(self.config.roles.values()),
         )
 
@@ -266,7 +276,8 @@ class MarkdownAdapter(Adapter):
         return JqlSubset(q, self.me, self.priorities()).run(
             self._all_tickets(all_projects=all_projects))
 
-    def view(self, key):
+    def view(self, key, *, children: bool = True):
+        # `children` is ignored: they are frontmatter, read with the ticket.
         fm, body = self._read_raw(key)
         return self._to_ticket(key, fm, body)
 
@@ -364,9 +375,14 @@ class MarkdownAdapter(Adapter):
                 "blocked_by": list(fm_in.get("blocked_by", []) or []),
                 "blocks": list(fm_in.get("blocks", []) or []),
             }
-            labels = list(fm_in.get("labels", []) or [])
-            if labels:
-                fm["labels"] = labels
+            # Optional lists are written only when the doc sets them, so a
+            # new ticket carries no empty `labels: []` / `children: []` noise.
+            for name in ("labels", "children"):
+                val = fm_in.get(name, []) or []
+                if isinstance(val, str):
+                    val = [val]
+                if val:
+                    fm[name] = list(val)
             for name in ("due", "scheduled", "completed"):
                 if name in fm_in and fm_in[name] not in (None, ""):
                     fm[name] = fm_in[name]
@@ -380,7 +396,7 @@ class MarkdownAdapter(Adapter):
         # `status` stays under transition's control; everything else the doc
         # carries is owned by apply.
         for field in ("type", "priority", "assignee", "labels",
-                      "blocked_by", "blocks", "components",
+                      "blocked_by", "blocks", "children", "components",
                       "due", "scheduled", "completed"):
             if field in fm_in:
                 fm[field] = fm_in[field]
@@ -413,6 +429,15 @@ class MarkdownAdapter(Adapter):
             if to not in cur:
                 cur.append(to)
             fm["blocks"] = cur
+        elif lt in ("child", "has child"):
+            # KEY has child TO. Only the parent records the edge; nothing
+            # writes a `parent` key into TO's file.
+            cur = fm.get("children", []) or []
+            if isinstance(cur, str):
+                cur = [cur]
+            if to not in cur:
+                cur.append(to)
+            fm["children"] = cur
         else:
             cur = fm.get("links", []) or []
             if isinstance(cur, str):

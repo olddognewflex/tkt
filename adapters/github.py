@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from urllib.parse import urlsplit
 
 from core.errors import ConfigError, NotFoundError, ProviderError
 from core.schema import Check, Ticket, Worklog
@@ -128,7 +129,8 @@ class GithubAdapter(Adapter):
     # ---- normalization -----------------------------------------------------
 
     def _issue_to_ticket(self, issue: dict, status: str | None = None,
-                         check_resolved: bool = False, transitions=None) -> Ticket:
+                         check_resolved: bool = False, transitions=None,
+                         children: list[str] | None = None) -> Ticket:
         labels = self._label_names(issue.get("labels"))
         body = issue.get("body", "") or ""
         if status is None:
@@ -152,6 +154,7 @@ class GithubAdapter(Adapter):
             components=[],
             blocked_by=blocked_by,
             blocks=blocks,
+            children=[c for c in dict.fromkeys(children or []) if c != number],
             transitions=transitions or [],
         )
 
@@ -261,9 +264,19 @@ class GithubAdapter(Adapter):
         lanes = sorted(self.config.roles.values())
         return [self._issue_to_ticket(i, transitions=lanes) for i in issues]
 
-    def view(self, key):
+    def view(self, key, *, children: bool = True):
+        # `children=False` is for internal callers that only need labels or
+        # links (`transition`, `blockers`, `create`): it skips the extra call.
         issue = self._gh_json("issue", "view", key, "--repo", self.repo,
                               "--json", self._ISSUE_FIELDS)
+        if children:
+            host, nwo = _issue_url_repo(issue.get("url"))
+            if not nwo:
+                # No usable issue URL: fall back to what the config names.
+                host, nwo = _repo_host(self.repo), self._repo_name
+            children = self._children(str(issue.get("number") or key), host, nwo)
+        else:
+            children = None
         if self.board == "projectv2":
             status = ""
             for item in self._repo_items():
@@ -271,9 +284,42 @@ class GithubAdapter(Adapter):
                     status = self._item_status(item, self.status_field)
                     break
             return self._issue_to_ticket(issue, status=status, check_resolved=True,
-                                         transitions=self._project()["option_names"])
+                                         transitions=self._project()["option_names"],
+                                         children=children)
         return self._issue_to_ticket(issue, check_resolved=True,
-                                     transitions=sorted(self.config.roles.values()))
+                                     transitions=sorted(self.config.roles.values()),
+                                     children=children)
+
+    def _children(self, number: str, host: str, nwo: str) -> list[str]:
+        """Keys of the issue's sub-issues: "12" for one in this repo,
+        "owner/repo#12" for one elsewhere (a bare number would name the
+        wrong issue). One extra call, so `view` only. A host without the
+        sub-issues API (older GHES) answers 404, which means "none here".
+
+        `host` and `nwo` (lowercased `owner/name`) come from the issue's own
+        URL, which is canonical whatever `--repo` spelling the config uses.
+        `host` is passed whenever known, so a GHES issue is never looked up
+        on gh's default host (and vice versa)."""
+        args = ["api", f"repos/{nwo}/issues/{number}/sub_issues?per_page=100",
+                "--paginate"]
+        if host:
+            args += ["--hostname", host]
+        try:
+            out = self._gh(*args)
+        except ProviderError as e:
+            if "HTTP 404" in str(e):
+                return []
+            raise
+        keys = []
+        for sub in _json_pages(out, " ".join(args)):
+            if not isinstance(sub, dict) or sub.get("number") in (None, ""):
+                continue
+            repo = _sub_issue_repo(sub)
+            if not repo or _name_with_owner(repo) == nwo:
+                keys.append(str(sub["number"]))
+            else:
+                keys.append(f"{repo}#{sub['number']}")
+        return [k for k in dict.fromkeys(keys) if k != number]
 
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
@@ -291,7 +337,7 @@ class GithubAdapter(Adapter):
             self._sync_issue_state(key, role)
             return
         # labels mode: swap the Status: label
-        cur = self.view(key)
+        cur = self.view(key, children=False)
         args = ["issue", "edit", key, "--repo", self.repo, "--add-label", f"{self.status_label_prefix}{lane}"]
         existing = self._status_from_labels(cur.labels)
         if existing and existing != lane:
@@ -325,7 +371,7 @@ class GithubAdapter(Adapter):
         self._gh("issue", "comment", key, "--repo", self.repo, "--body", body)
 
     def blockers(self, key):
-        return self.view(key).unresolved_blockers()
+        return self.view(key, children=False).unresolved_blockers()
 
     def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
         args = ["issue", "create", "--repo", self.repo, "--title", summary,
@@ -349,7 +395,7 @@ class GithubAdapter(Adapter):
             self._project_meta = None  # item set changed
             if todo_lane:
                 self.transition(number, "todo")
-        return self.view(number)
+        return self.view(number, children=False)  # brand new: it has none
 
     def link(self, key, to, link_type):
         lt = link_type.strip().lower()
@@ -411,10 +457,79 @@ class GithubAdapter(Adapter):
 
 def _name_with_owner(repo: str) -> str:
     """`owner/name`, lowercased, from any `--repo` spelling gh accepts
-    (`owner/name`, `HOST/owner/name`, a URL), tolerating `.git` and slashes."""
-    parts = [p for p in repo.strip().split("/") if p]
+    (`owner/name`, `HOST/owner/name`, a URL, `git@HOST:owner/name`),
+    tolerating `.git` and slashes."""
+    parts = [p for p in re.split(r"[/:]", repo.strip()) if p]
     name = "/".join(parts[-2:]).lower()
     return name[:-4] if name.endswith(".git") else name
+
+
+def _repo_host(repo: str) -> str:
+    """Best-effort host from a `--repo` spelling (`HOST/owner/name`, a URL,
+    `git@HOST:owner/name`), userinfo and port dropped; "" for `owner/name`
+    (gh then uses its default host). Only a fallback for when the issue's
+    own URL is unusable; see `_issue_url_repo`."""
+    s = repo.strip()
+    has_scheme = "://" in s
+    s = s.split("://", 1)[-1]
+    head = s.split("/", 1)[0]
+    if not has_scheme and ":" in head:
+        # scp-like `[user@]host:owner/name`
+        return head.split(":", 1)[0].rpartition("@")[2].lower()
+    parts = [p for p in s.split("/") if p]
+    if len(parts) < 3:
+        return ""
+    return parts[-3].rpartition("@")[2].split(":", 1)[0].lower()
+
+
+def _issue_url_repo(url) -> tuple[str, str]:
+    """(host, lowercased `owner/name`) from an issue's `url`
+    (`https://HOST/owner/name/issues/N`), or ("", "") if it isn't one."""
+    if not isinstance(url, str) or not url.strip():
+        return "", ""
+    parts = urlsplit(url.strip())
+    host = (parts.hostname or "").lower()   # userinfo and port dropped
+    segs = [p for p in parts.path.split("/") if p]
+    if not host or len(segs) < 4 or segs[-2] != "issues":
+        return "", ""
+    return host, f"{segs[-4]}/{segs[-3]}".lower()
+
+
+def _json_pages(out: str, what: str) -> list:
+    """Every item from `gh api --paginate` output on an array endpoint.
+
+    gh writes each page as its own JSON array, back to back (`[...][...]`),
+    which `json.loads` rejects past page one. `--slurp` would wrap them, but
+    it only exists from gh 2.48, so decode the pages one at a time instead.
+    """
+    dec, items, i, n = json.JSONDecoder(), [], 0, len(out)
+    while True:
+        while i < n and out[i].isspace():
+            i += 1
+        if i >= n:
+            return items
+        try:
+            page, i = dec.raw_decode(out, i)
+        except json.JSONDecodeError as e:
+            raise ProviderError(f"gh returned non-JSON for {what}: {e}") from e
+        if isinstance(page, list):
+            items += page
+        else:
+            raise ProviderError(f"gh returned a non-array page for {what}")
+
+
+def _sub_issue_repo(sub: dict) -> str:
+    """`owner/name` a sub-issue lives in, as GitHub spelled it."""
+    repo = sub.get("repository")
+    if isinstance(repo, dict) and repo.get("full_name"):
+        return repo["full_name"]
+    # https://api.github.com/repos/<owner>/<name>
+    url = sub.get("repository_url") or ""
+    if "/repos/" in url:
+        return "/".join(url.split("/repos/", 1)[1].split("/")[:2])
+    # https://github.com/<owner>/<name>/issues/<n>
+    parts = (sub.get("html_url") or "").split("/")
+    return "/".join(parts[3:5]) if len(parts) > 4 else ""
 
 
 def _extract_acceptance(body: str) -> list[str]:
