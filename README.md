@@ -598,17 +598,19 @@ usually don't have one, so give them a `presets_by_type` entry before
 turning on `strict`.
 
 Unknown keys and wrong types are a config error (exit 2), and `tkt doctor`
-reports the table in an `enforcement` row: FAIL for a bad table or a preset
-that `artifact-format.rules.json` doesn't define, ok but "inactive" when node
-or the checker is missing.
+reports the table in an `enforcement` row: FAIL for a bad table, a preset
+that `artifact-format.rules.json` doesn't define, or a checker whose rules
+file is missing; ok but "inactive" when node or the checker is missing.
 
 **A gate that cannot judge never blocks.** No node, no checker, an empty or
 unavailable body, a backend error while fetching the ticket, a checker crash,
 timeout (15 s) or exit 2: the verb proceeds as if there were no gate. Ticket
 bodies come from the adapter's `artifact_body`: on `markdown`, the whole body
-up to `## Comments` (comments are cut, so a heading inside one is never
-judged; a section placed by hand after Comments is not judged either); the
-description on `github`, `linear` and `openkanban`. **Jira
+up to `## Comments`; on `openkanban`, the description up to the `## Activity`
+log its `comment` appends; on `github` and `linear`, the description. The
+log is cut at the first exact `## Comments` / `## Activity` heading outside
+fenced code and HTML comments, so a heading inside a comment is never judged
+(nor is a section placed by hand after the log). **Jira
 tickets are unjudgeable**: their descriptions are ADF flattened to plain text
 without heading markers, so Jira transitions skip the check (comments are
 still checked).
@@ -619,11 +621,13 @@ as `tkt: warn: hierarchy: ...` and never block, even in strict mode:
 | Rule | Flags |
 | --- | --- |
 | `parent-test-plan` | a ticket with a sub-task child but no `## Test plan`, `## Testing` or `## Test strategy` heading |
-| `subtask-too-long` | a sub-task body over 150 words (fenced code and `## Comments` excluded) |
+| `subtask-too-long` | a sub-task body over 150 words (fenced code, HTML comments and `## Comments` excluded) |
 | `subtask-test-plan` | a sub-task with its own test-plan heading; it belongs on the parent |
 
 Sub-task types come from `subtask_types`, matched ignoring case and
-punctuation (`Sub-task` = `subtask`).
+punctuation (`Sub-task` = `subtask`). Headings and words are read as the
+checker reads them: a test-plan heading inside fenced code or an HTML
+comment doesn't count.
 
 ## Unattended runs
 

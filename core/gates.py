@@ -43,7 +43,12 @@ CHECKER_TIMEOUT = 15        # seconds
 TEST_PLAN_HEADINGS = frozenset({"test plan", "testing", "test strategy"})
 SUBTASK_MAX_WORDS = 150
 
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# Markdown reading mirrors check-artifact-format.mjs: fences close on the
+# same character, at least as long, with no info string; HTML comments are
+# skipped as blocks (a line opening with "<!--") or inline on one line.
+_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+_COMMENT_BLOCK = re.compile(r"^ {0,3}<!--")
 _HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 
 
@@ -116,38 +121,114 @@ def run_checker(kind: str, preset: str, body: str | None, *, runner=None,
 
 # ---- hierarchy (advisory) --------------------------------------------------
 
+def _norm_name(text: str) -> str:
+    return " ".join(text.split()).lower().rstrip(":").rstrip()
+
+
 def _heading(line: str) -> tuple[int, str] | None:
     """(level, normalized name) for an ATX heading, else None."""
     m = _HEADING.match(line)
     if not m:
         return None
     text = re.sub(r"(^|[ \t]+)#+$", "", m.group(2) or "")
-    name = " ".join(text.split()).lower().rstrip(":").rstrip()
-    return len(m.group(1)), name
+    return len(m.group(1)), _norm_name(text)
 
 
-def _prose_lines(body: str):
-    """(line, heading) for each line outside fenced code and outside a
-    `## Comments` section; heading is `_heading(line)`."""
+def _code_spans(line: str) -> list[tuple[int, int]]:
+    """[start, end) of inline code spans: a run of N backticks closed by the
+    next run of exactly N. A run with no closer is literal text."""
+    runs = [(m.start(), len(m.group())) for m in re.finditer(r"`+", line)]
+    nxt, last = [-1] * len(runs), {}
+    for k in range(len(runs) - 1, -1, -1):
+        nxt[k] = last.get(runs[k][1], -1)
+        last[runs[k][1]] = k
+    spans, a = [], 0
+    while a < len(runs):
+        b = nxt[a]
+        if b < 0:
+            a += 1
+            continue
+        spans.append((runs[a][0], runs[b][0] + runs[b][1]))
+        a = b + 1
+    return spans
+
+
+def _strip_inline_comments(line: str) -> str:
+    """`line` without the `<!-- ... -->` comments that close on it. One in a
+    code span, or with no `-->` after it, is text."""
+    spans = _code_spans(line)
+    out, frm = [], 0
+    start = line.find("<!--")
+    while start >= 0:
+        if any(s <= start < e for s, e in spans):
+            start = line.find("<!--", start + 1)
+            continue
+        end = line.find("-->", start + 4)
+        if end < 0:
+            break
+        out.append(line[frm:start] + " ")
+        frm = end + 3
+        start = line.find("<!--", frm)
+    return "".join(out) + line[frm:]
+
+
+def _scan(body: str):
+    """(index, text, heading) for each line outside fenced code. `text` has
+    HTML comments removed; lines of a comment block (an HTML block) are never
+    headings and cannot open a fence."""
     fence = ""
-    in_comments = False
-    for line in body.splitlines():
+    in_comment = False
+    for i, raw in enumerate(body.splitlines()):
         if fence:
-            m = _FENCE.match(line)
-            if (m and m.group(1)[0] == fence[0]
-                    and len(m.group(1)) >= len(fence) and not m.group(2).strip()):
+            m = _FENCE_CLOSE.match(raw)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
                 fence = ""
             continue
-        m = _FENCE.match(line)
+        if in_comment or _COMMENT_BLOCK.match(raw):
+            rest = raw if in_comment else raw[raw.index("<!--") + 4:]
+            end = rest.find("-->")
+            in_comment = end < 0
+            text = "" if in_comment else _strip_inline_comments(rest[end + 3:])
+            yield i, text, None
+            continue
+        m = _FENCE_OPEN.match(raw)
         if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
             fence = m.group(1)
             continue
-        h = _heading(line)
+        text = _strip_inline_comments(raw)
+        yield i, text, _heading(text)
+
+
+def managed_tail_start(body: str, name: str) -> int | None:
+    """Line index of the first `## <name>` heading (exact normalized name,
+    outside fences and HTML comments), or None. Adapters that keep a log
+    section at the end of a body (markdown Comments, openkanban Activity)
+    cut there so the log is never judged as the ticket."""
+    target = _norm_name(name)
+    for i, _, h in _scan(body):
+        if h and h[0] == 2 and h[1] == target:
+            return i
+    return None
+
+
+def cut_managed_tail(body: str, name: str) -> str:
+    """`body` up to its `## <name>` log section, or unchanged without one."""
+    start = managed_tail_start(body, name)
+    if start is None:
+        return body
+    return "\n".join(body.splitlines()[:start]).rstrip() + "\n"
+
+
+def _prose_lines(body: str):
+    """(text, heading) for each line outside fenced code, HTML comments and
+    a `## Comments` section."""
+    in_comments = False
+    for _, text, h in _scan(body):
         if h and h[1] and h[0] <= 2:
             in_comments = h[0] == 2 and h[1] == "comments"
         if in_comments:
             continue
-        yield line, h
+        yield text, h
 
 
 def has_test_plan(body: str) -> bool:
@@ -286,6 +367,10 @@ def doctor_check(config, *, which=None, script=None) -> Check:
         return Check(name, False, str(e))
     script = CHECKER if script is None else Path(script)
     rules = script.with_name(RULES_NAME)
+    if script.is_file() and not rules.is_file():
+        # Every check would exit 2 and silently pass: a broken install.
+        return Check(name, False,
+                     f"rules file missing: {rules}; format gate cannot run")
     if rules.is_file():
         try:
             presets = json.loads(rules.read_text(encoding="utf-8"))["presets"]

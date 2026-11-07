@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
+from core.gates import cut_managed_tail
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog
 
@@ -215,7 +216,10 @@ class OpenKanbanAdapter(Adapter):
     has_artifact_body = True
 
     def artifact_body(self, ticket):
-        return ticket.description
+        # `comment` appends to an `## Activity` log at the end of the
+        # description (this adapter has no edit/apply to move it), so cut
+        # there: a comment is not the ticket's content.
+        return cut_managed_tail(ticket.description, "activity")
 
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)

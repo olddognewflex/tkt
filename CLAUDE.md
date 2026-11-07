@@ -165,8 +165,11 @@ Two layers, connected only by the verb contract and the normalized schema:
     picks warn (default) / strict (`GateError`, exit 5) / off. Anything it
     cannot judge — no node, no checker, no body (`Adapter.artifact_body`
     returns None; jira always does), a backend or checker failure — lets the
-    verb through. Also holds the advisory hierarchy checks (test plans,
-    sub-task size) and the `enforcement` doctor row.
+    verb through. Its markdown reading mirrors the checker's (CommonMark
+    fences, HTML comments); `cut_managed_tail` is what the markdown and
+    openkanban adapters use to drop their comment logs (`## Comments`,
+    `## Activity`) from the judged body. Also holds the advisory hierarchy
+    checks (test plans, sub-task size) and the `enforcement` doctor row.
   - `schedule.py` — the `[schedule]` table and `tkt schedule`: parses and
     validates it (bad hours, days or timezone are a `ConfigError`, never a
     silently disabled hold) and answers "is it business hours now". Skills ask

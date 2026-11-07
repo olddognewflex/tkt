@@ -566,6 +566,41 @@ class Hierarchy(unittest.TestCase):
         self.assertEqual(self.rules(out), ["parent-test-plan"])
         self.assertIn("TKT-3", out[0])
 
+    def test_test_plan_hidden_in_a_comment_block_does_not_count(self):
+        for body in ("# T\n\n<!--\n## Test plan\n-->\n",
+                     "# T\n\n<!-- template:\n## Testing\n- fill in -->\n",
+                     "# T\n\n   <!--\n## Test plan -->\n"):
+            self.assertFalse(gates.has_test_plan(body), body)
+            out, _ = self.run_h(tk("TKT-1", "Story", ["TKT-2"]), body,
+                                [tk("TKT-2", "Sub-task")])
+            self.assertEqual(self.rules(out), ["parent-test-plan"], body)
+            out, _ = self.run_h(tk("TKT-2", "Sub-task"), body)
+            self.assertEqual(out, [], body)
+
+    def test_heading_after_an_inline_comment_still_counts(self):
+        # An inline comment that closes on its line hides only itself.
+        self.assertTrue(gates.has_test_plan("## Test plan <!-- todo -->\n"))
+        self.assertFalse(gates.has_test_plan("<!-- x --> ## Test plan\n"))
+
+    def test_hidden_words_do_not_count_toward_the_limit(self):
+        body = ("# S\n\nDo it.\n<!--\n" + "hidden " * 200 + "\n-->\n"
+                "Inline <!-- " + "gone " * 50 + "--> kept\n")
+        self.assertEqual(gates.word_count(body), 5)  # S, Do, it., Inline, kept
+        out, _ = self.run_h(tk("TKT-2", "Sub-task"), body)
+        self.assertEqual(out, [])
+
+    def test_comment_marker_in_a_code_span_is_text(self):
+        # Were the span's "<!--" a comment opener, it would hide up to "-->".
+        body = "Write `<!--` then some words then `-->` done\n"
+        self.assertEqual(gates.word_count(body), 6)
+        # An unclosed mid-line marker is text too, and hides nothing.
+        self.assertEqual(gates.word_count("a <!-- b\nc\n"), 3)
+
+    def test_fence_closes_only_on_a_long_enough_run(self):
+        body = "````\n```\n## Test plan\n```\n````\n"
+        self.assertFalse(gates.has_test_plan(body))
+        self.assertTrue(gates.has_test_plan(body + "## Testing\n"))
+
     def test_subtask_too_long_flagged(self):
         body = "# S\n\n" + "word " * 151
         out, _ = self.run_h(tk("TKT-2", "Sub-task"), body)
@@ -706,6 +741,30 @@ class ArtifactBody(unittest.TestCase):
             self.assertIn("## Behavior\nb", body)
             self.assertNotIn("- c", body)
 
+    def test_markdown_lookalike_comments_headings_do_not_truncate(self):
+        lookalikes = {
+            "html block": "<!--\n## Comments\n-->\n",
+            "long fence": "````md\n```\n## Comments\n```\n````\n",
+            "longer name": "## Comments on design\nnotes\n",
+            "inline html": "<!-- ## Comments -->\n",
+        }
+        for label, chunk in lookalikes.items():
+            with self.subTest(label), tempfile.TemporaryDirectory() as tmp:
+                a, t = self.markdown(tmp, "---\ntype: Story\n---\n# T\n\n"
+                                     "## Summary\ns\n\n" + chunk +
+                                     "\n## Behavior\nb\n\n## Comments\n- c\n")
+                body = a.artifact_body(t)
+                self.assertIn("## Behavior\nb", body)
+                self.assertIn(chunk.strip(), body)
+                self.assertNotIn("- c", body)     # the real log is still cut
+
+    def test_managed_tail_start(self):
+        self.assertEqual(gates.managed_tail_start("a\n## Comments\nx", "comments"), 1)
+        self.assertEqual(gates.managed_tail_start("## comments:\n", "Comments"), 0)
+        self.assertIsNone(gates.managed_tail_start("### Comments\n", "comments"))
+        self.assertIsNone(gates.managed_tail_start("## Commentary\n", "comments"))
+        self.assertIsNone(gates.managed_tail_start("", "comments"))
+
     def test_markdown_comment_headings_are_not_judged(self):
         with tempfile.TemporaryDirectory() as tmp:
             a, t = self.markdown(tmp, "---\ntype: Sub-task\n---\n# T\n\n"
@@ -717,6 +776,61 @@ class ArtifactBody(unittest.TestCase):
             self.assertFalse(gates.has_test_plan(body))
             out = gates.check_hierarchy(config(), a, a.view("TKT-1"), body)
             self.assertEqual(out, [])       # neither too long nor a test plan
+
+
+class OpenKanbanActivity(unittest.TestCase):
+    """openkanban keeps comments as an `## Activity` log in the description;
+    the gate must judge the description without it."""
+
+    PID = "proj-1"
+    DESC = ("The thesis.\n\n## Summary\nWhat.\n\n## Behavior\nHow.\n\n"
+            "## References\n- none")
+
+    def setUp(self):
+        from adapters.openkanban import OpenKanbanAdapter
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "projects.json").write_text(json.dumps(
+            {"projects": {self.PID: {"id": self.PID, "name": "demo"}}}))
+        (root / "tickets").mkdir()
+        (root / "tickets" / f"{self.PID}.json").write_text(json.dumps(
+            {"project_id": self.PID, "updated_at": "2026-01-01T00:00:00Z",
+             "tickets": {"t1": {"id": "t1", "project_id": self.PID,
+                                "title": "T", "description": self.DESC,
+                                "status": "in_progress", "labels": ["Story"],
+                                "priority": 3, "meta": {}}}}))
+        self.cfg = Config({"ticketing": {"provider": "openkanban"},
+                           "openkanban": {"project": "demo",
+                                          "config_dir": str(root)},
+                           "issue_types": {"full_sdlc": ["Story"]},
+                           "board": {"roles": {"todo": "backlog",
+                                               "in_progress": "in_progress",
+                                               "done": "done"}},
+                           "enforcement": {"artifact_format": "strict"}},
+                          root / ".sdlc" / "config.toml")
+        self.a = OpenKanbanAdapter(self.cfg)
+
+    def test_activity_log_is_cut(self):
+        self.a.comment("t1", "Self-review done.\n\n## Findings\nnone")
+        self.a.comment("t1", "second")
+        t = self.a.view("t1")
+        self.assertIn("## Activity", t.description)
+        body = self.a.artifact_body(t)
+        self.assertEqual(body, self.DESC + "\n")
+
+    def test_no_activity_returns_the_description(self):
+        self.assertEqual(self.a.artifact_body(self.a.view("t1")), self.DESC)
+
+    @unittest.skipUnless(shutil.which("node"), "node not on PATH")
+    def test_comment_then_strict_transition_passes(self):
+        self.a.comment("t1", "Self-review done.\n\n## Findings\nnone")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            gates.gate_transition(self.cfg, self.a, "t1", "done")
+            self.a.transition("t1", "done")
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(self.a.view("t1").status, "done")
 
 
 MARKDOWN_TOML = """
@@ -840,6 +954,14 @@ class Cli(unittest.TestCase):
         _, row = self.doctor_row("")
         self.assertTrue(row["ok"])
         self.assertIn("inactive: checker missing", row["detail"])
+
+    def test_doctor_fails_when_the_rules_file_is_missing(self):
+        (self.root / "artifact-format.rules.json").unlink()
+        code, row = self.doctor_row('[enforcement]\nartifact_format = "strict"')
+        self.assertEqual(code, 1)
+        self.assertFalse(row["ok"])
+        self.assertIn("rules file missing", row["detail"])
+        self.assertIn("format gate cannot run", row["detail"])
 
     def test_doctor_fails_an_invalid_table(self):
         code, row = self.doctor_row('[enforcement]\nmode = "strict"')

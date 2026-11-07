@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import ticketdoc
+from core.gates import cut_managed_tail
 from core.errors import NotFoundError, ProviderError, UsageError
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog, human_duration
@@ -383,10 +384,7 @@ class MarkdownAdapter(Adapter):
         # keeps Comments last (`comment` appends it, `apply`/`edit --body`
         # move it to the end), so only a hand-placed section after it is lost.
         _, body = self._read_raw(ticket.key)
-        bounds = ticketdoc.section_bounds(body, "comments")
-        if bounds is None:
-            return body
-        return "\n".join(body.splitlines()[:bounds[0]]).rstrip() + "\n"
+        return cut_managed_tail(body, "comments")
 
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
