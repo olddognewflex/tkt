@@ -16,8 +16,9 @@ has the full verb contract and per-provider notes.
 
 Pure stdlib, Python 3.11+ (uses `tomllib`). No third-party deps, no build step.
 The one exception is `enforcement/`: stdlib-only Node checker scripts (Node 20+,
-CI runs 24; no npm packages) that CI self-tests. Node is a CI/dev dependency
-for that directory alone; `tkt` itself never needs it.
+CI runs 24; no npm packages) that CI self-tests. `tkt` itself never requires
+Node: the format gates (`core/gates.py`) shell out to it when it is on `PATH`
+and stay inactive when it is not.
 
 ## Commands
 
@@ -92,7 +93,11 @@ adapter and its `view` rendering (`test_children_jira.py`,
 `link --type child|parent` on the local boards (`test_parent_jira.py`,
 `test_parent_github.py`, `test_parent_linear.py`,
 `test_parent_markdown.py`, `test_parent_openkanban.py`,
-`test_parent_cli.py`), and `tkt --version` (`test_version.py`).
+`test_parent_cli.py`), `tkt --version` (`test_version.py`), and the
+transition/comment format gates: warn/strict/off, lane-name resolution,
+every cannot-judge path, `[enforcement]` validation, the hierarchy checks,
+`artifact_body` per adapter and the doctor row, with one end-to-end run of
+the real checker skipped when node is absent (`test_gates.py`).
 Outside `tests/`, `enforcement/check-artifact-format.test.mjs` (`node:test`,
 run by `node --test enforcement/*.test.mjs`, not by `unittest`) drives
 `check-artifact-format.mjs` as a subprocess: every rule once allowed and once
@@ -124,6 +129,7 @@ Two layers, connected only by the verb contract and the normalized schema:
     → nearest `.sdlc/config.toml` walking up from cwd. Owns role↔lane mapping, the
     `close_on` terminal roles, issue-type routing (`full_sdlc` vs `deliverable`), named
     queries and their `[query_scopes]` (project | global), the
+    `[enforcement]` table (validated on use, not at load), the
     backend-agnostic priority ordering, and dotted-path `get()`.
   - `registry.py` — `provider name → (module, class)`, **lazy-imported** so one adapter's
     missing optional dep can't break the others.
@@ -152,6 +158,18 @@ Two layers, connected only by the verb contract and the normalized schema:
     plus the `[build]`-table rewrite `init` applies to the copied example config.
     Advisory only: a key the project doesn't declare keeps the example's value.
   - `scaffold.py` — implements `tkt init`.
+  - `gates.py` — the format gates `cli.py` runs before `transition` (into
+    `review` and later lanes, a literal lane name resolved to its role first)
+    and `comment`. Shells out to `enforcement/check-artifact-format.mjs` in
+    tkt's own checkout and reads its stderr finding lines; `[enforcement]`
+    picks warn (default) / strict (`GateError`, exit 5) / off. Anything it
+    cannot judge — no node, no checker, no body (`Adapter.artifact_body`
+    returns None; jira always does), a backend or checker failure — lets the
+    verb through. Its markdown reading mirrors the checker's (CommonMark
+    fences, HTML comments, leading YAML frontmatter); `cut_managed_tail` is
+    what the markdown and openkanban adapters use to drop their comment
+    logs (`## Comments`, `## Activity`) from the judged body. Also holds the advisory hierarchy
+    checks (test plans, sub-task size) and the `enforcement` doctor row.
   - `schedule.py` — the `[schedule]` table and `tkt schedule`: parses and
     validates it (bad hours, days or timezone are a `ConfigError`, never a
     silently disabled hold) and answers "is it business hours now". Skills ask

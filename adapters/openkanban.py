@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
+from core.gates import cut_managed_tail, managed_tail_start
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog
 
@@ -212,6 +213,14 @@ class OpenKanbanAdapter(Adapter):
         _, raw = self._get_raw(key)
         return self._to_ticket(raw)
 
+    has_artifact_body = True
+
+    def artifact_body(self, ticket):
+        # `comment` appends to an `## Activity` log at the end of the
+        # description (this adapter has no edit/apply to move it), so cut
+        # there: a comment is not the ticket's content.
+        return cut_managed_tail(ticket.description, "activity")
+
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
         store, raw = self._get_raw(key)
@@ -227,7 +236,9 @@ class OpenKanbanAdapter(Adapter):
         store, raw = self._get_raw(key)
         desc = (raw.get("description", "") or "").rstrip()
         stamp = f"- {_now()} {self.me or 'agent'}: {body}"
-        if "## Activity" in desc:
+        # Same exact-heading test `artifact_body` cuts at: a fenced
+        # `## Activity` example or an `### Activity` subheading is not the log.
+        if managed_tail_start(desc, "activity") is not None:
             desc += "\n" + stamp
         else:
             desc += ("\n\n" if desc else "") + "## Activity\n" + stamp

@@ -95,3 +95,20 @@ deep     = "claude-opus-5"
 
 [timetracking]
 provider = "none"        # openkanban has no time tracking; worklog/lane-time are no-ops
+
+# Format gates (see README "Format gates"). Optional: without this table the
+# gates run in warn mode with the standard preset. A ticket body is checked on
+# a transition into review, qa_ready, qa, deploy_ready or done; a comment is
+# checked before it is posted. A gate that cannot judge (no node, no checker,
+# an unreadable body) never blocks. Unknown keys are a config error. `done` is
+# gated with the default preset too: give deliverable types (Task, Chore,
+# Sub-task, Spike) a presets_by_type entry before turning on strict.
+# [enforcement]
+# artifact_format = "warn"      # warn (default): findings to stderr, carry on;
+#                               # strict: refuse with exit 5; off: no check
+# preset = "standard"           # rules preset for comments, and for ticket
+#                               # types not in presets_by_type
+# subtask_types = ["Sub-task", "Subtask"]   # types the advisory sub-task
+#                               # checks treat as sub-tasks
+# [enforcement.presets_by_type] # issue type -> preset, ticket bodies only
+# Story = "problem-proposal"

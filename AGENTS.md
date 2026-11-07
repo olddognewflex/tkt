@@ -69,8 +69,8 @@ separate harness-specific files).
 | `tkt list --tier N` \| `--query NAME` `[--all-projects]` | run named query from config (one is required); `--all-projects` drops project scoping |
 | `tkt view KEY --json` | normalized ticket |
 | `tkt activity --query NAME --since ISO [--until ISO] --json` | comments + field changes on the query's tickets in `[since, until)`; each event has a stable `evidence_id` to cite (adapter-opt-in: jira) |
-| `tkt transition KEY ROLE` | move ticket to role's lane |
-| `tkt comment KEY BODY` | post activity comment |
+| `tkt transition KEY ROLE` | move ticket to role's lane (format-gated from `review` on; see below) |
+| `tkt comment KEY BODY` | post activity comment (format-gated) |
 | `tkt blockers KEY --json` | unresolved blockers only |
 | `tkt worklog KEY --from-role ROLE [--note T] [--billable\|--no-billable]` | log time since entry → now |
 | `tkt lane-time [KEY] --role ROLE [--keys K1:role,K2:role] [--read-only]` | log time for a closed lane interval; batch via `--keys` |
@@ -144,6 +144,16 @@ filter) or every project on Jira; other backends accept it and ignore it. It
 is a view for humans only -- skills that act on the first result (e.g.
 `select-ticket`) must not pass it, or one repo picks up another's ticket.
 
+### Format gates
+
+`tkt transition` into `review`, `qa_ready`, `qa`, `deploy_ready` or `done`
+checks the ticket body's format first, and `tkt comment` checks the comment.
+Findings print to stderr as `tkt: warn: ...`; `--json` stdout is unchanged.
+Under `[enforcement].artifact_format = "strict"` a finding is exit 5 and the
+ticket does not move (or the comment is not posted): fix the body and retry.
+`tkt: warn: hierarchy: ...` lines are advisory and never block. A gate that
+cannot judge (no node, Jira bodies, a backend error) lets the verb through.
+
 ### Exit codes
 
 Branch on these — errors always go to stderr with a non-zero exit:
@@ -153,6 +163,7 @@ Branch on these — errors always go to stderr with a non-zero exit:
 | 2 | config error |
 | 3 | provider error (includes "verb not supported by this adapter") |
 | 4 | not found |
+| 5 | format gate refused a transition or comment (`[enforcement].artifact_format = "strict"`) |
 | 64 | usage error |
 
 ## SDLC skill pack
@@ -266,7 +277,8 @@ hand-maintained.
 - `scripts/` — `company-import.sh` (bulk import) and `smoke-sync-pack.sh`
   (sync-pack smoke test).
 - This repo is pure stdlib Python 3.11+; no build step. The exception is
-  `enforcement/` (stdlib-only Node checkers, CI-tested); `tkt` never needs Node.
+  `enforcement/` (stdlib-only Node checkers, CI-tested). `tkt` runs without
+  Node; the format gates just stay inactive.
 
 ## When in doubt
 

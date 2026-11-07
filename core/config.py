@@ -17,6 +17,16 @@ DEFAULT_PRIORITIES = ["Highest", "High", "Medium", "Low", "Lowest"]
 # configured project; "global" lets it span projects (backend permitting).
 QUERY_SCOPES = ("project", "global")
 
+# `[enforcement].artifact_format` modes (see core/gates.py). "warn" is the
+# default, also when the table is absent.
+ENFORCEMENT_MODES = ("warn", "strict", "off")
+ENFORCEMENT_DEFAULTS = {
+    "artifact_format": "warn",
+    "preset": "standard",
+    "presets_by_type": {},
+    "subtask_types": ["Sub-task", "Subtask"],
+}
+
 class Config:
     def __init__(self, data: dict[str, Any], path: Path):
         self.path = path
@@ -130,6 +140,49 @@ class Config:
         if tier is not None:
             name = f"tier{tier}"
         return self.query_scopes().get(name, "project")
+
+    # ---- enforcement -------------------------------------------------------
+
+    def enforcement(self) -> dict[str, Any]:
+        """The validated `[enforcement]` table merged over its defaults.
+        Validated here, on demand, rather than at load, so a bad table fails
+        the verbs that use it (transition, comment, doctor) and nothing else.
+        Unknown keys and wrong types are errors: a typo must not silently
+        disable a gate."""
+        table = self._d.get("enforcement", {})
+        if not isinstance(table, dict):
+            raise ConfigError("[enforcement] must be a table")
+        for key in table:
+            if key not in ENFORCEMENT_DEFAULTS:
+                raise ConfigError(
+                    f"[enforcement].{key}: unknown key. Known: "
+                    f"{', '.join(ENFORCEMENT_DEFAULTS)}")
+        out = {k: (dict(v) if isinstance(v, dict) else
+                   list(v) if isinstance(v, list) else v)
+               for k, v in ENFORCEMENT_DEFAULTS.items()}
+        out.update(table)
+        mode = out["artifact_format"]
+        if mode not in ENFORCEMENT_MODES:
+            raise ConfigError(
+                f"[enforcement].artifact_format = {mode!r}: must be one of "
+                f"{', '.join(repr(m) for m in ENFORCEMENT_MODES)}")
+        if not isinstance(out["preset"], str) or not out["preset"].strip():
+            raise ConfigError("[enforcement].preset must be a non-empty string")
+        by_type = out["presets_by_type"]
+        if not isinstance(by_type, dict):
+            raise ConfigError(
+                "[enforcement].presets_by_type must be a table of "
+                "issue type = preset")
+        for t, name in by_type.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ConfigError(
+                    f"[enforcement].presets_by_type.{t} must be a non-empty "
+                    f"preset name")
+        sub = out["subtask_types"]
+        if not isinstance(sub, list) or not all(isinstance(x, str) for x in sub):
+            raise ConfigError(
+                "[enforcement].subtask_types must be an array of strings")
+        return out
 
     # ---- priorities --------------------------------------------------------
 

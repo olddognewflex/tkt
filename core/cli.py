@@ -6,6 +6,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from . import gates
 from .config import Config
 from .errors import ConfigError, TktError, UsageError
 from .registry import get_adapter
@@ -481,11 +482,15 @@ def main(argv: list[str]) -> int:
                     print(_activity_line(e))
 
         elif args.verb == "transition":
+            # Format gate: warnings go to stderr; strict raises GateError
+            # before the backend is touched.
+            gates.gate_transition(config, adapter, args.key, args.role)
             adapter.transition(args.key, args.role)
             lane = config.role_to_lane(args.role)
             print(f"{args.key} -> {lane}")
 
         elif args.verb == "comment":
+            gates.gate_comment(config, args.key, args.body)
             adapter.comment(args.key, args.body)
             print(f"commented on {args.key}")
 
@@ -601,6 +606,7 @@ def main(argv: list[str]) -> int:
                     checks = checks + [Check("query scopes", True, f"{n} set")]
                 except ConfigError as e:
                     checks = checks + [Check("query scopes", False, str(e))]
+            checks = checks + [gates.doctor_check(config)]
             from .pack import doctor_check
             pack_c = doctor_check(config)
             if pack_c is not None:

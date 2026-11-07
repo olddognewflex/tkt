@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import ticketdoc
+from core.gates import cut_managed_tail
 from core.errors import NotFoundError, ProviderError, UsageError
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog, human_duration
@@ -371,6 +372,19 @@ class MarkdownAdapter(Adapter):
         # with the ticket.
         fm, body = self._read_raw(key)
         return self._to_ticket(key, fm, body)
+
+    has_artifact_body = True
+
+    def artifact_body(self, ticket):
+        # The body after frontmatter, up to `## Comments`. Ticket.description
+        # is only the preamble before the first `##`, so section rules can't
+        # use it. Comments are cut, not left for the checker to ignore: a
+        # comment is inserted verbatim, so a `## Findings` line in one would
+        # end the section and be judged as the ticket's. Every tkt writer
+        # keeps Comments last (`comment` appends it, `apply`/`edit --body`
+        # move it to the end), so only a hand-placed section after it is lost.
+        _, body = self._read_raw(ticket.key)
+        return cut_managed_tail(body, "comments")
 
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)

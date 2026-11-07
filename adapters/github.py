@@ -338,6 +338,11 @@ class GithubAdapter(Adapter):
         key = _related_key(issue, nwo)
         return key if key != number else ""
 
+    has_artifact_body = True
+
+    def artifact_body(self, ticket):
+        return ticket.description
+
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
         role = self.config.lane_to_role(lane)  # caller may have passed the lane name

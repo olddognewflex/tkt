@@ -134,6 +134,18 @@ class Adapter(ABC):
         reconcile the configured names with what the backend actually accepts."""
         return self.config.priorities()
 
+    # ---- format gate -------------------------------------------------------
+
+    # True when `artifact_body` can return a body. The format gate
+    # (core/gates.py) skips its `view` call on adapters that leave it False.
+    has_artifact_body = False
+
+    def artifact_body(self, ticket: Ticket) -> str | None:
+        """The ticket's markdown body as the format gate should judge it, or
+        None when this backend can't supply one faithfully. The default is
+        None: an unknown adapter is unjudgeable, so the gate lets it through."""
+        return None
+
     # ---- optional verbs ----------------------------------------------------
     # Not every backend supports these; default to a clear error so adapters
     # can opt in without breaking instantiation (unlike the @abstractmethods).
