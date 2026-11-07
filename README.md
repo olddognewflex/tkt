@@ -511,7 +511,8 @@ otherwise state as prose, implemented once so every harness gets the same
 answer. Each is a stdlib-only Node script (Node 20+, CI runs 24; no npm
 packages, no `package.json`) with a paired `*.test.mjs` self-test. Run them
 with `node --test enforcement/*.test.mjs`; CI runs the same glob. Node is a
-CI/dev dependency for this directory only; `tkt` itself stays stdlib Python.
+CI/dev dependency for this directory; `tkt` itself stays stdlib Python and
+only uses Node, when present, for the format gates below.
 Copying `enforcement/` into consumer repos is not done yet: it is pending
 TKT-36 (sync-pack base layer), so `sync-pack` does not install it today.
 
@@ -556,6 +557,73 @@ Notes have no word budget in either preset, on purpose; only tickets, PRs
 and comments are budgeted. `## Comments` is ignored by every rule, word
 count included. Section names match case-insensitively, with a trailing `:`
 ignored.
+
+### Format gates
+
+`tkt transition` and `tkt comment` run `check-artifact-format.mjs` before
+touching the backend (`core/gates.py`):
+
+- **Transition** into `review`, `qa_ready`, `qa`, `deploy_ready` or `done`
+  checks the ticket body as `--kind ticket`. The target resolves as
+  `tkt lane` does (exact role, then exact lane name), so
+  `tkt transition K "In Review"` is gated like `tkt transition K review`,
+  and a lane shared with a gated role is gated. Earlier lanes are not
+  checked.
+- **Comment** checks the comment text as `--kind comment`, with no backend
+  call.
+
+The checker is found in tkt's own checkout, so consumer repos don't need
+`enforcement/`, but `node` must be on `PATH`. The optional `[enforcement]`
+table sets the mode:
+
+```toml
+[enforcement]
+artifact_format = "warn"     # warn (default) | strict | off
+preset = "standard"          # comments, and ticket types not listed below
+subtask_types = ["Sub-task", "Subtask"]
+[enforcement.presets_by_type]
+Story = "problem-proposal"   # ticket bodies only
+```
+
+- `warn` (the default, also with no table) prints each finding to stderr as
+  `tkt: warn: <finding>` and carries on. `--json` stdout is unchanged.
+- `strict` prints the findings and exits 5 without moving the ticket or
+  posting the comment.
+- `off` never runs the checker.
+
+`done` is gated too, and the default `standard` preset expects a Story-shaped
+body (thesis, `## Summary`, `## Behavior`). Deliverable types (Task, Chore,
+Sub-task, Spike) that `complete-deliverable` moves straight to `done`
+usually don't have one, so give them a `presets_by_type` entry before
+turning on `strict`.
+
+Unknown keys and wrong types are a config error (exit 2), and `tkt doctor`
+reports the table in an `enforcement` row: FAIL for a bad table or a preset
+that `artifact-format.rules.json` doesn't define, ok but "inactive" when node
+or the checker is missing.
+
+**A gate that cannot judge never blocks.** No node, no checker, an empty or
+unavailable body, a backend error while fetching the ticket, a checker crash,
+timeout (15 s) or exit 2: the verb proceeds as if there were no gate. Ticket
+bodies come from the adapter's `artifact_body`: on `markdown`, the whole body
+up to `## Comments` (comments are cut, so a heading inside one is never
+judged; a section placed by hand after Comments is not judged either); the
+description on `github`, `linear` and `openkanban`. **Jira
+tickets are unjudgeable**: their descriptions are ADF flattened to plain text
+without heading markers, so Jira transitions skip the check (comments are
+still checked).
+
+On a gated transition, three advisory hierarchy checks also run. They print
+as `tkt: warn: hierarchy: ...` and never block, even in strict mode:
+
+| Rule | Flags |
+| --- | --- |
+| `parent-test-plan` | a ticket with a sub-task child but no `## Test plan`, `## Testing` or `## Test strategy` heading |
+| `subtask-too-long` | a sub-task body over 150 words (fenced code and `## Comments` excluded) |
+| `subtask-test-plan` | a sub-task with its own test-plan heading; it belongs on the parent |
+
+Sub-task types come from `subtask_types`, matched ignoring case and
+punctuation (`Sub-task` = `subtask`).
 
 ## Unattended runs
 

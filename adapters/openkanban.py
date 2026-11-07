@@ -212,6 +212,11 @@ class OpenKanbanAdapter(Adapter):
         _, raw = self._get_raw(key)
         return self._to_ticket(raw)
 
+    has_artifact_body = True
+
+    def artifact_body(self, ticket):
+        return ticket.description
+
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
         store, raw = self._get_raw(key)

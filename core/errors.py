@@ -26,6 +26,12 @@ class NotFoundError(TktError):
     exit_code = 4
 
 
+class GateError(TktError):
+    """A strict format gate refused a transition or comment."""
+
+    exit_code = 5
+
+
 class UsageError(TktError):
     """Bad CLI arguments."""
 

@@ -372,6 +372,22 @@ class MarkdownAdapter(Adapter):
         fm, body = self._read_raw(key)
         return self._to_ticket(key, fm, body)
 
+    has_artifact_body = True
+
+    def artifact_body(self, ticket):
+        # The body after frontmatter, up to `## Comments`. Ticket.description
+        # is only the preamble before the first `##`, so section rules can't
+        # use it. Comments are cut, not left for the checker to ignore: a
+        # comment is inserted verbatim, so a `## Findings` line in one would
+        # end the section and be judged as the ticket's. Every tkt writer
+        # keeps Comments last (`comment` appends it, `apply`/`edit --body`
+        # move it to the end), so only a hand-placed section after it is lost.
+        _, body = self._read_raw(ticket.key)
+        bounds = ticketdoc.section_bounds(body, "comments")
+        if bounds is None:
+            return body
+        return "\n".join(body.splitlines()[:bounds[0]]).rstrip() + "\n"
+
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
         fm, body = self._read_raw(key)

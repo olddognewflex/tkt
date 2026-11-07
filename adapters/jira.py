@@ -781,6 +781,12 @@ class JiraAdapter(Adapter):
         self._acli("jira", "workitem", "link", "create",
                    "--out", key, "--in", to, "--type", link_type, "--yes")
 
+    def artifact_body(self, ticket):
+        # Jira descriptions are ADF, flattened to plain text by `_adf_to_text`,
+        # which drops heading markers: section rules can't be judged. None
+        # keeps the format gate out of Jira transitions.
+        return None
+
     def transition(self, key, role):
         # acli reports an unavailable transition on stdout and still exits 0,
         # so check=True never fires. Verify the move instead of assuming it.
