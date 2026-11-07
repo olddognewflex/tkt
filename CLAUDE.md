@@ -15,6 +15,9 @@ It decouples **process logic** (what step comes next, in the skills) from
 has the full verb contract and per-provider notes.
 
 Pure stdlib, Python 3.11+ (uses `tomllib`). No third-party deps, no build step.
+The one exception is `enforcement/`: stdlib-only Node checker scripts (Node 20+,
+CI runs 24; no npm packages) that CI self-tests. Node is a CI/dev dependency
+for that directory alone; `tkt` itself never needs it.
 
 ## Commands
 
@@ -27,6 +30,7 @@ Pure stdlib, Python 3.11+ (uses `tomllib`). No third-party deps, no build step.
 ./tkt agents --json           # state of every agent run (local read, safe to poll)
 
 python3 -m unittest discover -s tests   # whole suite, fully offline
+node --test enforcement/*.test.mjs  # enforcement checker self-tests (Node 20+)
 bash scripts/smoke-agents.sh      # live run -> dead/halted, end to end
 bash scripts/smoke-sync-pack.sh
 ```
@@ -37,7 +41,10 @@ transport. On every PR and every push to `main` it runs the suite on Python
 3.11/3.12/3.13 (Linux) and 3.11 (macOS), byte-compiles `core`/`adapters`/`tkt`,
 asserts every *tracked file with a shebang* is still mode `100755`, scaffolds a
 throwaway markdown project and reads a ticket back through a PATH symlink from
-a cwd outside the repo, and runs `scripts/smoke-sync-pack.sh`.
+a cwd outside the repo, runs `scripts/smoke-sync-pack.sh`, and runs the
+`enforcement/` self-tests under Node 24 (`node --test enforcement/*.test.mjs`,
+with bash `failglob` so a glob matching nothing fails rather than passing
+vacuously).
 
 Three deliberate gaps, each documented at its place in the YAML: **Windows is
 not in the matrix** (decided in TKT-61: the CLI supports Windows, the suite
@@ -86,6 +93,12 @@ adapter and its `view` rendering (`test_children_jira.py`,
 `test_parent_github.py`, `test_parent_linear.py`,
 `test_parent_markdown.py`, `test_parent_openkanban.py`,
 `test_parent_cli.py`), and `tkt --version` (`test_version.py`).
+Outside `tests/`, `enforcement/check-artifact-format.test.mjs` (`node:test`,
+run by `node --test enforcement/*.test.mjs`, not by `unittest`) drives
+`check-artifact-format.mjs` as a subprocess: every rule once allowed and once
+flagged, the parser's edge cases (fences, HTML comments, frontmatter vs a
+leading thematic break), both shipped presets, the stderr/`--json` output and
+exit codes 0/1/2, and rules-file validation.
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
 "validation" of an adapter still means running `tkt doctor` / the read
