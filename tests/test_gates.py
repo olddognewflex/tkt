@@ -617,6 +617,17 @@ class Hierarchy(unittest.TestCase):
         self.assertEqual(out.count("`<!-- kept -->`"), n)
         self.assertNotIn("gone", out)
 
+    def test_lines_split_as_the_checker_splits(self):
+        # Only LF (after CRLF/CR) ends a line: a form feed or U+2028 is text,
+        # so a `## Comments` after one is not a heading. A leading BOM is
+        # dropped, so a heading on the first line is still seen.
+        for body in ("Intro\x0c## Comments\nlog\n", "Intro\u2028## Comments\n"):
+            self.assertIsNone(gates.managed_tail_start(body, "comments"), repr(body))
+        self.assertEqual(gates.managed_tail_start("\ufeffx\r\n## Comments\r\nlog", "comments"), 1)
+        self.assertEqual(gates.cut_managed_tail("\ufeffx\r\n## Comments\r\nlog", "comments"), "x\n")
+        self.assertTrue(gates.has_test_plan("\ufeff---\r\nk: v\r\n---\r\n## Test plan\r\n"))
+        self.assertFalse(gates.has_test_plan("\ufeff---\nk: v\n## Test plan\n---\n"))
+
     def test_subtask_types_keep_non_ascii_letters(self):
         self.assertTrue(gates.is_subtask("子任务", ["子任务"]))
         self.assertTrue(gates.is_subtask("Sous-tâche", ["sous tâche"]))

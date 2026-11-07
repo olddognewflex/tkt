@@ -182,12 +182,20 @@ def _strip_inline_comments(line: str) -> str:
     return "".join(out) + line[frm:]
 
 
+def _lines(body: str) -> list[str]:
+    """`body` split as the checker splits it: a leading BOM dropped, CRLF and
+    CR read as LF, and only LF ends a line (`str.splitlines` would also
+    break on form feeds and Unicode separators the checker treats as text)."""
+    return (body.removeprefix("\ufeff").replace("\r\n", "\n")
+            .replace("\r", "\n").split("\n"))
+
+
 def _frontmatter_end(lines: list[str]) -> int:
     """Index of the first line after a leading YAML frontmatter block, or 0
     when there is none: no closing "---"/"...", or a line between the fences
     that doesn't look like YAML (then the opening "---" is a thematic
     break). Same test as the checker's frontmatterEnd."""
-    if not lines or lines[0].lstrip("\ufeff").rstrip() != "---":
+    if not lines or lines[0].rstrip() != "---":
         return 0
     saw_key = False
     for j in range(1, len(lines)):
@@ -211,7 +219,7 @@ def _scan(body: str):
     fence."""
     fence = ""
     in_comment = False
-    lines = body.splitlines()
+    lines = _lines(body)
     start = _frontmatter_end(lines)
     for i, raw in enumerate(lines[start:], start):
         if fence:
@@ -251,7 +259,7 @@ def cut_managed_tail(body: str, name: str) -> str:
     start = managed_tail_start(body, name)
     if start is None:
         return body
-    return "\n".join(body.splitlines()[:start]).rstrip() + "\n"
+    return "\n".join(_lines(body)[:start]).rstrip() + "\n"
 
 
 def _prose_lines(body: str):
