@@ -428,7 +428,7 @@ class TestEnrich(unittest.TestCase):
             config = Config.load(str(_write_config(Path(tmp))))
             with mock.patch("core.registry.get_adapter", return_value=fake):
                 rows = agents.enrich(config, [{"key": "TKT-1"}])
-        self.assertEqual(fake.calls, [("TKT-1", {"children": False})])
+        self.assertEqual(fake.calls, [("TKT-1", {"hierarchy": False})])
         self.assertEqual(rows[0]["summary"], "s")
         self.assertEqual(rows[0]["status_role"], "in_progress")
 

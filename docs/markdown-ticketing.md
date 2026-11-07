@@ -55,6 +55,7 @@ assignee: raymond
 labels: [api, auth]
 blocked_by: [TKT-2]
 blocks: []
+parent: TKT-1
 children: [TKT-4, TKT-5]
 ---
 # One-line summary
@@ -93,7 +94,8 @@ Recognised keys and how the adapter maps them into the normalized ticket:
 | `components`  | `components` | List. |
 | `blocked_by`  | `blocked_by` | List of keys. Each is expanded to `{key, resolved}`, where `resolved` is true iff that ticket's `status` equals the `done` lane. |
 | `blocks`      | `blocks` | List of keys. Informational (the inverse edge). |
-| `children`    | `children` | List of keys: the ticket's direct children. De-duplicated, and the ticket's own key is dropped. Set by hand, by `tkt apply`, or by `tkt link KEY --to CHILD --type child`. Informational: nothing writes the inverse edge, and there is no `parent` key. Omit it when there are none; `tkt apply --new` only writes it when non-empty. |
+| `children`    | `children` | List of keys: the ticket's direct children. De-duplicated, and any entry naming the ticket itself is dropped (detected by file identity, so a hard link or, on a case-insensitive filesystem, a case variant counts too). Set by hand, by `tkt apply`, or by `tkt link` (see §5), which also writes the inverse `parent` edge into each child; a hand edit or `apply` writes only the file it touches. Omit it when there are none; `tkt apply --new` only writes it when non-empty. |
+| `parent`      | `parent` | **Scalar**: one key, the ticket's direct parent; `""` when absent. Coerced: a one-element list (`[TKT-1]`) reads as that key; an empty or multi-element list reads as no parent, as does the ticket itself (detected by file identity, so a hard link or, on a case-insensitive filesystem, a case variant counts too; `apply` drops it the same way). Set by hand, by `tkt apply` (single-sided: the parent's `children` is not updated, and `apply --new` writes it only when non-empty; an empty value on update drops the key), or by `tkt link`, which writes both edges. |
 | `links`       | — | List of `"<type>:<KEY>"` strings, written by `tkt link` for non-block link types. |
 
 Any other key you add is preserved on write but ignored by normalization. A
@@ -190,7 +192,8 @@ Consequences:
 | `comment KEY "text"` | `board/KEY.md` | appends a bullet under `## Comments` | Creates the section if missing. Author = `me` (or `agent`). |
 | `blockers KEY` | `board/KEY.md` + each blocker's file | — | Returns only *unresolved* blockers. |
 | `create --type T --summary S [...]` | board_dir | new `board/KEY.md` + initial history | Auto-keys `PREFIX-N` (next integer). Starts in the `todo` (else `backlog`) lane. |
-| `link KEY --to KEY2 --type "is blocked by"` | `board/KEY.md` | updates `blocked_by`/`blocks`/`children`/`links` | `--type child` (or `has child`) appends KEY2 to `children`. Only the source file is edited; the inverse edge is not auto-written. |
+| `link KEY --to KEY2 --type "is blocked by"` | `board/KEY.md` | updates `blocked_by`/`blocks`/`links` | Only the source file is edited; the inverse block edge is not auto-written. |
+| `link P --to C --type child` / `link C --to P --type parent` | `board/P.md`, `board/C.md`, every other `board/*.md` (scanned) | `C.parent`, `P.children`; drops C from the `children` of every other ticket that lists it | One operation, two spellings (`child`/`has child`; `parent`/`child of`/`is child of`; case-insensitive). Both tickets must exist (else exit 4, nothing written). Linking a ticket to itself (keys compared case-insensitively), or making P the parent of its own parent (a direct 2-cycle: `P.parent` is C, or C's `children` lists P), is a usage error (exit 64, nothing written); longer cycles are not detected. Keys are compared by file identity, so case-variant spellings on a case-insensitive filesystem are the same ticket, and both keys are written in their on-disk spelling. The whole board dir is scanned (every project's prefix), so C's old parent is cleaned even when C's own `parent` was never set (a one-sided hand edit or `apply`), and a missing old parent is simply not found. Re-running is idempotent and rewrites only files that change; files are written child → new parent → each stale parent, and because the scan re-finds any parent still listing C, re-running the same link repairs a crash between writes. (`apply` stays single-sided.) |
 | `worklog KEY from_role` | history | appends to `worklog.jsonl` | Duration = now − last entry into that lane (min 60s). No-op shape if timetracking `none`. |
 | `lane_time KEY role` | history | appends to `worklog.jsonl` | Retroactive: time between entering the lane and the next exit. |
 | `doctor` | config + board_dir | — | Checks board_dir exists, roles configured, `done` mapped, `me` set. |

@@ -47,7 +47,7 @@ class Adapter(ABC):
         """
 
     @abstractmethod
-    def view(self, key: str, *, children: bool = True) -> Ticket:
+    def view(self, key: str, *, hierarchy: bool = True) -> Ticket:
         """Return one normalized ticket.
 
         **Not scoped**, deliberately — unlike `list`. A `blocked_by` entry or
@@ -55,10 +55,10 @@ class Adapter(ABC):
         or blocker checks break. The write verbs address by key and are
         likewise unscoped.
 
-        `children=False` is for callers that don't read `Ticket.children`:
-        an adapter that needs an extra backend call to find children (jira,
-        github) skips it and leaves `children` empty. Adapters that get
-        children with the ticket itself ignore the flag.
+        `hierarchy=False` is for callers that read neither `Ticket.children`
+        nor `Ticket.parent`: an adapter that needs an extra backend call to
+        find either (jira children, github both) skips it and leaves that
+        field empty. Whatever arrives with the ticket itself is still filled.
         """
 
     @abstractmethod

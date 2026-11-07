@@ -18,6 +18,7 @@ Each ticket file:
     labels: [api, auth]
     blocked_by: [TKT-2]
     blocks: []
+    parent: TKT-1
     children: [TKT-4, TKT-5]
     ---
     # One-line summary
@@ -39,11 +40,12 @@ the human-canonical source; sidecars are derived/machine-local).
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from core import ticketdoc
-from core.errors import NotFoundError, ProviderError
+from core.errors import NotFoundError, ProviderError, UsageError
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog, human_duration
 
@@ -70,6 +72,76 @@ def _parse_scalar(raw: str):
             return []
         return [x.strip().strip("'\"") for x in inner.split(",") if x.strip()]
     return raw.strip("'\"")
+
+
+# `tkt link` types that set the hierarchy. `KEY child TO` and `TO parent KEY`
+# are the same edge, so both spellings route to `_set_parent`.
+_CHILD_LINKS = ("child", "has child")
+_PARENT_LINKS = ("parent", "child of", "is child of")
+
+
+def _coerce_parent(value, key: str = "") -> str:
+    """The `parent:` frontmatter value as one key, "" when none.
+
+    `parent` is a scalar, but the frontmatter grammar turns `[X]` into a
+    list, so a one-element list is read as that element. An empty or
+    multi-element list names no single parent and reads as none, as does a
+    self-reference (a ticket is never its own parent)."""
+    if isinstance(value, list):
+        value = value[0] if len(value) == 1 else ""
+    out = str(value or "").strip()
+    return "" if out == key else out
+
+
+def _as_list(value) -> list:
+    """A frontmatter list key, tolerating a bare scalar (`children: X`)."""
+    value = value or []
+    return [value] if isinstance(value, str) else list(value)
+
+
+class _TicketIdentity:
+    """Which board keys name the same ticket file, for one `_set_parent`
+    or one hierarchy self-reference check (`_without_self`).
+
+    On a case-insensitive filesystem `tkt-3` and `TKT-3` open one file, so
+    key strings alone miss existing edges. Keys are compared by file
+    identity (st_dev, st_ino; what `os.path.samefile` compares), never by
+    case-folding: on a case-sensitive filesystem `TKT-3.md` and `tkt-3.md`
+    are two tickets. A key whose file does not exist compares by string.
+    Each key is stat'd at most once per instance."""
+
+    def __init__(self, board_dir: Path):
+        self.board_dir = board_dir
+        self._ids: dict[str, tuple | None] = {}
+
+    def of(self, key: str):
+        if key not in self._ids:
+            try:
+                st = (self.board_dir / f"{key}.md").stat()
+                self._ids[key] = (st.st_dev, st.st_ino)
+            except (OSError, ValueError):
+                self._ids[key] = None
+        return self._ids[key]
+
+    def same(self, a: str, b: str) -> bool:
+        if a == b:
+            return True
+        ia = self.of(a)
+        return ia is not None and ia == self.of(b)
+
+    def canonical(self, key: str) -> str:
+        """`key` as spelled by the board file it opens (`tkt-3` ->
+        `TKT-3` when the file is `TKT-3.md`), so links are never written
+        in a miscased spelling. `key` itself when that exact name is a
+        directory entry, or when no entry matches."""
+        names = sorted(n for n in os.listdir(self.board_dir)
+                       if n.endswith(".md") and not n.startswith("."))
+        if f"{key}.md" in names:
+            return key
+        for name in names:
+            if self.same(name[:-3], key):
+                return name[:-3]
+        return key
 
 
 class MarkdownAdapter(Adapter):
@@ -152,6 +224,23 @@ class MarkdownAdapter(Adapter):
 
     # ---- normalization -----------------------------------------------------
 
+    def _without_self(self, key: str, parent: str, children: list) -> tuple:
+        """`(parent, children)` with every reference to `key`'s own file
+        removed: `parent` becomes "" and such `children` entries are dropped.
+
+        A reference is the key itself or any other name that opens the same
+        file (a hard link, or a case variant on a case-insensitive
+        filesystem); see `_TicketIdentity`, which never case-folds, so on a
+        case-sensitive filesystem `tkt-1` stays a distinct ticket from
+        `TKT-1`. Nothing is stat'd when there is no parent and no child, so
+        `list` pays nothing for tickets outside a hierarchy."""
+        if not parent and not children:
+            return parent, children
+        ids = _TicketIdentity(self.board_dir)
+        if parent and ids.same(parent, key):
+            parent = ""
+        return parent, [k for k in children if not ids.same(str(k), key)]
+
     def _to_ticket(self, key: str, fm: dict, body: str) -> Ticket:
         summary = ""
         description_lines: list[str] = []
@@ -186,14 +275,14 @@ class MarkdownAdapter(Adapter):
         blocks = fm.get("blocks", []) or []
         if isinstance(blocks, str):
             blocks = [blocks]
-        # Direct children, from frontmatter (hand-edited, `apply`, or `link
-        # --type child`). Informational only: nothing writes the inverse
-        # `parent` edge, so a child file does not name its parent.
-        children_raw = fm.get("children", []) or []
-        if isinstance(children_raw, str):
-            children_raw = [children_raw]
-        children = [k for k in dict.fromkeys(str(c) for c in children_raw)
-                    if k and k != key]
+        # Hierarchy, from frontmatter: `children:` on the parent, `parent:`
+        # on the child. `tkt link --type child|parent` writes both edges;
+        # a hand edit or `apply` writes only the file it touches. A
+        # reference to the ticket's own file, under any name, is dropped.
+        parent, children = self._without_self(
+            key, _coerce_parent(fm.get("parent", ""), key),
+            [k for k in dict.fromkeys(str(c) for c in
+                                      _as_list(fm.get("children"))) if k])
 
         def _date(name: str) -> str | None:
             v = fm.get(name)
@@ -221,6 +310,7 @@ class MarkdownAdapter(Adapter):
             blocked_by=blocked_by,
             blocks=list(blocks),
             children=children,
+            parent=parent,
             transitions=sorted(self.config.roles.values()),
         )
 
@@ -276,8 +366,9 @@ class MarkdownAdapter(Adapter):
         return JqlSubset(q, self.me, self.priorities()).run(
             self._all_tickets(all_projects=all_projects))
 
-    def view(self, key, *, children: bool = True):
-        # `children` is ignored: they are frontmatter, read with the ticket.
+    def view(self, key, *, hierarchy: bool = True):
+        # `hierarchy` is ignored: parent and children are frontmatter, read
+        # with the ticket.
         fm, body = self._read_raw(key)
         return self._to_ticket(key, fm, body)
 
@@ -381,12 +472,33 @@ class MarkdownAdapter(Adapter):
                 val = fm_in.get(name, []) or []
                 if isinstance(val, str):
                     val = [val]
+                if name == "children":  # a ticket is never its own child
+                    val = [k for k in val if str(k) != new_key]
                 if val:
                     fm[name] = list(val)
+            # Likewise `parent`, only when set. apply is single-sided: it
+            # does not add the new ticket to the parent's `children`; use
+            # `tkt link --type parent` for both edges.
+            parent = _coerce_parent(fm_in.get("parent", ""), new_key)
+            if parent:
+                fm["parent"] = parent
             for name in ("due", "scheduled", "completed"):
                 if name in fm_in and fm_in[name] not in (None, ""):
                     fm[name] = fm_in[name]
             self._write_raw(new_key, fm, body_in)
+            # Only now does the new file exist, so only now can another
+            # name (a case variant on a case-insensitive filesystem) be seen
+            # to open it. Rewritten only when such a self-reference is found.
+            kids = fm.get("children", [])
+            parent, kept = self._without_self(new_key, parent, kids)
+            if parent != fm.get("parent", "") or kept != kids:
+                if not parent:
+                    fm.pop("parent", None)
+                if kept:
+                    fm["children"] = kept
+                else:
+                    fm.pop("children", None)
+                self._write_raw(new_key, fm, body_in)
             self._append_history(new_key, "", todo_lane)
             return self.view(new_key)
 
@@ -400,6 +512,21 @@ class MarkdownAdapter(Adapter):
                       "due", "scheduled", "completed"):
             if field in fm_in:
                 fm[field] = fm_in[field]
+        # `parent` is stored as one scalar key; an empty one drops the key.
+        # Single-sided, like `children` above: neither the old nor the new
+        # parent's file is touched (that is `tkt link`'s job). A reference
+        # to this ticket's own file, under any name, is dropped from both
+        # (a self-parent clears the key, as an empty one does).
+        kids = _as_list(fm_in.get("children"))
+        parent, kept = self._without_self(
+            key, _coerce_parent(fm_in.get("parent", ""), key), kids)
+        if len(kept) != len(kids):
+            fm["children"] = kept
+        if "parent" in fm_in:
+            if parent:
+                fm["parent"] = parent
+            else:
+                fm.pop("parent", None)
         # The buffer body wins, but backend-managed sections (Comments) are
         # restored verbatim from the stored ticket so the editor can't corrupt
         # the timestamped log.
@@ -413,8 +540,12 @@ class MarkdownAdapter(Adapter):
         return self.view(key)
 
     def link(self, key, to, link_type):
-        fm, body = self._read_raw(key)
         lt = link_type.strip().lower()
+        if lt in _CHILD_LINKS:
+            return self._set_parent(parent=key, child=to)
+        if lt in _PARENT_LINKS:
+            return self._set_parent(parent=to, child=key)
+        fm, body = self._read_raw(key)
         if lt == "is blocked by":
             cur = fm.get("blocked_by", []) or []
             if isinstance(cur, str):
@@ -429,15 +560,6 @@ class MarkdownAdapter(Adapter):
             if to not in cur:
                 cur.append(to)
             fm["blocks"] = cur
-        elif lt in ("child", "has child"):
-            # KEY has child TO. Only the parent records the edge; nothing
-            # writes a `parent` key into TO's file.
-            cur = fm.get("children", []) or []
-            if isinstance(cur, str):
-                cur = [cur]
-            if to not in cur:
-                cur.append(to)
-            fm["children"] = cur
         else:
             cur = fm.get("links", []) or []
             if isinstance(cur, str):
@@ -445,6 +567,90 @@ class MarkdownAdapter(Adapter):
             cur.append(f"{link_type}:{to}")
             fm["links"] = cur
         self._write_raw(key, fm, body)
+
+    def _set_parent(self, parent: str, child: str) -> None:
+        """Make `parent` the parent of `child`, writing both edges: the
+        child's `parent:` and the parent's `children:`. `child` is also
+        dropped from the `children:` of every other ticket on the board --
+        its previous parent, and any ticket that lists it one-sidedly (a
+        hand edit, a single-sided `apply`, or a link written before the
+        inverse edge existed) -- so it never ends up under two parents.
+
+        Keys are compared by file identity (see `_TicketIdentity`), so a
+        case-variant spelling on a case-insensitive filesystem is the same
+        ticket, and both keys are written in their on-disk spelling.
+
+        Only a direct 2-cycle (`parent` is already `child`'s child, by
+        either edge) is rejected; longer cycles are not looked for."""
+        # Before any read, so the error is the same whether or not the
+        # filesystem folds case (on a case-sensitive one `tkt-1.md` would
+        # otherwise surface as NotFoundError).
+        if parent.casefold() == child.casefold():
+            raise UsageError(f"link: {child} cannot be its own parent")
+        # Read everything before writing anything, so a missing ticket or a
+        # rejected cycle leaves the board untouched.
+        child_fm, child_body = self._read_raw(child)
+        parent_fm, parent_body = self._read_raw(parent)
+        ids = _TicketIdentity(self.board_dir)
+        if ids.same(parent, child):  # two names for one file (a hard link)
+            raise UsageError(f"link: {child} cannot be its own parent")
+        child, parent = ids.canonical(child), ids.canonical(parent)
+        if (ids.same(_coerce_parent(parent_fm.get("parent", ""), parent), child)
+                or any(ids.same(k, parent)
+                       for k in _as_list(child_fm.get("children")))):
+            raise UsageError(f"link: {child} is the parent of {parent}; making "
+                             f"{parent} its parent too would be a cycle")
+        stale = self._stale_parents(parent, child, ids)
+
+        # Each file write is independent: child, then new parent, then each
+        # stale parent. A crash between them leaves a partial state that
+        # re-running the same link repairs: every step is idempotent, the
+        # board scan finds any stale parent still listing the child, and an
+        # unchanged file is not rewritten.
+        if child_fm.get("parent") != parent:
+            child_fm["parent"] = parent
+            self._write_raw(child, child_fm, child_body)
+        # The child appears once, canonically spelled, where it first was
+        # (appended if absent); any other spelling of it is dropped.
+        kids = _as_list(parent_fm.get("children"))
+        new_kids, placed = [], False
+        for k in kids:
+            if not ids.same(k, child):
+                new_kids.append(k)
+            elif not placed:
+                new_kids.append(child)
+                placed = True
+        if not placed:
+            new_kids.append(child)
+        if new_kids != kids:
+            parent_fm["children"] = new_kids
+            self._write_raw(parent, parent_fm, parent_body)
+        for key, fm, body in stale:
+            fm["children"] = [k for k in _as_list(fm.get("children"))
+                              if not ids.same(k, child)]
+            self._write_raw(key, fm, body)
+
+    def _stale_parents(self, parent: str, child: str, ids: _TicketIdentity) -> list:
+        """`(key, fm, body)` for every board file other than `parent` and
+        `child` whose `children:` lists `child` under any spelling that
+        opens the child's file.
+
+        Scans the whole board dir, not just this project's prefix: on a
+        shared board a parent may belong to another project. Files are
+        matched by identity rather than by name, so a case-folded spelling
+        of `parent` on a case-insensitive filesystem is still skipped (and
+        keeps the edge just written to it)."""
+        skip = {ids.of(parent), ids.of(child)}
+        out = []
+        for path in sorted(self.board_dir.glob("*.md")):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            if ids.of(path.stem) in skip:
+                continue
+            fm, body = self._read_raw(path.stem)
+            if any(ids.same(k, child) for k in _as_list(fm.get("children"))):
+                out.append((path.stem, fm, body))
+        return out
 
     @staticmethod
     def _split_body(doc: str) -> tuple[str, str]:

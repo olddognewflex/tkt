@@ -77,7 +77,7 @@ class LinearChildren(unittest.TestCase):
 
     def test_view_accepts_children_flag_and_ignores_it(self):
         a = StubLinear(make_config(), [issue("ENG-1", nodes("ENG-2"))])
-        self.assertEqual(a.view("ENG-1", children=False).children, ["ENG-2"])
+        self.assertEqual(a.view("ENG-1", hierarchy=False).children, ["ENG-2"])
 
     def test_view_maps_children(self):
         t = self.view(issue("ENG-1", nodes("ENG-2", "ENG-3")))

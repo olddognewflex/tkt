@@ -132,7 +132,9 @@ class MarkdownChildren(unittest.TestCase):
     # ---- link -----------------------------------------------------------------
 
     def test_link_child_appends_without_duplicates(self):
-        self.write("TKT-1", [])
+        # TKT-72: a child link now writes both files, so both must exist.
+        for key in ("TKT-1", "TKT-2", "TKT-3"):
+            self.write(key, [])
         self.a.link("TKT-1", "TKT-2", "child")
         self.a.link("TKT-1", "TKT-3", "  Has Child ")
         self.a.link("TKT-1", "TKT-2", "CHILD")
@@ -143,6 +145,7 @@ class MarkdownChildren(unittest.TestCase):
 
     def test_link_child_extends_a_bare_string(self):
         self.write("TKT-1", ["children: TKT-2"])
+        self.write("TKT-3", [])  # TKT-72: the child must exist
         self.a.link("TKT-1", "TKT-3", "child")
         self.assertEqual(self.a.view("TKT-1").children, ["TKT-2", "TKT-3"])
 
@@ -154,8 +157,11 @@ class MarkdownChildren(unittest.TestCase):
         self.assertEqual(fm["blocks"], ["TKT-9"])
         self.assertFalse(fm.get("blocked_by"))
         child_fm, _ = self.a._read_raw("TKT-2")
-        self.assertNotIn("parent", child_fm)
+        # TKT-72: the child now records the inverse edge (and only that).
+        self.assertEqual(child_fm["parent"], "TKT-1")
         self.assertNotIn("children", child_fm)
+        self.assertFalse(child_fm.get("blocks"))
+        self.assertFalse(child_fm.get("blocked_by"))
 
     def test_other_link_types_do_not_touch_children(self):
         self.write("TKT-1", [])
@@ -166,7 +172,7 @@ class MarkdownChildren(unittest.TestCase):
 
     def test_view_accepts_children_flag_and_ignores_it(self):
         self.write("TKT-1", ["children: [TKT-2]"])
-        self.assertEqual(self.a.view("TKT-1", children=False).children, ["TKT-2"])
+        self.assertEqual(self.a.view("TKT-1", hierarchy=False).children, ["TKT-2"])
 
 
 if __name__ == "__main__":

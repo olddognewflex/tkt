@@ -26,6 +26,8 @@ def _print_ticket_human(t: Ticket) -> None:
     unresolved = t.unresolved_blockers()
     if unresolved:
         print(f"  BLOCKED BY: {', '.join(b['key'] for b in unresolved)}")
+    if t.parent:
+        print(f"  parent:   {t.parent}")
     if t.children:
         print(f"  children: {', '.join(t.children)}")
     if t.transitions:

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from adapters.github import GithubAdapter  # noqa: E402
 from core.config import Config  # noqa: E402
-from core.errors import NotFoundError  # noqa: E402
+from core.errors import NotFoundError, ProviderError  # noqa: E402
 
 ROLES = {"todo": "Todo", "in_progress": "In Progress", "done": "Done"}
 
@@ -74,6 +74,10 @@ class StubGithub(GithubAdapter):
 
     def _gh(self, *args):
         self.calls.append(args)
+        if args[0] == "api" and args[1].endswith("/parent"):
+            # TKT-72: `view` asks for the parent; these issues have none.
+            raise ProviderError(f"gh {' '.join(args)} failed: "
+                                "gh: Not Found (HTTP 404)")
         return ""
 
     def _project(self):

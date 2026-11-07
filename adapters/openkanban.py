@@ -20,7 +20,8 @@ Model notes:
     queries by assignee.
   - No comments field -> `comment` appends to the description under "## Activity".
   - No relations -> blocked_by/blocks/children stored in the ticket `meta` map
-    (comma-separated keys; children via `link --type child`).
+    (comma-separated keys), and `parent` as one key. `link --type child|parent`
+    writes both hierarchy edges.
   - No time tracking -> worklog/lane-time are no-ops.
   - priority is an int 1..5 (1=highest); normalized to a label here.
 
@@ -37,7 +38,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.errors import ConfigError, NotFoundError, ProviderError
+from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog
 
@@ -46,10 +47,33 @@ from .base import Adapter
 _PRI_LABEL = {1: "Highest", 2: "High", 3: "Medium", 4: "Low", 5: "Lowest"}
 _PRI_INT = {v.lower(): k for k, v in _PRI_LABEL.items()}
 _DONE_STATUSES = {"done", "archived"}
+# `tkt link` types that set the hierarchy. `KEY child TO` and `TO parent KEY`
+# are the same edge, so both spellings route to `_set_parent`.
+_CHILD_LINKS = ("child", "has child")
+_PARENT_LINKS = ("parent", "child of", "is child of")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _meta(raw: dict) -> dict:
+    """The ticket's `meta` map, created if absent or null."""
+    if not isinstance(raw.get("meta"), dict):
+        raw["meta"] = {}
+    return raw["meta"]
+
+
+def _parent_of(raw: dict) -> str:
+    """`meta.parent` as one key; "" when none or a self-reference."""
+    parent = str((raw.get("meta") or {}).get("parent") or "").strip()
+    return "" if parent == raw.get("id", "") else parent
+
+
+def _children_of(raw: dict) -> list[str]:
+    return [c.strip() for c in
+            str((raw.get("meta") or {}).get("children") or "").split(",")
+            if c.strip()]
 
 
 class OpenKanbanAdapter(Adapter):
@@ -124,9 +148,7 @@ class OpenKanbanAdapter(Adapter):
         blocked_ids = [x for x in (meta.get("blocked_by", "").split(",")) if x]
         blocks_ids = [x for x in (meta.get("blocks", "").split(",")) if x]
         key = raw.get("id", "")
-        children = [x for x in dict.fromkeys(
-                        c.strip() for c in (meta.get("children", "") or "").split(","))
-                    if x and x != key]
+        children = [x for x in dict.fromkeys(_children_of(raw)) if x != key]
         return Ticket(
             key=key,
             type=self._type_from_labels(raw.get("labels", []) or []),
@@ -144,6 +166,7 @@ class OpenKanbanAdapter(Adapter):
             blocked_by=[{"key": b, "resolved": self._is_done(b)} for b in blocked_ids],
             blocks=blocks_ids,
             children=children,
+            parent=_parent_of(raw),
             transitions=sorted(set(self.config.roles.values())),
         )
 
@@ -183,8 +206,9 @@ class OpenKanbanAdapter(Adapter):
         tickets = [self._to_ticket(r) for r in store["tickets"].values()]
         return JqlSubset(q, self.me, self.priorities()).run(tickets)
 
-    def view(self, key, *, children: bool = True):
-        # `children` is ignored: they are in `meta`, read with the ticket.
+    def view(self, key, *, hierarchy: bool = True):
+        # `hierarchy` is ignored: parent and children are in `meta`, read
+        # with the ticket.
         _, raw = self._get_raw(key)
         return self._to_ticket(raw)
 
@@ -236,22 +260,69 @@ class OpenKanbanAdapter(Adapter):
         return self._to_ticket(raw)
 
     def link(self, key, to, link_type):
-        store, raw = self._get_raw(key)
-        meta = raw.setdefault("meta", {})
         lt = link_type.strip().lower()
+        if lt in _CHILD_LINKS:
+            return self._set_parent(parent=key, child=to)
+        if lt in _PARENT_LINKS:
+            return self._set_parent(parent=to, child=key)
+        store, raw = self._get_raw(key)
+        meta = _meta(raw)  # tolerates `"meta": null`
         bucket = "blocked_by" if lt in ("is blocked by", "depends on") else \
-                 "blocks" if lt == "blocks" else \
-                 "children" if lt in ("child", "has child") else None
+                 "blocks" if lt == "blocks" else None
         if bucket is None:
             # record other relation types in meta verbatim
             meta[link_type] = to
         else:
-            cur = [x for x in meta.get(bucket, "").split(",") if x]
+            cur = [x for x in (meta.get(bucket) or "").split(",") if x]
             if to not in cur:
                 cur.append(to)
             meta[bucket] = ",".join(cur)
         raw["updated_at"] = _now()
         self._save_store(store)
+
+    def _set_parent(self, parent: str, child: str) -> None:
+        """Make `parent` the parent of `child`, writing both edges: the
+        child's `meta.parent` and the parent's `meta.children`. `child` is
+        also dropped from the `meta.children` of every other ticket in the
+        store -- its previous parent, and any ticket that lists it
+        one-sidedly (a hand edit, or a link written before the inverse edge
+        existed) -- so it never ends up under two parents.
+
+        Every ticket lives in one store file, so all edits land in a single
+        atomic `_save_store`: a failure leaves neither edge half-written.
+        Only a direct 2-cycle (`parent` is already `child`'s child, by
+        either edge) is rejected; longer cycles are not looked for."""
+        if parent.casefold() == child.casefold():
+            raise UsageError(f"link: {child} cannot be its own parent")
+        store, craw = self._get_raw(child)
+        praw = store["tickets"].get(parent)
+        if not praw:
+            raise NotFoundError(f"no openkanban ticket {parent}")
+        if _parent_of(praw) == child or parent in _children_of(craw):
+            raise UsageError(f"link: {child} is the parent of {parent}; making "
+                             f"{parent} its parent too would be a cycle")
+        changed = False
+        if _meta(craw).get("parent") != parent:
+            _meta(craw)["parent"] = parent
+            craw["updated_at"] = _now()
+            changed = True
+        kids = _children_of(praw)
+        if child not in kids:
+            _meta(praw)["children"] = ",".join(kids + [child])
+            praw["updated_at"] = _now()
+            changed = True
+        for oraw in store["tickets"].values():
+            if oraw is praw or oraw is craw or child not in _children_of(oraw):
+                continue
+            rest = [k for k in _children_of(oraw) if k != child]
+            if rest:
+                _meta(oraw)["children"] = ",".join(rest)
+            else:
+                _meta(oraw).pop("children", None)
+            oraw["updated_at"] = _now()
+            changed = True
+        if changed:
+            self._save_store(store)
 
     def worklog(self, key, from_role, note="", billable=False):
         return Worklog(key=key, role=from_role,
