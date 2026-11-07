@@ -162,10 +162,15 @@ def _strip_inline_comments(line: str) -> str:
     """`line` without the `<!-- ... -->` comments that close on it. One in a
     code span, or with no `-->` after it, is text."""
     spans = _code_spans(line)
+    # Spans are sorted and asked about increasing offsets, so one cursor
+    # walks them once (as the checker's stripInlineComments does).
+    si = 0
     out, frm = [], 0
     start = line.find("<!--")
     while start >= 0:
-        if any(s <= start < e for s, e in spans):
+        while si < len(spans) and spans[si][1] <= start:
+            si += 1
+        if si < len(spans) and start >= spans[si][0]:
             start = line.find("<!--", start + 1)
             continue
         end = line.find("-->", start + 4)
@@ -274,7 +279,9 @@ def word_count(body: str) -> int:
 
 
 def _norm_type(t: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(t).lower())
+    """Case-folded letters and digits only, any script: "Sub-task" and
+    "subtask" match, "子任务" survives, "Tâche" stays apart from "Tche"."""
+    return "".join(c for c in str(t).casefold() if c.isalnum())
 
 
 def is_subtask(issue_type: str, subtask_types) -> bool:

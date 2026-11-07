@@ -605,6 +605,25 @@ class Hierarchy(unittest.TestCase):
         out, _ = self.run_h(tk("TKT-2", "Sub-task"), body)
         self.assertEqual(out, [])
 
+    def test_many_spans_and_comments_on_one_line_stay_linear(self):
+        # Alternating code spans and inline comments: each opener used to
+        # rescan every span. Result must match, and stay fast.
+        import time
+        n = 20000
+        line = "`<!-- kept -->` <!-- gone --> " * n
+        t0 = time.perf_counter()
+        out = gates._strip_inline_comments(line)
+        self.assertLess(time.perf_counter() - t0, 2.0)
+        self.assertEqual(out.count("`<!-- kept -->`"), n)
+        self.assertNotIn("gone", out)
+
+    def test_subtask_types_keep_non_ascii_letters(self):
+        self.assertTrue(gates.is_subtask("子任务", ["子任务"]))
+        self.assertTrue(gates.is_subtask("Sous-tâche", ["sous tâche"]))
+        self.assertFalse(gates.is_subtask("Tâche", ["Tche"]))
+        self.assertTrue(gates.is_subtask("Sub-task", ["subtask"]))
+        self.assertFalse(gates.is_subtask("---", ["---"]))   # empty never matches
+
     def test_comment_marker_in_a_code_span_is_text(self):
         # Were the span's "<!--" a comment opener, it would hide up to "-->".
         body = "Write `<!--` then some words then `-->` done\n"
