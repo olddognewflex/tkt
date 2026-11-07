@@ -1,0 +1,68 @@
+{
+  "$comment": "Rules for check-artifact-format.mjs. Schema and rule ids are documented in that script's header. Section names are matched case-insensitively, trimmed, trailing ':' ignored; a list in place of a name means any one of those alternatives.",
+  "version": 1,
+  "presets": {
+    "standard": {
+      "$comment": "The planned house format (TKT-47): thesis, Summary first, Behavior or Business Process, at most 5 technical sections, References last when present. Notes have no word budget, on purpose.",
+      "ticket": {
+        "require_title": false,
+        "require_thesis": true,
+        "required": ["Summary", ["Behavior", "Business Process"]],
+        "first_section": "Summary",
+        "last_section": "References",
+        "max_extra_sections": 5,
+        "max_words": 800,
+        "ignore_sections": ["Comments"]
+      },
+      "pr": {
+        "require_title": false,
+        "require_thesis": true,
+        "required": ["Summary", ["Behavior", "Business Process"]],
+        "first_section": "Summary",
+        "last_section": "References",
+        "max_extra_sections": 5,
+        "max_words": 800,
+        "ignore_sections": ["Comments"]
+      },
+      "note": {
+        "require_title": false,
+        "require_thesis": true,
+        "required": ["Summary", ["Behavior", "Business Process"]],
+        "first_section": "Summary",
+        "last_section": "References",
+        "max_extra_sections": 5,
+        "ignore_sections": ["Comments"]
+      },
+      "comment": {
+        "$comment": "About ten seconds to read.",
+        "max_words": 40
+      }
+    },
+    "problem-proposal": {
+      "$comment": "The Problem -> Proposal -> Acceptance shape that Story tickets use on the odnf board. Many existing tickets (Epics, Spikes, older ones) do not follow it, so a gate should pick a preset per issue type and start in warn mode. pr matches the open-pr skill's body template. Notes have no word budget, on purpose.",
+      "ticket": {
+        "require_title": false,
+        "require_thesis": false,
+        "required": ["Problem", "Proposal", ["Acceptance", "Acceptance criteria"]],
+        "max_words": 800,
+        "ignore_sections": ["Comments"]
+      },
+      "pr": {
+        "require_title": false,
+        "require_thesis": false,
+        "required": ["Summary", "Changes", "Testing"],
+        "max_words": 800,
+        "ignore_sections": ["Comments"]
+      },
+      "note": {
+        "require_title": false,
+        "require_thesis": false,
+        "required": ["Summary"],
+        "ignore_sections": ["Comments"]
+      },
+      "comment": {
+        "max_words": 40
+      }
+    }
+  }
+}

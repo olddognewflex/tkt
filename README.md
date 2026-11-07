@@ -504,6 +504,59 @@ repo, branch formats, reviewers, and workflow names are all config-driven, and
 genuinely infra-specific steps (e.g. preview-URL extraction) are clearly marked
 PROJECT-SPECIFIC in the skill text.
 
+## Enforcement checkers
+
+`enforcement/` holds deterministic checker scripts: rules that skills
+otherwise state as prose, implemented once so every harness gets the same
+answer. Each is a stdlib-only Node script (Node 20+, CI runs 24; no npm
+packages, no `package.json`) with a paired `*.test.mjs` self-test. Run them
+with `node --test enforcement/*.test.mjs`; CI runs the same glob. Node is a
+CI/dev dependency for this directory only; `tkt` itself stays stdlib Python.
+Copying `enforcement/` into consumer repos is not done yet: it is pending
+TKT-36 (sync-pack base layer), so `sync-pack` does not install it today.
+
+**`check-artifact-format.mjs`** checks the mechanical shape of a ticket, PR,
+note or comment body: required sections and their order, first and last
+section, duplicate sections, the number of extra sections, empty required
+sections, title and thesis presence, and a word budget. YAML frontmatter,
+fenced code and HTML comments are skipped for headings and word counts. A
+`### Sub` heading with a word in it counts as content, so a required section
+holding only a subheading is not empty. It does not judge prose quality, tone
+or truth; the script's header lists exactly what it does and does not check.
+
+```sh
+enforcement/check-artifact-format.mjs --kind ticket|pr|note|comment \
+    [--preset NAME] [--rules FILE] [--strict] [--json] [FILE | -]
+```
+
+- Input is `FILE`, or stdin when `FILE` is `-` or omitted.
+- Each finding is one stderr line, `<kind>: <rule-id>: <message>`, e.g.
+  `ticket: missing-section: required section "## Summary" not found`.
+  Nothing goes to stdout unless `--json`, which prints
+  `{"findings":[{"rule","message","line"?}]}`.
+- Exit 0 with no findings, or with findings when not `--strict` (advisory);
+  exit 1 with findings under `--strict`; exit 2 on a usage error, unreadable
+  input, an unknown kind or preset, or an invalid rules file (`error: ...`).
+  Don't parse stderr on exit 2: those lines are not findings.
+
+Rules live in `enforcement/artifact-format.rules.json` (override with
+`--rules`), as presets of per-kind rules. Two ship:
+
+| Preset | ticket / pr | note | comment |
+| --- | --- | --- | --- |
+| `standard` (default; the planned TKT-47 house format) | thesis before the first section; `## Summary` first; `## Behavior` or `## Business Process`; at most 5 other sections; `## References` last if present; ≤ 800 words | same, no word budget | ≤ 40 words |
+| `problem-proposal` | ticket: `## Problem` → `## Proposal` → `## Acceptance` (or `Acceptance criteria`); pr: `## Summary` → `## Changes` → `## Testing` (the `open-pr` body); ≤ 800 words | `## Summary` | ≤ 40 words |
+
+`problem-proposal` is the Problem → Proposal → Acceptance shape that Story
+tickets use on the odnf board. Many existing tickets (Epics, Spikes, older
+ones) don't follow it, so a gate should pick a preset per issue type and
+start in warn mode (no `--strict`).
+
+Notes have no word budget in either preset, on purpose; only tickets, PRs
+and comments are budgeted. `## Comments` is ignored by every rule, word
+count included. Section names match case-insensitively, with a trailing `:`
+ignored.
+
 ## Unattended runs
 
 `tkt run` is an external loop driver: it invokes a configured AI harness
@@ -714,6 +767,7 @@ adapters/
   linear.py    linear adapter (GraphQL)
   openkanban.py  openkanban adapter (local JSON store)
 examples/      config.{jira,markdown,github,linear,openkanban}.toml
+enforcement/   stdlib Node checkers + *.test.mjs self-tests (CI/dev only)
 ```
 
 To add a provider: implement `adapters/base.Adapter`, register it in

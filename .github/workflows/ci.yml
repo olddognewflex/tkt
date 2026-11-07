@@ -116,13 +116,31 @@ jobs:
       - name: smoke-sync-pack
         run: bash scripts/smoke-sync-pack.sh
 
+      # `enforcement/` is stdlib-only Node, the one non-Python code in the
+      # repo; Node is a CI/dev dependency for it alone, and `tkt` itself
+      # never needs it. The checkers use only Node 20+ APIs; CI runs the
+      # current LTS, 24 (20 is EOL).
+      #
+      # A glob, not `node --test enforcement/`: a directory argument is
+      # searched for tests only on some majors (others fail with "Cannot
+      # find module"), and where it is searched an empty directory passes
+      # with 0 tests. `failglob` makes a glob that matches nothing fail the
+      # step (this job's shell is `bash -euo pipefail`) instead of handing
+      # node the literal pattern. New `*.test.mjs` files are picked up
+      # without editing this step.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: enforcement checker self-tests
+        run: |
+          shopt -s failglob
+          node --test enforcement/*.test.mjs
+
       # scripts/smoke-agents.sh is deliberately NOT here: it SIGKILLs a live
       # background driver (kill -9 / pkill), which is not safe on a shared
       # runner. It stays a local-only check.
       #
-      # TODO(TKT-29): node --test enforcement/*.test.mjs — needs
-      #   actions/setup-node; `enforcement/` does not exist yet.
-      # TODO(TKT-49): the skill-tier lint — does not exist yet.
-      # Neither is stubbed in: a step that globs a nonexistent directory
-      # either fails outright or passes vacuously, and a check that cannot
-      # fail is worse than no check.
+      # TODO(TKT-49): the skill-tier lint — does not exist yet. Not stubbed
+      # in: a step that globs a nonexistent directory either fails outright
+      # or passes vacuously, and a check that cannot fail is worse than no
+      # check.

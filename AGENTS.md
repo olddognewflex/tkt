@@ -265,7 +265,8 @@ hand-maintained.
 - `docs/extraction-history.md` — how this pack was extracted from its origin repo.
 - `scripts/` — `company-import.sh` (bulk import) and `smoke-sync-pack.sh`
   (sync-pack smoke test).
-- This repo is pure stdlib Python 3.11+; no build step.
+- This repo is pure stdlib Python 3.11+; no build step. The exception is
+  `enforcement/` (stdlib-only Node checkers, CI-tested); `tkt` never needs Node.
 
 ## When in doubt
 
