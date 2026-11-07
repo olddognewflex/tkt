@@ -262,6 +262,18 @@ describe("parsing", () => {
   test("a ``` line with a backtick in its info string is not a fence", () => {
     assert.deepEqual(findings({ required: ["Summary"] }, md("```foo`", "## Summary", "x")), []);
   });
+  test("a backtick inside a comment in the info string still stops a ``` fence", () => {
+    // The info string is literal text, so the "<!-- ` -->" does not hide its backtick.
+    const text = md("```js <!-- ` -->", "## Summary", "one two");
+    assert.deepEqual(findings({ required: ["Summary"] }, text), []);
+    // "```js", "Summary", "one", "two": nothing after the line is hidden.
+    assert.deepEqual(findings({ max_words: 4 }, text), []);
+    assert.deepEqual(ruleIds(findings({ max_words: 3 }, text)), ["word-budget"]);
+  });
+  test("a fence opener with a comment in its info string still opens a fence", () => {
+    const text = md("```js <!-- note -->", "## Summary", "```");
+    assert.deepEqual(ruleIds(findings({ required: ["Summary"] }, text)), ["missing-section"]);
+  });
   test("an unclosed fence runs to the end of the input", () => {
     const text = md("```", "## Summary", "words words words");
     assert.deepEqual(ruleIds(findings({ required: ["Summary"], max_words: 0 }, text)), ["missing-section"]);
@@ -358,6 +370,20 @@ describe("HTML comments", () => {
   test("a comment-block line cannot open a fence or be a heading", () => {
     const text = md("Thesis.", "<!-- a --> ```", "## Summary", "x", "<!--", "c", "--> ## Other");
     assert.deepEqual(findings({ ...rules, max_extra_sections: 0 }, text), []);
+  });
+  test("a line with many code spans and comments is processed in linear time", () => {
+    // 100k code spans with a comment between each: a quadratic span search
+    // takes minutes here, so the subprocess timeout catches a regression.
+    const text = "`a` <!-- x --> ".repeat(100000);
+    const rules = rulesFile({ max_words: 99999 });
+    const r = spawnSync(process.execPath, [SCRIPT, "--kind", "ticket", "--preset", "t", "--rules", rules, "--json"], {
+      input: text,
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    assert.equal(r.error, undefined, "checker timed out");
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(ruleIds(JSON.parse(r.stdout).findings), ["word-budget"]);
   });
   test("a long comment hiding a code-span <!-- still breaks the budget under --strict", () => {
     const text = `${"word ".repeat(150)}with \`<!--\` in it ${"more ".repeat(146)}`;

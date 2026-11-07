@@ -254,12 +254,20 @@ const YAML_COMMENT = /^[ \t]*#/;
 
 // [start, end) offsets of the inline code spans on one line: a run of N
 // backticks closed by the next run of exactly N. A run with no closer is
-// literal text, and the search goes on from the next run.
+// literal text, and the search goes on from the next run. Linear: a reverse
+// pass records each run's next same-length run.
 function codeSpans(line) {
   const runs = [...line.matchAll(/`+/g)];
+  const next = new Array(runs.length).fill(-1);
+  const lastByLen = new Map();
+  for (let k = runs.length - 1; k >= 0; k--) {
+    const len = runs[k][0].length;
+    next[k] = lastByLen.get(len) ?? -1;
+    lastByLen.set(len, k);
+  }
   const spans = [];
   for (let a = 0; a < runs.length; a++) {
-    const b = runs.findIndex((r, k) => k > a && r[0].length === runs[a][0].length);
+    const b = next[a];
     if (b < 0) continue;
     spans.push([runs[a].index, runs[b].index + runs[b][0].length]);
     a = b;
@@ -271,7 +279,13 @@ function codeSpans(line) {
 // "<!--" inside a code span, or with no "-->" after it, is left as text.
 function stripInlineComments(line) {
   const spans = codeSpans(line);
-  const inSpan = (i) => spans.some(([s, e]) => i >= s && i < e);
+  // Spans are sorted and inSpan is asked about increasing offsets, so one
+  // cursor walks them once.
+  let si = 0;
+  const inSpan = (i) => {
+    while (si < spans.length && spans[si][1] <= i) si++;
+    return si < spans.length && i >= spans[si][0];
+  };
   let out = "";
   let from = 0;
   let start = line.indexOf("<!--");
@@ -353,7 +367,9 @@ function parse(source) {
     inComment = stripped.inComment;
     const text = stripped.text;
 
-    const open = stripped.block ? null : FENCE_OPEN.exec(text);
+    // The info string is literal (a "<!--" there is not a comment), so a
+    // fence is matched on the raw line.
+    const open = stripped.block ? null : FENCE_OPEN.exec(raw);
     if (open && !(open[1][0] === "`" && open[2].includes("`"))) {
       fence = { ch: open[1][0], len: open[1].length };
       current.hasContent = true;
