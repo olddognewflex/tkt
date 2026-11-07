@@ -2,7 +2,8 @@
 
 Issues are tickets (key = identifier like ENG-123). Board lanes = Linear workflow
 states (transition updates the issue's state). Blockers use Linear's native issue
-relations; children are its native sub-issues. No CLI — talks GraphQL over urllib.
+relations; children and parent come from its native sub-issue hierarchy. No CLI —
+talks GraphQL over urllib.
 
 Auth: a Linear API key in env (named in [ticketing].auth_env, default LINEAR_API_KEY).
 Personal API keys go in the Authorization header verbatim (no "Bearer").
@@ -47,6 +48,7 @@ _ISSUE_FIELDS = """
   relations { nodes { type relatedIssue { identifier state { type } } } }
   inverseRelations { nodes { type issue { identifier state { type } } } }
   children { nodes { identifier } }
+  parent { identifier }
 """
 
 
@@ -162,6 +164,11 @@ class LinearAdapter(Adapter):
             c["identifier"]
             for c in ((issue.get("children") or {}).get("nodes") or [])
             if c and c.get("identifier") and c["identifier"] != key))
+        # Native parent issue; null for a top-level issue. A self-reference
+        # is never a real parent, so it reads as none.
+        parent = (issue.get("parent") or {}).get("identifier") or ""
+        if parent == key:
+            parent = ""
         assignee = issue.get("assignee") or {}
         return Ticket(
             key=key,
@@ -180,6 +187,7 @@ class LinearAdapter(Adapter):
             blocked_by=blocked_by,
             blocks=blocks,
             children=children,
+            parent=parent,
             transitions=transitions or list(self._state_map_safe()),
         )
 
@@ -231,8 +239,9 @@ class LinearAdapter(Adapter):
         tickets = [self._to_ticket(i) for i in data["issues"]["nodes"]]
         return JqlSubset(q, self.whoami(), self.priorities()).run(tickets)
 
-    def view(self, key, *, children: bool = True):
-        # `children` is ignored: the sub-issues come with the issue query.
+    def view(self, key, *, hierarchy: bool = True):
+        # `hierarchy` is ignored: parent and sub-issues come with the issue
+        # query.
         return self._to_ticket(self._fetch_issue(key))
 
     def transition(self, key, role):

@@ -87,6 +87,11 @@ class StubGithub(GithubAdapter):
         if args[0] == "api":
             if self.api_error:
                 raise self.api_error
+            if args[1].endswith("/parent"):
+                # TKT-72: `view` also asks for the parent; none here
+                # (tests/test_parent_github.py covers that call).
+                raise ProviderError(f"gh {' '.join(args)} failed: "
+                                    "gh: Not Found (HTTP 404)")
             return "".join(json.dumps(list(p)) for p in self.pages) + "\n"
         return ""
 
@@ -95,7 +100,9 @@ class StubGithub(GithubAdapter):
                 "options": {"Todo": "o1"}, "option_names": ["Todo"]}
 
     def api_calls(self):
-        return [c for c in self.calls if c[0] == "api"]
+        """The sub-issues calls (the parent call is tested on its own)."""
+        return [c for c in self.calls
+                if c[0] == "api" and "/sub_issues" in c[1]]
 
 
 def not_found():

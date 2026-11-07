@@ -62,7 +62,7 @@ class OpenKanbanChildren(unittest.TestCase):
 
     def test_view_accepts_children_flag_and_ignores_it(self):
         self.seed(raw_ticket("p", {"children": "c1"}))
-        self.assertEqual(self.a.view("p", children=False).children, ["c1"])
+        self.assertEqual(self.a.view("p", hierarchy=False).children, ["c1"])
 
     def test_dedupe_and_own_key_dropped(self):
         self.seed(raw_ticket("p", {"children": "c2,p,c1,c2,"}))

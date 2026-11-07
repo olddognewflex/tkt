@@ -81,7 +81,11 @@ replying in-thread across the skill and every mirror
 adapter and its `view` rendering (`test_children_jira.py`,
 `test_children_github.py`, `test_children_linear.py`,
 `test_children_markdown.py`, `test_children_openkanban.py`,
-`test_children_cli.py`), and `tkt --version` (`test_version.py`).
+`test_children_cli.py`), `Ticket.parent` likewise, plus the two-sided
+`link --type child|parent` on the local boards (`test_parent_jira.py`,
+`test_parent_github.py`, `test_parent_linear.py`,
+`test_parent_markdown.py`, `test_parent_openkanban.py`,
+`test_parent_cli.py`), and `tkt --version` (`test_version.py`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
 "validation" of an adapter still means running `tkt doctor` / the read
@@ -179,10 +183,13 @@ the date fields `due` / `scheduled` / `completed`, and `agent_status` (board age
 `idle` | `processing` | `waiting` | `done` | `blocked`, or empty) alongside
 `agent_status_at` (when that state last actually changed, ISO-8601 UTC; stamped by
 the adapter, never passed in, so re-asserting the same state doesn't reset it),
-and `children` (direct child keys; jira and github need an extra call for it, so
-they fill it on `view` only. Every adapter's `view` takes `children=False`; jira
-and github then skip that call, the rest ignore it. Internal callers that don't
-read children — `blockers`, `create`, `tkt agents --enrich` — pass it).
+and the hierarchy edges `children` (direct child keys) and `parent` (one key or
+`""`). Edges that cost an extra backend call — jira and github children, github
+parent — are filled on `view` only. Every adapter's `view` takes
+`hierarchy=False` to skip those calls (the rest ignore it); internal callers that
+read neither edge — `blockers`, `create`, `tkt agents --enrich` — pass it. On
+the local boards (markdown, openkanban) `tkt link --type child|parent` writes
+both edges so they cannot drift.
 Adapters that can't store a field leave it at its default rather than faking it.
 
 ## Adding a provider

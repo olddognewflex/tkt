@@ -44,6 +44,10 @@ class Ticket:
     # need an extra backend call to find them (jira, github) fill it on
     # `view` only; `list` leaves it [].
     children: list[str] = field(default_factory=list)
+    # Key of this ticket's direct parent (an Epic, or the Story a sub-task
+    # sits under); "" when none, never this ticket's own key. github needs
+    # an extra call for it, so fills it on `view` only.
+    parent: str = ""
     transitions: list[str] = field(default_factory=list)  # available next lanes
 
     def unresolved_blockers(self) -> list[dict[str, Any]]:

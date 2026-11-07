@@ -210,7 +210,7 @@ name, and `tkt transition KEY review` to move.
   "due": null, "scheduled": null, "completed": null,
   "labels": ["..."], "components": ["..."],
   "blocked_by": [{"key": "TKT-2", "resolved": false}],
-  "blocks": [], "children": [], "transitions": ["..."], "url": "..."
+  "blocks": [], "children": [], "parent": "", "transitions": ["..."], "url": "..."
 }
 ```
 
@@ -304,6 +304,7 @@ read, acli's own output decides.
   `parent = "KEY"` search over REST (every page) or acli (first 100 only,
   `--limit 100`). That search is not scoped to
   `[ticketing].project`, so a child in another project is still listed.
+- **parent** = `fields.parent`, on `list` and `view`, with no extra call.
 - In **acli mode** `list` carries no `blocked_by` at all (acli search rejects
   `issuelinks`), so blocker state must be confirmed per ticket with
   `tkt blockers` — which `select-ticket` does. REST mode returns the full set.
@@ -334,6 +335,8 @@ scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode
   from the issue's own URL, so any `repo` spelling works. A child in another
   repo is keyed `owner/repo#n`, a same-repo child by its number; `tkt view`
   can't take that cross-repo key back (it addresses numbers in `[github].repo`).
+- **parent** comes from the sub-issues `/parent` endpoint, on `view` only (`list`
+  leaves `""`); `""` on a 404. A cross-repo parent is keyed `owner/repo#n`.
 - `view` and the **write verbs** address an issue by number in `[github].repo`.
   A `Blocked by #N` reference resolves in the same repo; cross-repo references
   are not parsed.
@@ -359,6 +362,7 @@ key in env (`[ticketing].auth_env`, default `LINEAR_API_KEY`).
   `resolved` = related issue in a completed/canceled state.
 - **children** = the native sub-issue (`children`) connection, on `list` and `view`;
   only its first page (Linear's default, 50) is read.
+- **parent** = the native `parent` issue, on `list` and `view`.
 - **priority** = Linear's `priorityLabel` (`Urgent`/`High`/`Medium`/`Low`). With no
   top-level `priorities` list, `tkt cfg priorities` and `ORDER BY priority` use Linear's own
   order (`Urgent`, `High`, `Medium`, `Low`, `No priority`), not the generic Highest…Lowest.
@@ -387,8 +391,9 @@ repo's store source). Fully local, no network.
   the config's `priorities` says.
 - **No assignee** (single-user) → blank; don't filter queries by assignee.
   **Comments** append to the description under `## Activity`. **Relations** live in
-  the ticket `meta` map, **children** included (`meta.children`, set with
-  `tkt link KEY --to CHILD --type child`). **No time tracking** (worklog/lane-time no-op).
+  the ticket `meta` map, hierarchy included (`meta.children`, and `meta.parent`
+  as one key); `tkt link --type child|parent` writes both edges, and drops the
+  child from any other ticket's `meta.children`, in one store write. **No time tracking** (worklog/lane-time no-op).
 - **Queries** use the shared JQL subset (client-side over the JSON store).
 
 Validation status: fully validated live against the real on-disk format (doctor,
@@ -441,9 +446,11 @@ Description...
 ```
 
 Frontmatter is a tiny YAML subset: `key: value`, `[a, b]` list literals, no nesting.
-**children** come from a `children: [KEY, ...]` frontmatter list, edited by hand
-or appended by `tkt link KEY --to CHILD --type child` (no `parent` key is
-written back to the child).
+**children** come from a `children: [KEY, ...]` frontmatter list and **parent**
+from a `parent: KEY` scalar. `tkt link P --to C --type child` (or
+`C --to P --type parent`) writes both edges and drops C from any other
+parent's `children` (the whole board dir is scanned, so a one-sided edge is
+cleaned too); a hand edit or `tkt apply` writes only the file it touches.
 Queries use a tiny JQL subset (`field = "v" [AND ...] [ORDER BY field DIR]`,
 `currentUser()`, `is EMPTY`) so the same `[queries]` strings read like Jira's.
 `ORDER BY priority` ranks by the priority order (`tkt cfg priorities`), not by

@@ -18,6 +18,7 @@ Each ticket file:
     labels: [api, auth]
     blocked_by: [TKT-2]
     blocks: []
+    parent: TKT-1
     children: [TKT-4, TKT-5]
     ---
     # One-line summary
@@ -43,7 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import ticketdoc
-from core.errors import NotFoundError, ProviderError
+from core.errors import NotFoundError, ProviderError, UsageError
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog, human_duration
 
@@ -70,6 +71,31 @@ def _parse_scalar(raw: str):
             return []
         return [x.strip().strip("'\"") for x in inner.split(",") if x.strip()]
     return raw.strip("'\"")
+
+
+# `tkt link` types that set the hierarchy. `KEY child TO` and `TO parent KEY`
+# are the same edge, so both spellings route to `_set_parent`.
+_CHILD_LINKS = ("child", "has child")
+_PARENT_LINKS = ("parent", "child of", "is child of")
+
+
+def _coerce_parent(value, key: str = "") -> str:
+    """The `parent:` frontmatter value as one key, "" when none.
+
+    `parent` is a scalar, but the frontmatter grammar turns `[X]` into a
+    list, so a one-element list is read as that element. An empty or
+    multi-element list names no single parent and reads as none, as does a
+    self-reference (a ticket is never its own parent)."""
+    if isinstance(value, list):
+        value = value[0] if len(value) == 1 else ""
+    out = str(value or "").strip()
+    return "" if out == key else out
+
+
+def _as_list(value) -> list:
+    """A frontmatter list key, tolerating a bare scalar (`children: X`)."""
+    value = value or []
+    return [value] if isinstance(value, str) else list(value)
 
 
 class MarkdownAdapter(Adapter):
@@ -186,14 +212,13 @@ class MarkdownAdapter(Adapter):
         blocks = fm.get("blocks", []) or []
         if isinstance(blocks, str):
             blocks = [blocks]
-        # Direct children, from frontmatter (hand-edited, `apply`, or `link
-        # --type child`). Informational only: nothing writes the inverse
-        # `parent` edge, so a child file does not name its parent.
-        children_raw = fm.get("children", []) or []
-        if isinstance(children_raw, str):
-            children_raw = [children_raw]
-        children = [k for k in dict.fromkeys(str(c) for c in children_raw)
+        # Hierarchy, from frontmatter: `children:` on the parent, `parent:`
+        # on the child. `tkt link --type child|parent` writes both edges;
+        # a hand edit or `apply` writes only the file it touches.
+        children = [k for k in dict.fromkeys(str(c) for c in
+                                             _as_list(fm.get("children")))
                     if k and k != key]
+        parent = _coerce_parent(fm.get("parent", ""), key)
 
         def _date(name: str) -> str | None:
             v = fm.get(name)
@@ -221,6 +246,7 @@ class MarkdownAdapter(Adapter):
             blocked_by=blocked_by,
             blocks=list(blocks),
             children=children,
+            parent=parent,
             transitions=sorted(self.config.roles.values()),
         )
 
@@ -276,8 +302,9 @@ class MarkdownAdapter(Adapter):
         return JqlSubset(q, self.me, self.priorities()).run(
             self._all_tickets(all_projects=all_projects))
 
-    def view(self, key, *, children: bool = True):
-        # `children` is ignored: they are frontmatter, read with the ticket.
+    def view(self, key, *, hierarchy: bool = True):
+        # `hierarchy` is ignored: parent and children are frontmatter, read
+        # with the ticket.
         fm, body = self._read_raw(key)
         return self._to_ticket(key, fm, body)
 
@@ -383,6 +410,12 @@ class MarkdownAdapter(Adapter):
                     val = [val]
                 if val:
                     fm[name] = list(val)
+            # Likewise `parent`, only when set. apply is single-sided: it
+            # does not add the new ticket to the parent's `children`; use
+            # `tkt link --type parent` for both edges.
+            parent = _coerce_parent(fm_in.get("parent", ""), new_key)
+            if parent:
+                fm["parent"] = parent
             for name in ("due", "scheduled", "completed"):
                 if name in fm_in and fm_in[name] not in (None, ""):
                     fm[name] = fm_in[name]
@@ -400,6 +433,15 @@ class MarkdownAdapter(Adapter):
                       "due", "scheduled", "completed"):
             if field in fm_in:
                 fm[field] = fm_in[field]
+        # `parent` is stored as one scalar key; an empty one drops the key.
+        # Single-sided, like `children` above: neither the old nor the new
+        # parent's file is touched (that is `tkt link`'s job).
+        if "parent" in fm_in:
+            parent = _coerce_parent(fm_in["parent"], key)
+            if parent:
+                fm["parent"] = parent
+            else:
+                fm.pop("parent", None)
         # The buffer body wins, but backend-managed sections (Comments) are
         # restored verbatim from the stored ticket so the editor can't corrupt
         # the timestamped log.
@@ -413,8 +455,12 @@ class MarkdownAdapter(Adapter):
         return self.view(key)
 
     def link(self, key, to, link_type):
-        fm, body = self._read_raw(key)
         lt = link_type.strip().lower()
+        if lt in _CHILD_LINKS:
+            return self._set_parent(parent=key, child=to)
+        if lt in _PARENT_LINKS:
+            return self._set_parent(parent=to, child=key)
+        fm, body = self._read_raw(key)
         if lt == "is blocked by":
             cur = fm.get("blocked_by", []) or []
             if isinstance(cur, str):
@@ -429,15 +475,6 @@ class MarkdownAdapter(Adapter):
             if to not in cur:
                 cur.append(to)
             fm["blocks"] = cur
-        elif lt in ("child", "has child"):
-            # KEY has child TO. Only the parent records the edge; nothing
-            # writes a `parent` key into TO's file.
-            cur = fm.get("children", []) or []
-            if isinstance(cur, str):
-                cur = [cur]
-            if to not in cur:
-                cur.append(to)
-            fm["children"] = cur
         else:
             cur = fm.get("links", []) or []
             if isinstance(cur, str):
@@ -445,6 +482,73 @@ class MarkdownAdapter(Adapter):
             cur.append(f"{link_type}:{to}")
             fm["links"] = cur
         self._write_raw(key, fm, body)
+
+    def _set_parent(self, parent: str, child: str) -> None:
+        """Make `parent` the parent of `child`, writing both edges: the
+        child's `parent:` and the parent's `children:`. `child` is also
+        dropped from the `children:` of every other ticket on the board --
+        its previous parent, and any ticket that lists it one-sidedly (a
+        hand edit, a single-sided `apply`, or a link written before the
+        inverse edge existed) -- so it never ends up under two parents.
+
+        Only a direct 2-cycle (`parent` is already `child`'s child, by
+        either edge) is rejected; longer cycles are not looked for."""
+        # Before any read, so the error is the same whether or not the
+        # filesystem folds case (on a case-sensitive one `tkt-1.md` would
+        # otherwise surface as NotFoundError).
+        if parent.casefold() == child.casefold():
+            raise UsageError(f"link: {child} cannot be its own parent")
+        # Read everything before writing anything, so a missing ticket or a
+        # rejected cycle leaves the board untouched.
+        child_fm, child_body = self._read_raw(child)
+        parent_fm, parent_body = self._read_raw(parent)
+        if (_coerce_parent(parent_fm.get("parent", ""), parent) == child
+                or parent in _as_list(child_fm.get("children"))):
+            raise UsageError(f"link: {child} is the parent of {parent}; making "
+                             f"{parent} its parent too would be a cycle")
+        stale = self._stale_parents(parent, child)
+
+        # Each file write is independent: child, then new parent, then each
+        # stale parent. A crash between them leaves a partial state that
+        # re-running the same link repairs: every step is idempotent, the
+        # board scan finds any stale parent still listing the child, and an
+        # unchanged file is not rewritten.
+        if child_fm.get("parent") != parent:
+            child_fm["parent"] = parent
+            self._write_raw(child, child_fm, child_body)
+        kids = _as_list(parent_fm.get("children"))
+        if child not in kids:
+            parent_fm["children"] = kids + [child]
+            self._write_raw(parent, parent_fm, parent_body)
+        for key, fm, body in stale:
+            fm["children"] = [k for k in _as_list(fm.get("children"))
+                              if k != child]
+            self._write_raw(key, fm, body)
+
+    def _stale_parents(self, parent: str, child: str) -> list:
+        """`(key, fm, body)` for every board file other than `parent` and
+        `child` whose `children:` lists `child`.
+
+        Scans the whole board dir, not just this project's prefix: on a
+        shared board a parent may belong to another project. Files are
+        matched by identity rather than by name, so a case-folded spelling
+        of `parent` on a case-insensitive filesystem is still skipped (and
+        keeps the edge just written to it)."""
+        def ident(key):
+            st = self._ticket_path(key).stat()
+            return st.st_dev, st.st_ino
+        skip = {ident(parent), ident(child)}
+        out = []
+        for path in sorted(self.board_dir.glob("*.md")):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            st = path.stat()
+            if (st.st_dev, st.st_ino) in skip:
+                continue
+            fm, body = self._read_raw(path.stem)
+            if child in _as_list(fm.get("children")):
+                out.append((path.stem, fm, body))
+        return out
 
     @staticmethod
     def _split_body(doc: str) -> tuple[str, str]:

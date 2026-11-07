@@ -130,7 +130,8 @@ class GithubAdapter(Adapter):
 
     def _issue_to_ticket(self, issue: dict, status: str | None = None,
                          check_resolved: bool = False, transitions=None,
-                         children: list[str] | None = None) -> Ticket:
+                         children: list[str] | None = None,
+                         parent: str = "") -> Ticket:
         labels = self._label_names(issue.get("labels"))
         body = issue.get("body", "") or ""
         if status is None:
@@ -155,6 +156,7 @@ class GithubAdapter(Adapter):
             blocked_by=blocked_by,
             blocks=blocks,
             children=[c for c in dict.fromkeys(children or []) if c != number],
+            parent=parent if parent != number else "",
             transitions=transitions or [],
         )
 
@@ -264,19 +266,21 @@ class GithubAdapter(Adapter):
         lanes = sorted(self.config.roles.values())
         return [self._issue_to_ticket(i, transitions=lanes) for i in issues]
 
-    def view(self, key, *, children: bool = True):
-        # `children=False` is for internal callers that only need labels or
-        # links (`transition`, `blockers`, `create`): it skips the extra call.
+    def view(self, key, *, hierarchy: bool = True):
+        # `hierarchy=False` is for internal callers that only need labels or
+        # links (`transition`, `blockers`, `create`): it skips both extra
+        # calls (sub-issues and parent).
         issue = self._gh_json("issue", "view", key, "--repo", self.repo,
                               "--json", self._ISSUE_FIELDS)
-        if children:
+        children, parent = None, ""
+        if hierarchy:
             host, nwo = _issue_url_repo(issue.get("url"))
             if not nwo:
                 # No usable issue URL: fall back to what the config names.
                 host, nwo = _repo_host(self.repo), self._repo_name
-            children = self._children(str(issue.get("number") or key), host, nwo)
-        else:
-            children = None
+            number = str(issue.get("number") or key)
+            children = self._children(number, host, nwo)
+            parent = self._parent(number, host, nwo)
         if self.board == "projectv2":
             status = ""
             for item in self._repo_items():
@@ -285,10 +289,10 @@ class GithubAdapter(Adapter):
                     break
             return self._issue_to_ticket(issue, status=status, check_resolved=True,
                                          transitions=self._project()["option_names"],
-                                         children=children)
+                                         children=children, parent=parent)
         return self._issue_to_ticket(issue, check_resolved=True,
                                      transitions=sorted(self.config.roles.values()),
-                                     children=children)
+                                     children=children, parent=parent)
 
     def _children(self, number: str, host: str, nwo: str) -> list[str]:
         """Keys of the issue's sub-issues: "12" for one in this repo,
@@ -310,16 +314,29 @@ class GithubAdapter(Adapter):
             if "HTTP 404" in str(e):
                 return []
             raise
-        keys = []
-        for sub in _json_pages(out, " ".join(args)):
-            if not isinstance(sub, dict) or sub.get("number") in (None, ""):
-                continue
-            repo = _sub_issue_repo(sub)
-            if not repo or _name_with_owner(repo) == nwo:
-                keys.append(str(sub["number"]))
-            else:
-                keys.append(f"{repo}#{sub['number']}")
-        return [k for k in dict.fromkeys(keys) if k != number]
+        keys = [_related_key(sub, nwo) for sub in _json_pages(out, " ".join(args))]
+        return [k for k in dict.fromkeys(keys) if k and k != number]
+
+    def _parent(self, number: str, host: str, nwo: str) -> str:
+        """Key of the issue's parent (the issue it is a sub-issue of), keyed
+        like `_children`; "" when it has none. One extra call, so `view`
+        only. GitHub answers 404 both for "no parent" and on a host without
+        the sub-issues API (older GHES); either way, "none here"."""
+        args = ["api", f"repos/{nwo}/issues/{number}/parent"]
+        if host:
+            args += ["--hostname", host]
+        try:
+            out = self._gh(*args)
+        except ProviderError as e:
+            if "HTTP 404" in str(e):
+                return ""
+            raise
+        try:
+            issue = json.loads(out)
+        except json.JSONDecodeError as e:
+            raise ProviderError(f"gh returned non-JSON for {' '.join(args)}: {e}") from e
+        key = _related_key(issue, nwo)
+        return key if key != number else ""
 
     def transition(self, key, role):
         lane = self.config.role_to_lane(role)
@@ -337,7 +354,7 @@ class GithubAdapter(Adapter):
             self._sync_issue_state(key, role)
             return
         # labels mode: swap the Status: label
-        cur = self.view(key, children=False)
+        cur = self.view(key, hierarchy=False)
         args = ["issue", "edit", key, "--repo", self.repo, "--add-label", f"{self.status_label_prefix}{lane}"]
         existing = self._status_from_labels(cur.labels)
         if existing and existing != lane:
@@ -371,7 +388,7 @@ class GithubAdapter(Adapter):
         self._gh("issue", "comment", key, "--repo", self.repo, "--body", body)
 
     def blockers(self, key):
-        return self.view(key, children=False).unresolved_blockers()
+        return self.view(key, hierarchy=False).unresolved_blockers()
 
     def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
         args = ["issue", "create", "--repo", self.repo, "--title", summary,
@@ -395,7 +412,7 @@ class GithubAdapter(Adapter):
             self._project_meta = None  # item set changed
             if todo_lane:
                 self.transition(number, "todo")
-        return self.view(number, children=False)  # brand new: it has none
+        return self.view(number, hierarchy=False)  # brand new: it has none
 
     def link(self, key, to, link_type):
         lt = link_type.strip().lower()
@@ -516,6 +533,19 @@ def _json_pages(out: str, what: str) -> list:
             items += page
         else:
             raise ProviderError(f"gh returned a non-array page for {what}")
+
+
+def _related_key(issue, nwo: str) -> str:
+    """How this adapter keys a sub-issue or parent from the REST API: its
+    bare number when it lives in `nwo` (the viewed issue's lowercased
+    `owner/name`), "owner/repo#N" when elsewhere, so a number from another
+    repo is never read as one of ours; "" if it carries no number."""
+    if not isinstance(issue, dict) or issue.get("number") in (None, ""):
+        return ""
+    repo = _sub_issue_repo(issue)
+    if not repo or _name_with_owner(repo) == nwo:
+        return str(issue["number"])
+    return f"{repo}#{issue['number']}"
 
 
 def _sub_issue_repo(sub: dict) -> str:

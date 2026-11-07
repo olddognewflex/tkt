@@ -28,9 +28,10 @@ lane history stays correct) and the whole body EXCEPT backend-managed sections
 (`MANAGED_SECTIONS`), which are preserved verbatim from the stored ticket.
 
 A backend maps only the keys it can store and ignores the rest. `children:
-[KEY, ...]` is one such key: markdown stores it, while backends that derive
-children from their own parent links (jira, github, linear) ignore it, so it
-is deliberately not in the shared `TEMPLATE`.
+[KEY, ...]` and `parent: KEY` are such keys: markdown stores them (one side
+only; `tkt link --type child|parent` keeps both sides in step), while
+backends that derive hierarchy from their own links (jira, github, linear)
+ignore them, so they are deliberately not in the shared `TEMPLATE`.
 """
 from __future__ import annotations
 
