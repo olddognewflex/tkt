@@ -489,6 +489,76 @@ class MarkdownParentIdentity(_Base):
         self.assertEqual(ids.canonical("GONE-1"), "GONE-1")
 
 
+class MarkdownSelfReferenceByIdentity(_Base):
+    """A ticket never names itself as parent or child, under any name that
+    opens its own file. TKT-9.md is a hard link to TKT-1.md (runs on every
+    filesystem, the same path a case variant takes on a case-insensitive
+    one)."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("TKT-1")
+        self.write("TKT-2")
+        os.link(self.a.board_dir / "TKT-1.md", self.a.board_dir / "TKT-9.md")
+
+    def test_view_drops_parent_naming_own_file(self):
+        self.write("TKT-1", ["parent: TKT-9"])
+        self.assertEqual(self.a.view("TKT-1").parent, "")
+        self.assert_control()
+
+    def test_view_drops_child_naming_own_file(self):
+        self.write("TKT-1", ["children: [TKT-9, TKT-2]"])
+        self.assertEqual(self.a.view("TKT-1").children, ["TKT-2"])
+
+    def test_list_normalizes_the_same_way(self):
+        self.write("TKT-1", ["parent: TKT-9", "children: [TKT-9, TKT-2]"])
+        by_key = {t.key: (t.parent, t.children) for t in self.a.list(query="all")}
+        self.assertEqual(by_key["TKT-1"], ("", ["TKT-2"]))
+        self.assertEqual(by_key["TKT-9"], ("", ["TKT-2"]))
+        self.assertEqual(by_key["TKT-2"], ("", []))
+
+    def test_apply_update_clears_parent_naming_own_file(self):
+        self.write("TKT-1", ["parent: TKT-2"])
+        t = self.a.apply(self.doc("parent: TKT-9"), key="TKT-1")
+        self.assertEqual(t.parent, "")
+        self.assertNotIn("parent", self.fm("TKT-1"))
+
+    def test_apply_update_drops_child_naming_own_file(self):
+        t = self.a.apply(self.doc("children: [TKT-9, TKT-2]"), key="TKT-1")
+        self.assertEqual(t.children, ["TKT-2"])
+        self.assertEqual(self.fm("TKT-1")["children"], ["TKT-2"])
+        # Control: names that open other files are kept as written.
+        t = self.a.apply(self.doc("parent: TKT-2", "children: [TKT-2, TKT-5]"),
+                         key="TKT-1")
+        self.assertEqual((t.parent, t.children), ("TKT-2", ["TKT-2", "TKT-5"]))
+        self.assertEqual(self.fm("TKT-1")["children"], ["TKT-2", "TKT-5"])
+
+    def test_list_does_not_stat_tickets_outside_a_hierarchy(self):
+        from adapters import markdown
+        calls = []
+        real = markdown._TicketIdentity.of
+
+        def spy(ids, key):
+            calls.append(key)
+            return real(ids, key)
+        markdown._TicketIdentity.of = spy
+        self.addCleanup(setattr, markdown._TicketIdentity, "of", real)
+        self.a.list(query="all")
+        self.assertEqual(calls, [])
+
+
+class MarkdownApplyCreateSelfChild(_Base):
+
+    def test_apply_create_drops_child_naming_the_new_key(self):
+        # The board is empty, so the new ticket is minted as TKT-1.
+        t = self.a.apply(self.doc("children: [TKT-1, TKT-5]"))
+        self.assertEqual(t.key, "TKT-1")
+        self.assertEqual(self.fm("TKT-1")["children"], ["TKT-5"])
+        t = self.a.apply(self.doc("children: [TKT-2]"))
+        self.assertEqual(t.key, "TKT-2")
+        self.assertNotIn("children", self.fm("TKT-2"))
+
+
 def _folds_case(directory):
     """True when `directory` is on a case-insensitive filesystem."""
     probe = Path(directory) / "CaseProbe.tmp"
@@ -546,6 +616,27 @@ class MarkdownParentCaseInsensitive(_Base):
         self.a.link("TKT-2", "TKT-3", "child")
         self.assertEqual(self.fm("TKT-2")["children"], ["TKT-3"])
 
+    def test_view_drops_case_variant_self_reference(self):
+        self.write("TKT-1", ["parent: tkt-1", "children: [tkt-1, TKT-2]"])
+        t = self.a.view("TKT-1")
+        self.assertEqual((t.parent, t.children), ("", ["TKT-2"]))
+        self.assert_control()
+
+    def test_apply_update_clears_case_variant_self_parent(self):
+        self.write("TKT-1", ["parent: TKT-2"])
+        t = self.a.apply(self.doc("parent: tkt-1", "children: [tkt-1, TKT-2]"),
+                         key="TKT-1")
+        self.assertEqual((t.parent, t.children), ("", ["TKT-2"]))
+        self.assertNotIn("parent", self.fm("TKT-1"))
+        self.assertEqual(self.fm("TKT-1")["children"], ["TKT-2"])
+
+    def test_apply_create_drops_case_variant_of_the_new_key(self):
+        # The board is empty, so the new ticket is minted as TKT-1.
+        t = self.a.apply(self.doc("parent: tkt-1", "children: [tkt-1, TKT-5]"))
+        self.assertEqual((t.key, t.parent, t.children), ("TKT-1", "", ["TKT-5"]))
+        self.assertNotIn("parent", self.fm("TKT-1"))
+        self.assertEqual(self.fm("TKT-1")["children"], ["TKT-5"])
+
 
 class MarkdownParentCaseSensitive(_Base):
     """On a case-sensitive filesystem `TKT-3.md` and `tkt-3.md` are two
@@ -570,6 +661,16 @@ class MarkdownParentCaseSensitive(_Base):
         after = self.snapshot()
         self.assertEqual(after["TKT-1.md"], before["TKT-1.md"])
         self.assertEqual(after["tkt-3.md"], before["tkt-3.md"])
+
+    def test_case_variant_parent_is_another_ticket(self):
+        self.write("TKT-1", ["parent: tkt-1", "children: [tkt-1]"])
+        self.write("tkt-1")
+        t = self.a.view("TKT-1")
+        self.assertEqual((t.parent, t.children), ("tkt-1", ["tkt-1"]))
+        t = self.a.apply(self.doc("parent: tkt-1", "children: [tkt-1]"),
+                         key="TKT-1")
+        self.assertEqual((t.parent, t.children), ("tkt-1", ["tkt-1"]))
+        self.assertEqual(self.fm("TKT-1")["parent"], "tkt-1")
 
 
 if __name__ == "__main__":

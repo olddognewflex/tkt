@@ -100,7 +100,8 @@ def _as_list(value) -> list:
 
 
 class _TicketIdentity:
-    """Which board keys name the same ticket file, for one `_set_parent`.
+    """Which board keys name the same ticket file, for one `_set_parent`
+    or one hierarchy self-reference check (`_without_self`).
 
     On a case-insensitive filesystem `tkt-3` and `TKT-3` open one file, so
     key strings alone miss existing edges. Keys are compared by file
@@ -223,6 +224,23 @@ class MarkdownAdapter(Adapter):
 
     # ---- normalization -----------------------------------------------------
 
+    def _without_self(self, key: str, parent: str, children: list) -> tuple:
+        """`(parent, children)` with every reference to `key`'s own file
+        removed: `parent` becomes "" and such `children` entries are dropped.
+
+        A reference is the key itself or any other name that opens the same
+        file (a hard link, or a case variant on a case-insensitive
+        filesystem); see `_TicketIdentity`, which never case-folds, so on a
+        case-sensitive filesystem `tkt-1` stays a distinct ticket from
+        `TKT-1`. Nothing is stat'd when there is no parent and no child, so
+        `list` pays nothing for tickets outside a hierarchy."""
+        if not parent and not children:
+            return parent, children
+        ids = _TicketIdentity(self.board_dir)
+        if parent and ids.same(parent, key):
+            parent = ""
+        return parent, [k for k in children if not ids.same(str(k), key)]
+
     def _to_ticket(self, key: str, fm: dict, body: str) -> Ticket:
         summary = ""
         description_lines: list[str] = []
@@ -259,11 +277,12 @@ class MarkdownAdapter(Adapter):
             blocks = [blocks]
         # Hierarchy, from frontmatter: `children:` on the parent, `parent:`
         # on the child. `tkt link --type child|parent` writes both edges;
-        # a hand edit or `apply` writes only the file it touches.
-        children = [k for k in dict.fromkeys(str(c) for c in
-                                             _as_list(fm.get("children")))
-                    if k and k != key]
-        parent = _coerce_parent(fm.get("parent", ""), key)
+        # a hand edit or `apply` writes only the file it touches. A
+        # reference to the ticket's own file, under any name, is dropped.
+        parent, children = self._without_self(
+            key, _coerce_parent(fm.get("parent", ""), key),
+            [k for k in dict.fromkeys(str(c) for c in
+                                      _as_list(fm.get("children"))) if k])
 
         def _date(name: str) -> str | None:
             v = fm.get(name)
@@ -453,6 +472,8 @@ class MarkdownAdapter(Adapter):
                 val = fm_in.get(name, []) or []
                 if isinstance(val, str):
                     val = [val]
+                if name == "children":  # a ticket is never its own child
+                    val = [k for k in val if str(k) != new_key]
                 if val:
                     fm[name] = list(val)
             # Likewise `parent`, only when set. apply is single-sided: it
@@ -465,6 +486,19 @@ class MarkdownAdapter(Adapter):
                 if name in fm_in and fm_in[name] not in (None, ""):
                     fm[name] = fm_in[name]
             self._write_raw(new_key, fm, body_in)
+            # Only now does the new file exist, so only now can another
+            # name (a case variant on a case-insensitive filesystem) be seen
+            # to open it. Rewritten only when such a self-reference is found.
+            kids = fm.get("children", [])
+            parent, kept = self._without_self(new_key, parent, kids)
+            if parent != fm.get("parent", "") or kept != kids:
+                if not parent:
+                    fm.pop("parent", None)
+                if kept:
+                    fm["children"] = kept
+                else:
+                    fm.pop("children", None)
+                self._write_raw(new_key, fm, body_in)
             self._append_history(new_key, "", todo_lane)
             return self.view(new_key)
 
@@ -480,9 +514,15 @@ class MarkdownAdapter(Adapter):
                 fm[field] = fm_in[field]
         # `parent` is stored as one scalar key; an empty one drops the key.
         # Single-sided, like `children` above: neither the old nor the new
-        # parent's file is touched (that is `tkt link`'s job).
+        # parent's file is touched (that is `tkt link`'s job). A reference
+        # to this ticket's own file, under any name, is dropped from both
+        # (a self-parent clears the key, as an empty one does).
+        kids = _as_list(fm_in.get("children"))
+        parent, kept = self._without_self(
+            key, _coerce_parent(fm_in.get("parent", ""), key), kids)
+        if len(kept) != len(kids):
+            fm["children"] = kept
         if "parent" in fm_in:
-            parent = _coerce_parent(fm_in["parent"], key)
             if parent:
                 fm["parent"] = parent
             else:
