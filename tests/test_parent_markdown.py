@@ -416,5 +416,161 @@ class MarkdownParentBoardScan(_Base):
         self.assertEqual(self.snapshot(), before)
 
 
+class MarkdownParentIdentity(_Base):
+    """Keys are compared by file identity, not by string: two names that
+    open one file are one ticket. Hard links give two names for one file on
+    every filesystem, so these run everywhere and exercise the same path a
+    case-variant spelling takes on a case-insensitive one."""
+
+    def alias(self, key, name):
+        os.link(self.a.board_dir / f"{key}.md", self.a.board_dir / f"{name}.md")
+
+    def test_two_cycle_via_parent_edge_under_another_name(self):
+        # TKT-2 names TKT-1 as its parent (one-sided). ALIAS-1 is TKT-1.
+        self.write("TKT-1")
+        self.write("TKT-2", ["parent: TKT-1"])
+        self.alias("TKT-1", "ALIAS-1")
+        before = self.snapshot()
+        with self.assertRaises(UsageError):
+            self.a.link("TKT-2", "ALIAS-1", "child")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_two_cycle_via_children_edge_under_another_name(self):
+        # TKT-1 lists TKT-2 as a child (one-sided). ALIAS-2 is TKT-2.
+        self.write("TKT-1", ["children: [TKT-2]"])
+        self.write("TKT-2")
+        self.alias("TKT-2", "ALIAS-2")
+        before = self.snapshot()
+        with self.assertRaises(UsageError):
+            self.a.link("ALIAS-2", "TKT-1", "child")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_self_link_under_another_name_rejected(self):
+        self.write("TKT-1")
+        self.alias("TKT-1", "ALIAS-1")
+        before = self.snapshot()
+        with self.assertRaises(UsageError):
+            self.a.link("TKT-1", "ALIAS-1", "child")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_reparent_cleans_old_parent_listing_another_name(self):
+        # The old parent lists the child as TKT-3; the command names it
+        # ALIAS-3. The stale scan must still find and clean TKT-1.
+        self.write("TKT-1", ["children: [TKT-9, TKT-3]"])
+        self.write("TKT-2")
+        self.write("TKT-3", ["parent: TKT-1"])
+        self.alias("TKT-3", "ALIAS-3")
+        self.a.link("TKT-2", "ALIAS-3", "child")
+        self.assertEqual(self.fm("TKT-1")["children"], ["TKT-9"])
+        self.assertEqual(self.fm("TKT-2")["children"], ["ALIAS-3"])
+        self.assertEqual(self.fm("TKT-3")["parent"], "TKT-2")
+
+    def test_new_parent_listing_another_name_is_not_appended_twice(self):
+        # TKT-2 already lists the child twice, under both names: it ends
+        # up listed once, in the command's spelling, where it first was.
+        self.write("TKT-2", ["children: [TKT-8, TKT-3, ALIAS-3]"])
+        self.write("TKT-3", ["parent: TKT-2"])
+        self.alias("TKT-3", "ALIAS-3")
+        self.a.link("TKT-2", "ALIAS-3", "child")
+        self.assertEqual(self.fm("TKT-2")["children"], ["TKT-8", "ALIAS-3"])
+
+    def test_missing_entries_compare_by_string(self):
+        from adapters.markdown import _TicketIdentity
+        self.write("TKT-1")
+        self.alias("TKT-1", "ALIAS-1")
+        ids = _TicketIdentity(self.a.board_dir)
+        self.assertTrue(ids.same("TKT-1", "ALIAS-1"))
+        self.assertTrue(ids.same("GONE-1", "GONE-1"))
+        self.assertFalse(ids.same("GONE-1", "GONE-2"))
+        self.assertFalse(ids.same("GONE-1", "TKT-1"))
+        self.assertFalse(ids.same("TKT-1", "GONE-1"))
+        # A listed name is its own canonical spelling; a missing one too.
+        self.assertEqual(ids.canonical("ALIAS-1"), "ALIAS-1")
+        self.assertEqual(ids.canonical("GONE-1"), "GONE-1")
+
+
+def _folds_case(directory):
+    """True when `directory` is on a case-insensitive filesystem."""
+    probe = Path(directory) / "CaseProbe.tmp"
+    probe.write_text("")
+    try:
+        return (Path(directory) / "caseprobe.tmp").exists()
+    finally:
+        probe.unlink()
+
+
+class MarkdownParentCaseInsensitive(_Base):
+    """Case-variant spellings on a case-insensitive filesystem (macOS APFS
+    by default). Skipped on a case-sensitive one."""
+
+    def setUp(self):
+        super().setUp()
+        if not _folds_case(self.a.board_dir):
+            self.skipTest("filesystem is case-sensitive")
+
+    def test_reverse_link_in_other_case_is_a_two_cycle(self):
+        self.write("TKT-1", ["children: [TKT-2]"])
+        self.write("TKT-2", ["parent: TKT-1"])
+        before = self.snapshot()
+        with self.assertRaises(UsageError):
+            self.a.link("tkt-2", "tkt-1", "child")
+        with self.assertRaises(UsageError):
+            self.a.link("tkt-1", "TKT-2", "parent")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_reparent_in_other_case_cleans_old_parent(self):
+        self.write("TKT-1", ["children: [TKT-3]"])
+        self.write("TKT-2")
+        self.write("TKT-3", ["parent: TKT-1"])
+        self.a.link("TKT-2", "tkt-3", "child")
+        self.assertEqual(self.fm("TKT-1")["children"], [])
+        self.assertEqual(self.fm("TKT-3")["parent"], "TKT-2")
+        self.assertEqual(self.fm("TKT-2")["children"], ["TKT-3"])
+        # Retrying in either spelling changes nothing.
+        after = self.snapshot()
+        self.a.link("TKT-2", "tkt-3", "child")
+        self.a.link("tkt-2", "TKT-3", "child")
+        self.assertEqual(self.snapshot(), after)
+
+    def test_lowercase_command_writes_on_disk_spelling(self):
+        self.write("TKT-1")
+        self.write("TKT-2")
+        self.a.link("tkt-1", "tkt-2", "child")
+        self.assertEqual(self.fm("TKT-1")["children"], ["TKT-2"])
+        self.assertEqual(self.fm("TKT-2")["parent"], "TKT-1")
+        self.assertEqual(sorted(self.snapshot()), ["TKT-1.md", "TKT-2.md"])
+
+    def test_miscased_existing_entry_is_normalized_not_duplicated(self):
+        self.write("TKT-2", ["children: [tkt-3]"])
+        self.write("TKT-3", ["parent: TKT-2"])
+        self.a.link("TKT-2", "TKT-3", "child")
+        self.assertEqual(self.fm("TKT-2")["children"], ["TKT-3"])
+
+
+class MarkdownParentCaseSensitive(_Base):
+    """On a case-sensitive filesystem `TKT-3.md` and `tkt-3.md` are two
+    tickets; identity comparison must not conflate them. Skipped on a
+    case-insensitive one."""
+
+    def setUp(self):
+        super().setUp()
+        if _folds_case(self.a.board_dir):
+            self.skipTest("filesystem is case-insensitive")
+
+    def test_case_variant_files_stay_distinct(self):
+        self.write("TKT-1", ["children: [tkt-3]"])
+        self.write("TKT-2")
+        self.write("TKT-3")
+        self.write("tkt-3", ["parent: TKT-1"])
+        before = self.snapshot()
+        self.a.link("TKT-2", "TKT-3", "child")
+        self.assertEqual(self.fm("TKT-3")["parent"], "TKT-2")
+        self.assertEqual(self.fm("TKT-2")["children"], ["TKT-3"])
+        # tkt-3's edges, and TKT-1 listing it, are untouched.
+        after = self.snapshot()
+        self.assertEqual(after["TKT-1.md"], before["TKT-1.md"])
+        self.assertEqual(after["tkt-3.md"], before["tkt-3.md"])
+
+
 if __name__ == "__main__":
     unittest.main()

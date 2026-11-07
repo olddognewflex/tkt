@@ -40,6 +40,7 @@ the human-canonical source; sidecars are derived/machine-local).
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -96,6 +97,50 @@ def _as_list(value) -> list:
     """A frontmatter list key, tolerating a bare scalar (`children: X`)."""
     value = value or []
     return [value] if isinstance(value, str) else list(value)
+
+
+class _TicketIdentity:
+    """Which board keys name the same ticket file, for one `_set_parent`.
+
+    On a case-insensitive filesystem `tkt-3` and `TKT-3` open one file, so
+    key strings alone miss existing edges. Keys are compared by file
+    identity (st_dev, st_ino; what `os.path.samefile` compares), never by
+    case-folding: on a case-sensitive filesystem `TKT-3.md` and `tkt-3.md`
+    are two tickets. A key whose file does not exist compares by string.
+    Each key is stat'd at most once per instance."""
+
+    def __init__(self, board_dir: Path):
+        self.board_dir = board_dir
+        self._ids: dict[str, tuple | None] = {}
+
+    def of(self, key: str):
+        if key not in self._ids:
+            try:
+                st = (self.board_dir / f"{key}.md").stat()
+                self._ids[key] = (st.st_dev, st.st_ino)
+            except (OSError, ValueError):
+                self._ids[key] = None
+        return self._ids[key]
+
+    def same(self, a: str, b: str) -> bool:
+        if a == b:
+            return True
+        ia = self.of(a)
+        return ia is not None and ia == self.of(b)
+
+    def canonical(self, key: str) -> str:
+        """`key` as spelled by the board file it opens (`tkt-3` ->
+        `TKT-3` when the file is `TKT-3.md`), so links are never written
+        in a miscased spelling. `key` itself when that exact name is a
+        directory entry, or when no entry matches."""
+        names = sorted(n for n in os.listdir(self.board_dir)
+                       if n.endswith(".md") and not n.startswith("."))
+        if f"{key}.md" in names:
+            return key
+        for name in names:
+            if self.same(name[:-3], key):
+                return name[:-3]
+        return key
 
 
 class MarkdownAdapter(Adapter):
@@ -491,6 +536,10 @@ class MarkdownAdapter(Adapter):
         hand edit, a single-sided `apply`, or a link written before the
         inverse edge existed) -- so it never ends up under two parents.
 
+        Keys are compared by file identity (see `_TicketIdentity`), so a
+        case-variant spelling on a case-insensitive filesystem is the same
+        ticket, and both keys are written in their on-disk spelling.
+
         Only a direct 2-cycle (`parent` is already `child`'s child, by
         either edge) is rejected; longer cycles are not looked for."""
         # Before any read, so the error is the same whether or not the
@@ -502,11 +551,16 @@ class MarkdownAdapter(Adapter):
         # rejected cycle leaves the board untouched.
         child_fm, child_body = self._read_raw(child)
         parent_fm, parent_body = self._read_raw(parent)
-        if (_coerce_parent(parent_fm.get("parent", ""), parent) == child
-                or parent in _as_list(child_fm.get("children"))):
+        ids = _TicketIdentity(self.board_dir)
+        if ids.same(parent, child):  # two names for one file (a hard link)
+            raise UsageError(f"link: {child} cannot be its own parent")
+        child, parent = ids.canonical(child), ids.canonical(parent)
+        if (ids.same(_coerce_parent(parent_fm.get("parent", ""), parent), child)
+                or any(ids.same(k, parent)
+                       for k in _as_list(child_fm.get("children")))):
             raise UsageError(f"link: {child} is the parent of {parent}; making "
                              f"{parent} its parent too would be a cycle")
-        stale = self._stale_parents(parent, child)
+        stale = self._stale_parents(parent, child, ids)
 
         # Each file write is independent: child, then new parent, then each
         # stale parent. A crash between them leaves a partial state that
@@ -516,37 +570,45 @@ class MarkdownAdapter(Adapter):
         if child_fm.get("parent") != parent:
             child_fm["parent"] = parent
             self._write_raw(child, child_fm, child_body)
+        # The child appears once, canonically spelled, where it first was
+        # (appended if absent); any other spelling of it is dropped.
         kids = _as_list(parent_fm.get("children"))
-        if child not in kids:
-            parent_fm["children"] = kids + [child]
+        new_kids, placed = [], False
+        for k in kids:
+            if not ids.same(k, child):
+                new_kids.append(k)
+            elif not placed:
+                new_kids.append(child)
+                placed = True
+        if not placed:
+            new_kids.append(child)
+        if new_kids != kids:
+            parent_fm["children"] = new_kids
             self._write_raw(parent, parent_fm, parent_body)
         for key, fm, body in stale:
             fm["children"] = [k for k in _as_list(fm.get("children"))
-                              if k != child]
+                              if not ids.same(k, child)]
             self._write_raw(key, fm, body)
 
-    def _stale_parents(self, parent: str, child: str) -> list:
+    def _stale_parents(self, parent: str, child: str, ids: _TicketIdentity) -> list:
         """`(key, fm, body)` for every board file other than `parent` and
-        `child` whose `children:` lists `child`.
+        `child` whose `children:` lists `child` under any spelling that
+        opens the child's file.
 
         Scans the whole board dir, not just this project's prefix: on a
         shared board a parent may belong to another project. Files are
         matched by identity rather than by name, so a case-folded spelling
         of `parent` on a case-insensitive filesystem is still skipped (and
         keeps the edge just written to it)."""
-        def ident(key):
-            st = self._ticket_path(key).stat()
-            return st.st_dev, st.st_ino
-        skip = {ident(parent), ident(child)}
+        skip = {ids.of(parent), ids.of(child)}
         out = []
         for path in sorted(self.board_dir.glob("*.md")):
             if not path.is_file() or path.name.startswith("."):
                 continue
-            st = path.stat()
-            if (st.st_dev, st.st_ino) in skip:
+            if ids.of(path.stem) in skip:
                 continue
             fm, body = self._read_raw(path.stem)
-            if child in _as_list(fm.get("children")):
+            if any(ids.same(k, child) for k in _as_list(fm.get("children"))):
                 out.append((path.stem, fm, body))
         return out
 
