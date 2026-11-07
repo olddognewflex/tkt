@@ -45,11 +45,16 @@ SUBTASK_MAX_WORDS = 150
 
 # Markdown reading mirrors check-artifact-format.mjs: fences close on the
 # same character, at least as long, with no info string; HTML comments are
-# skipped as blocks (a line opening with "<!--") or inline on one line.
+# skipped as blocks (a line opening with "<!--") or inline on one line; a
+# leading YAML frontmatter block is skipped when every line in it looks like
+# YAML, else its opening "---" is a thematic break.
 _FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 _FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
 _COMMENT_BLOCK = re.compile(r"^ {0,3}<!--")
 _HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
+_YAML_KEY = re.compile(r"^[ \t]*[\w.-]+[ \t]*:(?:[ \t].*)?$", re.ASCII)
+_YAML_ITEM = re.compile(r"^[ \t]*-(?:[ \t].*)?$")
+_YAML_COMMENT = re.compile(r"^[ \t]*#")
 
 
 # ---- role resolution -------------------------------------------------------
@@ -172,13 +177,38 @@ def _strip_inline_comments(line: str) -> str:
     return "".join(out) + line[frm:]
 
 
+def _frontmatter_end(lines: list[str]) -> int:
+    """Index of the first line after a leading YAML frontmatter block, or 0
+    when there is none: no closing "---"/"...", or a line between the fences
+    that doesn't look like YAML (then the opening "---" is a thematic
+    break). Same test as the checker's frontmatterEnd."""
+    if not lines or lines[0].lstrip("\ufeff").rstrip() != "---":
+        return 0
+    saw_key = False
+    for j in range(1, len(lines)):
+        line = lines[j].rstrip()
+        if line in ("---", "..."):
+            return j + 1
+        if not line.strip() or _YAML_COMMENT.match(line):
+            continue
+        if _YAML_KEY.match(line):
+            saw_key = True
+        elif not (saw_key and (_YAML_ITEM.match(line) or line[:1] in " \t")):
+            return 0
+    return 0
+
+
 def _scan(body: str):
-    """(index, text, heading) for each line outside fenced code. `text` has
-    HTML comments removed; lines of a comment block (an HTML block) are never
-    headings and cannot open a fence."""
+    """(index, text, heading) for each line outside frontmatter and fenced
+    code. Indices count every line of `body`, frontmatter included, so a cut
+    lands on the right line. `text` has HTML comments removed; lines of a
+    comment block (an HTML block) are never headings and cannot open a
+    fence."""
     fence = ""
     in_comment = False
-    for i, raw in enumerate(body.splitlines()):
+    lines = body.splitlines()
+    start = _frontmatter_end(lines)
+    for i, raw in enumerate(lines[start:], start):
         if fence:
             m = _FENCE_CLOSE.match(raw)
             if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):

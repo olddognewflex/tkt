@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
-from core.gates import cut_managed_tail
+from core.gates import cut_managed_tail, managed_tail_start
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog
 
@@ -236,7 +236,9 @@ class OpenKanbanAdapter(Adapter):
         store, raw = self._get_raw(key)
         desc = (raw.get("description", "") or "").rstrip()
         stamp = f"- {_now()} {self.me or 'agent'}: {body}"
-        if "## Activity" in desc:
+        # Same exact-heading test `artifact_body` cuts at: a fenced
+        # `## Activity` example or an `### Activity` subheading is not the log.
+        if managed_tail_start(desc, "activity") is not None:
             desc += "\n" + stamp
         else:
             desc += ("\n\n" if desc else "") + "## Activity\n" + stamp

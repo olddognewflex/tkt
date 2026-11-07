@@ -577,6 +577,22 @@ class Hierarchy(unittest.TestCase):
             out, _ = self.run_h(tk("TKT-2", "Sub-task"), body)
             self.assertEqual(out, [], body)
 
+    def test_frontmatter_is_not_ticket_content(self):
+        # Frontmatter is skipped as the checker skips it: a YAML comment
+        # that reads like a heading is not a plan, and keys are not words.
+        body = "---\ntitle: many words in the frontmatter\n## Test plan\n---\n# T\n"
+        self.assertFalse(gates.has_test_plan(body))
+        self.assertEqual(gates.word_count(body), 1)       # T
+        self.assertTrue(gates.has_test_plan(
+            "---\nk: v\n...\n## Test plan\n- x\n"))
+
+    def test_leading_break_before_prose_is_not_frontmatter(self):
+        # Not YAML, or never closed: the "---" is a thematic break and what
+        # follows is read.
+        for body in ("---\nJust prose.\n---\n## Test plan\n",
+                     "---\n## Test plan\n- x\n"):
+            self.assertTrue(gates.has_test_plan(body), body)
+
     def test_heading_after_an_inline_comment_still_counts(self):
         # An inline comment that closes on its line hides only itself.
         self.assertTrue(gates.has_test_plan("## Test plan <!-- todo -->\n"))
@@ -818,6 +834,37 @@ class OpenKanbanActivity(unittest.TestCase):
         self.assertIn("## Activity", t.description)
         body = self.a.artifact_body(t)
         self.assertEqual(body, self.DESC + "\n")
+
+    def set_desc(self, desc):
+        path = Path(self.cfg.get("openkanban.config_dir")) / "tickets" / f"{self.PID}.json"
+        store = json.loads(path.read_text())
+        store["tickets"]["t1"]["description"] = desc
+        path.write_text(json.dumps(store))
+
+    def test_lookalike_activity_headings_still_start_a_log(self):
+        # A fenced `## Activity` example or an `### Activity` subheading is
+        # ticket content: `comment` must open a real log after it, which
+        # `artifact_body` then cuts.
+        for extra in ("\n\n```\n## Activity\n```", "\n\n### Activity\nnotes",
+                      "\n\n## Activity log\nnotes",
+                      "\n\n<!--\n## Activity\n-->"):
+            desc = self.DESC + extra
+            self.set_desc(desc)
+            self.a.comment("t1", "Self-review done.\n\n## Findings\nnone")
+            t = self.a.view("t1")
+            self.assertIn("\n\n## Activity\n- ", t.description, extra)
+            self.assertEqual(self.a.artifact_body(t), desc + "\n", extra)
+
+    def test_frontmatter_activity_comment_is_not_the_log(self):
+        # A YAML comment reading `## Activity` is frontmatter, not the log:
+        # nothing is cut, and `comment` opens a real log at the end.
+        desc = "---\n## Activity\n---\n" + self.DESC
+        self.set_desc(desc)
+        self.assertEqual(self.a.artifact_body(self.a.view("t1")), desc)
+        self.a.comment("t1", "first")
+        t = self.a.view("t1")
+        self.assertIn(self.DESC + "\n\n## Activity\n- ", t.description)
+        self.assertEqual(self.a.artifact_body(t), desc + "\n")
 
     def test_no_activity_returns_the_description(self):
         self.assertEqual(self.a.artifact_body(self.a.view("t1")), self.DESC)
