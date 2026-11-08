@@ -318,7 +318,9 @@ scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode
 - **Key** = issue number. **type**/**priority** from label conventions
   (`type_label_prefix` / `priority_label_prefix`, or labels matching `[issue_types]`).
 - **blocked_by/blocks** parsed from the body (`Blocked by #N` / `Blocks #N`);
-  `resolved` = referenced issue closed.
+  `resolved` = referenced issue closed. `tkt link` writes that line into the
+  source issue's body only, so after `tkt link 1 --to 2 --type blocks`
+  issue 2 reports no blockers (TKT-80).
 - **Queries are GitHub-native**, not JQL: projectv2 → Projects filter syntax
   (`gh project item-list --query`); labels → issue search (`gh issue list --search`).
 - **`list` is scoped to `[github].repo`.** Labels mode searches that repo only.
@@ -393,7 +395,9 @@ repo's store source). Fully local, no network.
   **Comments** append to the description under `## Activity`. **Relations** live in
   the ticket `meta` map, hierarchy included (`meta.children`, and `meta.parent`
   as one key); `tkt link --type child|parent` writes both edges, and drops the
-  child from any other ticket's `meta.children`, in one store write. **No time tracking** (worklog/lane-time no-op).
+  child from any other ticket's `meta.children`, in one store write.
+  `tkt link --type blocks|"is blocked by"|"depends on"` likewise writes both
+  `meta.blocks` and `meta.blocked_by` in one store write. **No time tracking** (worklog/lane-time no-op).
 - **Queries** use the shared JQL subset (client-side over the JSON store).
 
 Validation status: fully validated live against the real on-disk format (doctor,
@@ -451,6 +455,12 @@ from a `parent: KEY` scalar. `tkt link P --to C --type child` (or
 `C --to P --type parent`) writes both edges and drops C from any other
 parent's `children` (the whole board dir is scanned, so a one-sided edge is
 cleaned too); a hand edit or `tkt apply` writes only the file it touches.
+`tkt link A --to B --type blocks` (or `B --to A --type "is blocked by"`;
+`depends on` is an alias) writes both A's `blocks` and B's `blocked_by`,
+since `tkt blockers` reads only `blocked_by`. Both tickets must exist, and
+re-running a link changes nothing; a hand edit or `tkt apply` writes only
+the file it touches. Any file `link` writes has its frontmatter rewritten in
+canonical form (quotes dropped, lines without a `:` removed).
 Queries use a tiny JQL subset (`field = "v" [AND ...] [ORDER BY field DIR]`,
 `currentUser()`, `is EMPTY`) so the same `[queries]` strings read like Jira's.
 `ORDER BY priority` ranks by the priority order (`tkt cfg priorities`), not by
