@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -151,6 +152,45 @@ class MarkdownBlocksLink(_Base):
         before = self.snapshot()
         self.a.link("TKT-2", "TKT-1", "is blocked by")
         self.assertEqual(self.snapshot(), before)
+
+    # The snapshots above compare contents only, so a rewrite with identical
+    # text would still pass them. Count the writes instead.
+
+    def writes(self, *link_args):
+        """The keys `_write_raw` is called with during one `link`."""
+        with mock.patch.object(self.a, "_write_raw",
+                               wraps=self.a._write_raw) as spy:
+            self.a.link(*link_args)
+        return [c.args[0] for c in spy.call_args_list]
+
+    def test_relink_does_not_write(self):
+        self.write("TKT-1")
+        self.write("TKT-2")
+        self.a.link("TKT-1", "TKT-2", "blocks")
+        self.assertEqual(self.writes("TKT-1", "TKT-2", "blocks"), [])
+
+    def test_inverse_relink_does_not_write(self):
+        self.write("TKT-1")
+        self.write("TKT-2")
+        self.a.link("TKT-1", "TKT-2", "blocks")
+        self.assertEqual(self.writes("TKT-2", "TKT-1", "is blocked by"), [])
+
+    def test_first_link_writes_each_file_once(self):
+        # Control for the two above: a new edge writes both files, once each.
+        self.write("TKT-1")
+        self.write("TKT-2")
+        self.assertEqual(self.writes("TKT-1", "TKT-2", "blocks"),
+                         ["TKT-1", "TKT-2"])
+
+    def test_repairing_one_side_writes_only_that_file(self):
+        self.write("TKT-1", ["blocks: [TKT-2]"])
+        self.write("TKT-2")
+        self.assertEqual(self.writes("TKT-1", "TKT-2", "blocks"), ["TKT-2"])
+
+    def test_repairing_other_side_writes_only_that_file(self):
+        self.write("TKT-1")
+        self.write("TKT-2", ["blocked_by: [TKT-1]"])
+        self.assertEqual(self.writes("TKT-1", "TKT-2", "blocks"), ["TKT-1"])
 
     # ---- nothing half-written -----------------------------------------------
 
