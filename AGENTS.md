@@ -305,7 +305,10 @@ writes nothing, and exits 1 if any would go. Guarantees:
   tampered manifest cannot reach other files.
 - A retired path that is the same file as a live one (a case-only rename on a
   case-insensitive disk, a hard link, a base-layer dir linked to another
-  surface) is skipped, not deleted.
+  surface, or a link you added under a base-layer dir) is skipped, not
+  deleted. Links under base-layer dirs are followed while they stay inside
+  the repo. If part of the base layer cannot be read, prune deletes nothing
+  and reports each candidate as `kept (could not verify)`.
 - A file whose content changed since the pack wrote it is kept and reported
   (`kept (locally modified)`), and stays retired. So is a file that is now a
   symlink, or one prune cannot read. A file that cannot be deleted is warned

@@ -455,8 +455,7 @@ class SymlinkedDirsInsideTheTree(TempPack):
                       ".claude/skills/extra/SKILL.md", out)
 
     def test_per_skill_link_from_the_base_layer_never_prunes_base_files(self):
-        # Only one skill dir is a link; the walk does not enter linked
-        # dirs, so the recorded base path is what protects it.
+        # Only one skill dir is a link, and its base path is recorded.
         (self.consumer / ".claude/skills/extra").mkdir(parents=True)
         self.link(".agents/skills/extra", "../../.claude/skills/extra")
         self.sync()
@@ -466,6 +465,44 @@ class SymlinkedDirsInsideTheTree(TempPack):
         self.assertTrue(base.is_file())
         self.assertIn("skipped (same file as a live path): "
                       ".claude/skills/extra/SKILL.md", out)
+
+    def test_unrecorded_link_in_the_base_layer_protects_its_target(self):
+        # A link the consumer adds under a base dir, which no manifest
+        # records: only following it in the walk can protect the file.
+        self.sync()
+        self.link(".agents/skills/local-extra", "../../.claude/skills/extra")
+        shutil.rmtree(self.pack_root / "skills" / "extra")
+        _, out = self.sync(prune=True)
+        self.assertTrue(self.extra.is_file())
+        self.assertTrue((self.consumer / ".agents/skills/local-extra/SKILL.md").is_file())
+        self.assertIn("skipped (same file as a live path): "
+                      ".claude/skills/extra/SKILL.md", out)
+
+    def test_link_loop_in_the_base_layer_ends(self):
+        self.sync()
+        self.link(".agents/skills/loop", ".")
+        shutil.rmtree(self.pack_root / "skills" / "extra")
+        _, out = self.sync(prune=True)
+        self.assertIn("pruned: .claude/skills/extra/SKILL.md", out)
+
+    def test_link_leading_outside_the_tree_is_not_walked(self):
+        self.sync()
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        self.link(".agents/skills/out", str(outside))
+        walked = []
+        real_scandir = os.scandir
+
+        def spy(path, *a, **kw):
+            walked.append(Path(path))
+            return real_scandir(path, *a, **kw)
+
+        shutil.rmtree(self.pack_root / "skills" / "extra")
+        with mock.patch.object(pack.os, "scandir", spy):
+            _, out = self.sync(prune=True)
+        self.assertIn("pruned: .claude/skills/extra/SKILL.md", out)
+        self.assertTrue(walked)
+        self.assertNotIn(outside.resolve(), [w.resolve() for w in walked])
 
     def test_link_to_a_planned_tree_never_prunes_planned_files(self):
         self.sync()
@@ -495,6 +532,21 @@ class Robustness(TempPack):
         rc, out = self.sync(prune=True)
         self.assertEqual(rc, 0)
         self.assertIn("kept (unreadable): .claude/skills/extra/SKILL.md", out)
+
+    def test_unreadable_base_dir_keeps_every_candidate(self):
+        # Prune cannot tell whether a file in an unreadable base dir links
+        # to a candidate, so it keeps them all rather than guess.
+        self.retire_extra()
+        mine = self.consumer / ".agents/skills/mine"
+        mine.mkdir()
+        self.lock(mine, 0o000)
+        rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.extra.is_file())
+        self.assertIn("kept (could not verify): .claude/skills/extra/SKILL.md", out)
+        self.assertIn(".claude/skills/extra/SKILL.md", self.manifest()["retired"])
+        rc, out = self.sync(check=True, prune=True)
+        self.assertIn("kept, could not verify (", out)
 
     def test_failed_unlink_is_reported_and_stays_retired(self):
         self.retire_extra()
@@ -624,13 +676,13 @@ class PackOwnedOnly(TempPack):
         self.write_manifest(m)
         self.assertEqual(pack._base_prefixes(m), pack._BASE_DESTS)
         roots = []
-        real_walk = os.walk
+        real_walk = pack._walk_ids
 
-        def spy(top, *a, **kw):
-            roots.append(Path(top))
-            return real_walk(top, *a, **kw)
+        def spy(root, *a, **kw):
+            roots.append(Path(root))
+            return real_walk(root, *a, **kw)
 
-        with mock.patch.object(pack.os, "walk", spy):
+        with mock.patch.object(pack, "_walk_ids", spy):
             self.sync(check=True, prune=True)
             self.sync()
         self.assertTrue(roots)

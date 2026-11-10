@@ -397,15 +397,55 @@ def _file_id(path: Path) -> tuple[int, int] | None:
     return (st.st_dev, st.st_ino)
 
 
+def _walk_ids(root: Path, target: Path, ids: set) -> bool:
+    """Add the (st_dev, st_ino) of every file under `root` to `ids`. Dir
+    symlinks are followed when they stay inside `target` (a link a consumer
+    adds under a base-layer dir can point at a pack file); one leading
+    outside cannot reach a prune candidate, so it is skipped. Each real dir
+    is entered once, so a link loop ends. False when some dir or entry
+    could not be read: the set may then be incomplete."""
+    ok = True
+    seen: set = set()
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            if d != target and d.is_symlink():
+                d.resolve().relative_to(target)
+            st = os.stat(d)
+            key = (st.st_dev, st.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries = list(os.scandir(d))
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            continue
+        except OSError:
+            ok = False
+            continue
+        for e in entries:
+            try:
+                if e.is_dir(follow_symlinks=True):
+                    stack.append(Path(e.path))
+                else:
+                    fid = _file_id(Path(e.path))
+                    if fid:
+                        ids.add(fid)
+            except OSError:
+                ok = False
+    return ok
+
+
 def _live_ids(target: Path, planned: set[str], base_prefixes: list[str],
-              recorded: list[str] = ()) -> set:
+              recorded: list[str] = (), problems: list | None = None) -> set:
     """(st_dev, st_ino) of every file prune must never remove: each planned
     dest, AGENTS.md, the manifest, every recorded base-layer path, and every
     file under a base-layer dir. Comparing identities, not strings, catches
     the aliases a string check misses: a case-only difference on a
     case-insensitive disk, a hard link, or a symlinked dir. `os.stat`
-    follows links, so a recorded base path behind a per-dir symlink (which
-    the walk does not enter) is covered too."""
+    follows links, and the walk follows dir links that stay in the tree, so
+    a base path behind a symlink is covered whether recorded or not. A base
+    dir that could not be fully read is appended to `problems`."""
     ids = set()
     base_recorded = [r for r in recorded
                      if _canonical(r) and _is_base(r, base_prefixes)]
@@ -414,17 +454,13 @@ def _live_ids(target: Path, planned: set[str], base_prefixes: list[str],
         if fid:
             ids.add(fid)
     for prefix in base_prefixes:
-        root = target / prefix
-        for d, _dirs, files in os.walk(root, followlinks=False):
-            for name in files:
-                fid = _file_id(Path(d) / name)
-                if fid:
-                    ids.add(fid)
+        if not _walk_ids(target / prefix, target, ids) and problems is not None:
+            problems.append(prefix)
     return ids
 
 
-_BUCKETS = ("prune", "modified", "symlink", "unreadable", "unsafe", "foreign",
-            "notfile", "alias")
+_BUCKETS = ("prune", "modified", "symlink", "unreadable", "unverified",
+            "unsafe", "foreign", "notfile", "alias")
 
 
 def _locate(target: Path, rel) -> tuple[str | None, Path | None]:
@@ -460,8 +496,8 @@ def _classify_one(target: Path, rel: str, sha, live: set) -> str | None:
     return "prune" if isinstance(sha, str) and cur == sha else "modified"
 
 
-def _classify_retired(target: Path, candidates: dict,
-                      live: set | None = None) -> dict[str, list[str]]:
+def _classify_retired(target: Path, candidates: dict, live: set | None = None,
+                      verified: bool = True) -> dict[str, list[str]]:
     """Sort candidates into prune (unchanged since the pack wrote it), kept
     (locally modified, symlink, unreadable) and skipped (unsafe path, not a
     file, same file as a live path). Vanished files are dropped: there is
@@ -474,6 +510,10 @@ def _classify_retired(target: Path, candidates: dict,
         except OSError:
             # e.g. a parent dir with no permissions: keep it, carry it on.
             bucket = "unreadable"
+        if bucket == "prune" and not verified:
+            # Part of the base layer could not be read, so this file may
+            # still be in use there: keep it rather than guess.
+            bucket = "unverified"
         if bucket:
             res[bucket].append(rel)
     return res
@@ -759,10 +799,12 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     planned = {r for _, r in plan}
     base_prefixes = _base_prefixes(old)
     candidates = _prune_candidates(old, old_files, planned)
+    live_problems: list[str] = []
     live = (_live_ids(target, planned, base_prefixes,
-                      list(old_files) + list(old_base_retired))
+                      list(old_files) + list(old_base_retired), live_problems)
             if candidates else set())
-    retired = _classify_retired(target, candidates, live)
+    retired = _classify_retired(target, candidates, live,
+                                verified=not live_problems)
     new_base_retired = _base_retired(target, old, old_files, planned, base_prefixes)
 
     # AGENTS.md managed block.
@@ -794,6 +836,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                                ("kept, locally modified", "modified"),
                                ("kept, symlink", "symlink"),
                                ("kept, unreadable", "unreadable"),
+                               ("kept, could not verify", "unverified"),
                                ("skipped, unsafe manifest path", "unsafe"),
                                ("skipped, not a pack path", "foreign"),
                                ("skipped, not a file", "notfile"),
@@ -820,7 +863,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     # Retired files: delete (with --prune) or carry forward under `retired`.
     pruned = 0
     prune_failed = 0
-    keep = retired["modified"] + retired["symlink"] + retired["unreadable"]
+    keep = (retired["modified"] + retired["symlink"] + retired["unreadable"]
+            + retired["unverified"])
     if prune:
         for rel in retired["prune"]:
             try:
@@ -841,9 +885,13 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             print(f"pruned: {rel}")
             pruned += 1
         for label, key in (("locally modified", "modified"), ("symlink", "symlink"),
-                           ("unreadable", "unreadable")):
+                           ("unreadable", "unreadable"),
+                           ("could not verify", "unverified")):
             for rel in retired[key]:
                 print(f"kept ({label}): {rel}")
+        for prefix in live_problems:
+            print(f"warning: could not fully read {prefix}; retired files kept "
+                  f"until it is readable", file=sys.stderr)
     else:
         keep += retired["prune"]
     for rel in retired["unsafe"]:
