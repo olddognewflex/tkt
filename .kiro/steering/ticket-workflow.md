@@ -27,7 +27,10 @@ Check a ticket's `type_class` to determine the correct flow:
 CLASS=$(tkt view "$KEY" --json | jq -r .type_class)
 ```
 
-### `full_sdlc` (Story, Bug)
+`[issue_types]` decides which types fall in each set. The lists below are the
+example configs' defaults; a project can move a type, such as Sub-task.
+
+### `full_sdlc` (by default Story, Bug)
 
 Full pipeline:
 1. `select-ticket` — pick from tiered queries
@@ -42,7 +45,7 @@ Full pipeline:
 10. Promote to `qa_ready` (human QA gate — agent stops here)
 11. `deploy-ready` — merge, watch staging, gate production
 
-### `deliverable` (Task, Sub-task, Chore, Epic, Spike)
+### `deliverable` (by default Task, Sub-task, Chore, Epic, Spike)
 
 Short-circuit:
 1. `select-ticket` / `triage-ticket` (same as above)

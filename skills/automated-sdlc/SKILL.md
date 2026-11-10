@@ -133,9 +133,11 @@ case "$CLASS" in
 esac
 ```
 
-`full_sdlc` (Story/Bug) → full pipeline. `deliverable` (Task/Sub-task/Chore/Epic/
-Spike) → **invoke `complete-deliverable`, then stop**. The `full_sdlc` /
-`deliverable` sets are defined in `[issue_types]`.
+`full_sdlc` → full pipeline. `deliverable` → **invoke `complete-deliverable`,
+then stop**. `[issue_types]` decides which types fall in each set, so route on
+`type_class`, never on the type name. The example configs put Story and Bug in
+`full_sdlc` and Task, Sub-task, Chore, Epic and Spike in `deliverable`. A
+project whose sub-tasks ship code moves Sub-task to `full_sdlc`.
 
 ### Phase 2: Plan (→ `sdlc-planner`)
 
