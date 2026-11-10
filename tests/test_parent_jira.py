@@ -139,12 +139,13 @@ class RestList(unittest.TestCase):
 
 
 class AcliList(unittest.TestCase):
-    def test_search_requests_parent_and_maps_it(self):
+    def test_search_does_not_request_parent(self):
+        # acli search rejects `parent` ("field 'parent' is not allowed") and
+        # fails the whole list, so acli-mode list leaves it to `view`.
         a = StubAcliJira()
-        (t,) = a.list(tier=1)
-        self.assertEqual(t.parent, "PROJ-1")
+        a.list(tier=1)
         (search,) = a.searches()
-        self.assertIn("parent", search[search.index("--fields") + 1].split(","))
+        self.assertNotIn("parent", search[search.index("--fields") + 1].split(","))
 
 
 class View(unittest.TestCase):

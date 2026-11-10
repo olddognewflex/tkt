@@ -17,7 +17,12 @@ class Ticket:
     status: str = ""                 # provider lane name, verbatim
     status_role: str = ""            # canonical role resolved from config
     type_class: str = ""             # "full_sdlc" | "deliverable" | "unknown"
+    project: str = ""                # project key (Jira "PROJ"); "" when none
+    project_name: str = ""           # project display name; "" when none
     assignee: str = ""
+    assignee_id: str = ""            # provider account id; "" when unknown
+    reporter: str = ""               # display name, else email; "" when unknown
+    reporter_id: str = ""            # provider account id; "" when unknown
     priority: str = ""
     # Agent execution state, for boards that surface "is an agent working this,
     # and what is it doing": "" (none) | idle | processing | waiting | done |
@@ -32,6 +37,10 @@ class Ticket:
     due: str | None = None
     scheduled: str | None = None
     completed: str | None = None
+    # When the ticket was created / last updated, ISO-8601 UTC as iso_utc()
+    # writes it (`YYYY-MM-DDTHH:MM:SS.mmmZ`); None when the backend has none.
+    created: str | None = None
+    updated: str | None = None
     url: str = ""
     acceptance: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)

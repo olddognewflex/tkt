@@ -74,6 +74,10 @@ Jira non-billable worklogs (native property, Tempo only under
 `provider = "tempo"`, the `worklog (REST)` doctor row; `test_jira_worklog.py`),
 Jira `list` paging every search result under both the token and
 offset contracts (`test_jira_search.py`),
+the identity fields (`project`, `reporter`, account ids, `created` /
+`updated`) Jira fills on `list` and `view`, the acli search allow-list,
+their lenient timestamp
+normalization and their `view` rendering (`test_jira_identity.py`),
 Jira blocker-link direction (`test_jira_blockers.py`,
 `test_jira_blockers_edges.py`), Jira JQL project scoping (`test_jira_jql.py`,
 `test_jira_jql_edges.py`), the shared JQL-subset evaluator (`test_query.py`),
@@ -223,6 +227,14 @@ parent — are filled on `view` only. Every adapter's `view` takes
 read neither edge — `blockers`, `create`, `tkt agents --enrich` — pass it. On
 the local boards (markdown, openkanban) `tkt link --type child|parent` writes
 both edges so they cannot drift.
+The identity fields `project` / `project_name` (key and display name),
+`assignee_id`, `reporter` / `reporter_id` (name and account id) and `created` /
+`updated` (canonical UTC from `schema.iso_utc`, `YYYY-MM-DDTHH:MM:SS.mmmZ`) are
+filled by jira only, on `view` and REST-mode `list` (acli search rejects
+`project`, `created`, `updated` and `parent`, so acli-mode `list` leaves
+those at their defaults); jira normalizes them leniently
+(a missing, null or offset-less value is the default, never an error). Every
+other adapter leaves them at `""` / `None`.
 Adapters that can't store a field leave it at its default rather than faking it.
 
 ## Adding a provider
