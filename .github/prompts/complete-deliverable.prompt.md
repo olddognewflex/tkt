@@ -6,7 +6,7 @@ tools: ['terminal', 'file']
 
 # Complete Deliverable
 
-For tickets whose `type_class` is `deliverable` (Task, Sub-task, Epic, Chore, Spike). Produces the artifact, comments the link, logs lane time, and transitions to `done`. Ticketing via `tkt`.
+For tickets whose `type_class` is `deliverable` (by default Task, Sub-task, Epic, Chore, Spike; `[issue_types]` decides). Produces the artifact, comments the link, logs lane time, and transitions to `done`. Ticketing via `tkt`.
 
 ## Steps
 

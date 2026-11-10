@@ -1,7 +1,7 @@
 description = "Short-circuit flow for deliverable ticket types via tkt."
 
 prompt = """
-For tickets whose `type_class` is `deliverable` (Task, Sub-task, Epic, Chore, Spike). Produce the artifact, comment the link, log lane time, and transition to `done`. All access via `tkt`.
+For tickets whose `type_class` is `deliverable` (by default Task, Sub-task, Epic, Chore, Spike; `[issue_types]` decides). Produce the artifact, comment the link, log lane time, and transition to `done`. All access via `tkt`.
 
 Steps:
 1. Read `tkt view "$KEY" --json` — classify deliverable: config change, ADR, design doc, spike, demo, POC, runbook, other

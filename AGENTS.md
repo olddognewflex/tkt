@@ -48,8 +48,11 @@ separate harness-specific files).
 4. **Respect `type_class` routing.**
    - `full_sdlc` (Story/Bug): runs select → triage → plan → implement →
      self-review → open-pr → respond-to-review → deploy-ready.
-   - `deliverable` (Task/Epic/Spike/Chore): short-circuits via
+   - `deliverable` (Task/Sub-task/Epic/Spike/Chore): short-circuits via
      `complete-deliverable` straight to `done`.
+   - Those lists are the example configs' defaults. `[issue_types]` decides
+     which types fall in each set, and a project can move one, such as
+     Sub-task, so branch on `type_class`, not the type name.
 
 5. **`tkt worklog` / `tkt lane-time` are safe no-ops.**
    - When `[timetracking].provider = "none"`, these return empty worklogs.

@@ -1,6 +1,6 @@
 ---
 name: complete-deliverable
-description: 'Short-circuit flow for non-PR ticket types (Task, Sub-task, Epic, Chore, Spike). Produces the deliverable, comments with the artifact link, logs lane time, and transitions straight to Done. Provider-agnostic via tkt.'
+description: 'Short-circuit flow for tickets whose type_class is deliverable (by default Task, Sub-task, Epic, Chore, Spike; [issue_types] decides). Produces the deliverable, comments with the artifact link, logs lane time, and transitions straight to Done. Provider-agnostic via tkt.'
 model_tier: standard
 ---
 
@@ -52,8 +52,9 @@ tkt edit "$KEY" --agent-status done
   single self-review. Then comment + `tkt transition "$KEY" done`. Do not route to
   `qa_ready`. `open-pr` auto-detects the missing review lane (via `type_class`) and
   leaves the ticket in `in_progress` until this step.
-- **Sub-task under a parent Story**: complete and mark the sub-task `done`. Do not
-  transition the parent.
+- **Sub-task under a parent Story** (only where `[issue_types]` makes Sub-task a
+  deliverable): complete and mark the sub-task `done`. Do not transition the
+  parent.
 - **Spike with no concrete next step**: comment findings + a recommended follow-up
   ticket, mark `done`. The follow-up is a separate Story.
 - **Blocked deliverable**: `tkt worklog "$KEY" --from-role in_progress` then

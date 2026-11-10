@@ -618,10 +618,10 @@ Story = "problem-proposal"   # ticket bodies only
 - `off` never runs the checker.
 
 `done` is gated too, and the default `standard` preset expects a Story-shaped
-body (thesis, `## Summary`, `## Behavior`). Deliverable types (Task, Chore,
-Sub-task, Spike) that `complete-deliverable` moves straight to `done`
-usually don't have one, so give them a `presets_by_type` entry before
-turning on `strict`.
+body (thesis, `## Summary`, `## Behavior`). Short-bodied types (usually Task,
+Chore, Sub-task and Spike) don't have one, whichever flow `[issue_types]`
+sends them down, so give them a `presets_by_type` entry before turning on
+`strict`.
 
 Unknown keys and wrong types are a config error (exit 2), and `tkt doctor`
 reports the table in an `enforcement` row: FAIL for a bad table, a preset
