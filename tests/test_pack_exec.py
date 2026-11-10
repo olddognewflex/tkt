@@ -9,9 +9,9 @@ The subtle half: every consumer synced before this fix already has the right
 *bytes* and the wrong *mode*, and the idempotent path skipped any file whose
 content matched. A fix that only chmods on write would never repair them.
 
-The real pack ships no executable today (0 of 171 planned files), so these
-tests plant one in a temp pack by pointing `core.pack.PACK_ROOT` at it; an
-assertion over the real pack would pass vacuously over zero files. Fully
+These tests plant an executable in a temp pack by pointing
+`core.pack.PACK_ROOT` at it, so they do not depend on what the real pack
+happens to ship (today only the base layer's enforcement checker). Fully
 offline. Run from the repo root:
 
     python3 -m unittest tests.test_pack_exec

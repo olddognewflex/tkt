@@ -7,7 +7,8 @@ count, which read as unblocked.
 
 These tests run step 2's shell block, extracted from the canonical SKILL.md,
 under every available shell against a stub `tkt` that plays back a scripted
-exit code and output per call. The mirrors are checked for the same rules.
+exit code and output per call. The condensed mirrors are checked for the
+same rules; the full copies are derived at sync time (see test_pack_base.py).
 Needs `jq`. Run from the repo root:
 
     python3 -m unittest tests.test_select_ticket
@@ -26,8 +27,6 @@ from pathlib import Path
 ROOT = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CANONICAL = ROOT / "skills/select-ticket/SKILL.md"
 
-FULL_COPIES = [".agents/skills/select-ticket/SKILL.md",
-               ".kiro/skills/select-ticket/SKILL.md"]
 CONDENSED_MIRRORS = [
     ".agents/workflows/select-ticket.md",
     ".augment/commands/select-ticket.md",
@@ -241,12 +240,6 @@ class Step2(unittest.TestCase):
 
 
 class Mirrors(unittest.TestCase):
-    def test_full_copies_match_canonical(self):
-        canonical = CANONICAL.read_bytes()
-        for rel in FULL_COPIES:
-            with self.subTest(copy=rel):
-                self.assertEqual((ROOT / rel).read_bytes(), canonical)
-
     def test_condensed_mirrors_state_both_rules(self):
         for rel in CONDENSED_MIRRORS:
             with self.subTest(mirror=rel):

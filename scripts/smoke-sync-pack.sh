@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for `tkt sync-pack`. Exercises fresh install, idempotency, local
 # modification restore + warning, --check exit status, --all-harnesses,
-# AGENTS.md custom-content preservation, and named/sticky harness selection.
+# AGENTS.md custom-content preservation, named/sticky harness selection, the
+# exec bit, and the always-on base layer (incl. under a narrow selection).
 # Prints PASS/FAIL per case.
 set -euo pipefail
 
@@ -23,16 +24,47 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 # Expected counts are derived from the pack, not hardcoded, so adding a skill
 # does not require editing this file. sync-pack never ships `sync-skills`.
 want_skills=$(find "$PACK/skills" -maxdepth 1 -mindepth 1 -type d ! -name sync-skills | wc -l | tr -d ' ')
 want_prompts=$(find "$PACK/.github/prompts" -maxdepth 1 -type f | wc -l | tr -d ' ')
-want_kiro=$(find "$PACK/.kiro/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+# The skill mirrors are derived from canonical skills/, never stored.
+want_kiro=$want_skills
 want_agents=$(find "$PACK/agents" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
 want_steer=$(find "$PACK/.kiro/steering" -maxdepth 1 -type f | wc -l | tr -d ' ')
+want_wf=$(find "$PACK/.agents/workflows" -maxdepth 1 -type f | wc -l | tr -d ' ')
+want_enf=$(find "$PACK/enforcement" -maxdepth 1 -type f ! -name '*.test.mjs' | wc -l | tr -d ' ')
+
+# check_base DIR: the base layer is present and matches the pack. Prints
+# what is wrong; returns 1 if anything is.
+check_base() {
+  local d="$1" bad=0 n
+  n=$(find "$d/.agents/skills" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" = "$want_skills" ] || { bad=1; echo "  .agents/skills=$n (want $want_skills)"; }
+  n=$(find "$d/.agents/workflows" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" = "$want_wf" ] || { bad=1; echo "  .agents/workflows=$n (want $want_wf)"; }
+  n=$(find "$d/.sdlc/enforcement" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" = "$want_enf" ] || { bad=1; echo "  .sdlc/enforcement=$n (want $want_enf)"; }
+  diff -rq -x sync-skills "$PACK/skills" "$d/.agents/skills" >/dev/null \
+    || { bad=1; echo "  .agents/skills differs from canonical skills/"; }
+  [ -z "$(find "$d/.sdlc/enforcement" -name '*.test.mjs' 2>/dev/null)" ] \
+    || { bad=1; echo "  enforcement self-tests shipped"; }
+  [ -x "$d/.sdlc/enforcement/check-artifact-format.mjs" ] \
+    || { bad=1; echo "  checker not executable"; }
+  if [ -d "$PACK/standards" ]; then
+    n=$(find "$d/docs/sdlc" -type f 2>/dev/null | wc -l | tr -d ' ')
+    [ "$n" = "$(find "$PACK/standards" -type f | wc -l | tr -d ' ')" ] \
+      || { bad=1; echo "  docs/sdlc=$n does not match standards/"; }
+  else
+    [ ! -e "$d/docs/sdlc" ] || { bad=1; echo "  docs/sdlc exists without standards/"; }
+  fi
+  grep -q '"base_layer"' "$d/.sdlc/pack-manifest.json" \
+    || { bad=1; echo "  manifest has no base_layer"; }
+  return "$bad"
+}
 
 "$TKT" sync-pack --dir "$C" >/dev/null
 skills_n=$(find "$C/.claude/skills" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
@@ -46,9 +78,12 @@ ok=1
 [ "$kiro_n" = "$want_kiro" ] || { ok=0; echo "  .kiro/skills=$kiro_n (want $want_kiro)"; }
 [ "$agents_n" = "$want_agents" ] || { ok=0; echo "  .claude/agents=$agents_n (want $want_agents)"; }
 [ "$steer_n" = "$want_steer" ] || { ok=0; echo "  .kiro/steering=$steer_n (want $want_steer)"; }
+diff -rq -x sync-skills "$PACK/skills" "$C/.kiro/skills" >/dev/null \
+  || { ok=0; echo "  .kiro/skills differs from canonical skills/"; }
+check_base "$C" || ok=0
 [ -f "$C/.sdlc/pack-manifest.json" ] || { ok=0; echo "  manifest missing"; }
 grep -q "tkt-pack:begin" "$C/AGENTS.md" || { ok=0; echo "  AGENTS.md markers missing"; }
-[ "$ok" = "1" ] && pass "case1 fresh install (skills=$want_skills prompts=$want_prompts kiro=$want_kiro agents=$want_agents steering=$want_steer manifest+markers)" \
+[ "$ok" = "1" ] && pass "case1 fresh install (skills=$want_skills prompts=$want_prompts kiro=$want_kiro agents=$want_agents steering=$want_steer workflows=$want_wf enforcement=$want_enf manifest+markers)" \
                 || fail "case1 fresh install"
 
 # ---- case 2: idempotent second run leaves git clean -------------------------
@@ -158,9 +193,10 @@ else
 fi
 
 # ---- case 10: the exec bit survives the sync, and is repaired --------------
-# The real pack ships no executable today, so an assertion over it would pass
-# over zero files. Plant one in a copy of the pack and sync from that copy
-# (tkt locates its pack relative to its own script, so the copy is the pack).
+# Plant an executable in a copy of the pack and sync from that copy, so the
+# case does not depend on what the real pack ships (today only the base
+# layer's checker). tkt locates its pack relative to its own script, so the
+# copy is the pack.
 P7="$(mktemp -d)"; C7="$(mktemp -d)"
 git_init "$C7"
 # Copy exactly the working set (tracked + untracked-but-not-ignored), not
@@ -187,6 +223,16 @@ if [ "$fresh" = 0 ] && [ "$rc10" != 0 ] && echo "$out10" | grep -q "not-executab
 else
   fail "case10 exec bit (fresh=$fresh check_rc=$rc10 repaired=$repaired): $out10 ${err10:+[first sync stderr: $err10]}"
 fi
+
+# ---- case 11: a narrow selection still gets the base layer ------------------
+C8="$(mktemp -d)"
+"$TKT" sync-pack cursor --dir "$C8" >/dev/null
+ok=1
+check_base "$C8" || ok=0
+[ ! -e "$C8/.claude" ] || { ok=0; echo "  .claude installed for a cursor-only sync"; }
+[ -d "$C8/.cursor/commands" ] || { ok=0; echo "  .cursor/commands missing"; }
+[ "$ok" = "1" ] && pass "case11 cursor-only sync still installs the base layer" \
+                || fail "case11 narrow selection base layer"
 
 echo
 if [ "$fails" = "0" ]; then

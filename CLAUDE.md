@@ -58,7 +58,8 @@ stubbing `_win_query_process`;
 driver; and the exec-bit check covers *this repo's index only*. The mode bits
 `sync-pack` writes into a *consumer* tree are covered separately, by
 `smoke-sync-pack.sh` case 10 and `tests/test_pack_exec.py` — both plant their own
-executable, since the real pack ships none today. `tests/` is a stdlib
+executable, so they don't depend on what the real pack ships (today only
+the base layer's enforcement checker). `tests/` is a stdlib
 `unittest` suite covering the run
 driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
@@ -87,7 +88,8 @@ markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`
 `tkt list --all-projects` dropping project scoping on markdown and Jira
 and being accepted by every adapter (`test_list_all_projects.py`),
 markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
-`sync-pack`'s exec-bit handling (`test_pack_exec.py`), `respond-to-review`
+`sync-pack`'s exec-bit handling (`test_pack_exec.py`), its always-on base
+layer and derived skill mirrors (`test_pack_base.py`), `respond-to-review`
 replying in-thread across the skill and every mirror
 (`test_respond_to_review.py`), `Ticket.children` normalization in every
 adapter and its `view` rendering (`test_children_jira.py`,
@@ -153,7 +155,12 @@ Two layers, connected only by the verb contract and the normalized schema:
     writes outside recorded paths, and is idempotent. `_HARNESSES` is the registry of
     named harnesses → (pack source, consumer dest) dirs; the installed set is
     additive and persisted in the manifest's `harnesses` list, so a bare re-run
-    refreshes every harness the project ever added.
+    refreshes every harness the project ever added. `_BASE_LAYER` ships on
+    every sync regardless (`.agents/skills`, `.agents/workflows`,
+    `standards/` → `docs/sdlc/`, `enforcement/` → `.sdlc/enforcement/`) and
+    is recorded as `base_layer` so a prune skips it. The `.agents/skills`
+    and `.kiro/skills` mirrors are derived from `skills/` at sync time, not
+    stored in this repo.
   - `__init__.py` / `version.py` — `__version__` is the single place the release
     number is written; bump it when releasing. `version.py` builds what
     `tkt --version` prints (number + own-checkout `git describe`), lazily.

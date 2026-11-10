@@ -41,7 +41,7 @@ tkt doctor
 tkt sync-pack
 
 # e) Commit everything sync-pack and init produced.
-git add .sdlc/config.toml .sdlc/pack-manifest.json .claude .github .kiro AGENTS.md
+git add .sdlc/config.toml .sdlc/pack-manifest.json .sdlc/enforcement .claude .github .kiro .agents AGENTS.md
 git commit -m "chore: install SDLC skill pack"
 ```
 
@@ -57,18 +57,35 @@ before you install.
 
 ## 3. What gets installed
 
-`tkt sync-pack` copies a **default harness set**. Name any other harness to add
-it, or use `--all-harnesses` for the whole curated long tail, path-verbatim.
+Every sync installs the **base layer**, then a **default harness set**. Name any
+other harness to add it, or use `--all-harnesses` for the whole curated long
+tail, path-verbatim.
+
+### Base layer (always)
+
+| Pack source | Destination | Notes |
+|---|---|---|
+| `skills/` | `.agents/skills/` | Agent Skills mirror, derived from `skills/` at sync time |
+| `.agents/workflows/` | `.agents/workflows/` | condensed workflows (Antigravity, Junie) |
+| `standards/` | `docs/sdlc/` | shipped once the pack has a `standards/` tree |
+| `enforcement/` | `.sdlc/enforcement/` | checker scripts for consumer CI and hooks; `*.test.mjs` left out |
+
+Codex reads the base layer plus `AGENTS.md`, so it needs no harness of its own.
+Harness selection only adds surfaces on top: no selection, however narrow, drops
+the base layer. The manifest records these dirs under `base_layer`, and a prune
+never removes them.
+
+### Harnesses
 
 | Name | Destination | Harness | Default |
 |---|---|---|:---:|
 | `claude` | `.claude/skills/` (19 skills) + `.claude/agents/` (6 subagents) | Claude Code | ✓ |
 | `copilot` | `.github/prompts/` | GitHub Copilot | ✓ |
-| `kiro` | `.kiro/skills/` + `.kiro/steering/` + `.kiro/agents/` | AWS Kiro (skills, project conventions, sub-agents) | ✓ |
+| `kiro` | `.kiro/skills/` (derived from `skills/`) + `.kiro/steering/` + `.kiro/agents/` | AWS Kiro (skills, project conventions, sub-agents) | ✓ |
 | — | `AGENTS.md` managed block (`<!-- tkt-pack:begin/end -->`) | Universal fallback (Codex, Amp, Devin, …) — always written | ✓ |
 | `cursor` | `.cursor/skills/` + `.cursor/commands/` | Cursor | |
 | `gemini` | `.gemini/commands/` | Gemini CLI | |
-| `agents` | `.agents/skills/` + `.agents/workflows/` | Antigravity, Junie, Codex | |
+| `agents` | — (served by the base layer; alone, installs only the base layer) | Antigravity, Junie, Codex | |
 | `windsurf` | `.windsurf/workflows/` | Windsurf | |
 | `cline` | `.clinerules/workflows/` | Cline | |
 | `continue` | `.continue/prompts/` | Continue | |
@@ -102,6 +119,7 @@ Notes:
 - The `AGENTS.md` block is spliced in between markers; content outside the markers
   is preserved verbatim. Don't hand-edit inside the markers — it is regenerated.
 - Only directories that exist in the pack are copied; empty ones are skipped.
+  That is why `docs/sdlc/` does not appear until the pack ships `standards/`.
 
 ## 4. Updating
 
@@ -118,6 +136,9 @@ Check for drift without writing anything:
 ```sh
 tkt sync-pack --check    # lists missing / locally-modified / out-of-date / not-executable; exit 1 if any
 ```
+
+After a pack update that adds files (such as a new base-layer dir), `--check`
+lists them as **missing** until you re-run `tkt sync-pack` once.
 
 `--check` reports four buckets: **missing** (pack file not installed here),
 **locally-modified** (installed file changed since the last sync),
