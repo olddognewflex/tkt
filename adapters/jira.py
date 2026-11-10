@@ -53,6 +53,30 @@ def _parse_jira_ts(value, what: str) -> datetime:
     raise ProviderError(f"Jira returned an unparseable timestamp for {what}: {value!r}")
 
 
+def _jira_ts_or_none(value) -> str | None:
+    """A Jira timestamp (`2026-09-27T06:28:36.123+0000`) in canonical UTC
+    (see `iso_utc`), or None when it is missing, unparseable or carries no
+    offset. Lenient on purpose, unlike `_parse_jira_ts`: a ticket's
+    `created` / `updated` are descriptive, and one odd value must not make
+    the whole ticket unreadable."""
+    try:
+        # OverflowError: a boundary year (0001, 9999) shifted past UTC.
+        return iso_utc(_parse_jira_ts(value, "ticket timestamp"))
+    except (ProviderError, OverflowError):
+        return None
+
+
+def _person(value) -> tuple[str, str]:
+    """(display name or email, accountId) of a Jira user field; ("", "")
+    when it is unset, null, or not an object."""
+    if not isinstance(value, dict):
+        return "", ""
+    name = value.get("displayName") or value.get("emailAddress") or ""
+    account = value.get("accountId") or ""
+    return ((name if isinstance(name, str) else ""),
+            (account if isinstance(account, str) else ""))
+
+
 def _adf_to_text(node) -> str:
     """Flatten Atlassian Document Format to plaintext."""
     if node is None:
@@ -540,6 +564,10 @@ class JiraAdapter(Adapter):
         # `view(hierarchy=False)` carry it too.
         parent = f.get("parent")
         parent = (parent.get("key") or "") if isinstance(parent, dict) else ""
+        project = f.get("project")
+        project = project if isinstance(project, dict) else {}
+        assignee, assignee_id = _person(f.get("assignee"))
+        reporter, reporter_id = _person(f.get("reporter"))
         return Ticket(
             key=key,
             type=issue_type,
@@ -548,8 +576,12 @@ class JiraAdapter(Adapter):
             status=status,
             status_role=self.config.lane_to_role(status),
             type_class=self.config.type_class(issue_type),
-            assignee=((f.get("assignee") or {}).get("displayName")
-                      or (f.get("assignee") or {}).get("emailAddress") or ""),
+            project=str(project.get("key") or ""),
+            project_name=str(project.get("name") or ""),
+            assignee=assignee,
+            assignee_id=assignee_id,
+            reporter=reporter,
+            reporter_id=reporter_id,
             priority=(f.get("priority") or {}).get("name", ""),
             # Native Jira dates: duedate is YYYY-MM-DD; resolutiondate is a
             # datetime we trim to its date. Jira has no native "scheduled"
@@ -557,6 +589,8 @@ class JiraAdapter(Adapter):
             due=(f.get("duedate") or None),
             scheduled=None,
             completed=((f.get("resolutiondate") or "")[:10] or None),
+            created=_jira_ts_or_none(f.get("created")),
+            updated=_jira_ts_or_none(f.get("updated")),
             url=f"https://{self._site_for_url()}/browse/{key}",
             acceptance=self._extract_acceptance(desc),
             labels=list(f.get("labels", []) or []),
@@ -642,7 +676,8 @@ class JiraAdapter(Adapter):
             scope = "global"
         jql = self._full_jql(self.config.query(tier=tier, name=query), scope)
         if self.have_rest:
-            fields = "priority,assignee,summary,issuelinks,labels,components,issuetype,status,parent"
+            fields = ("priority,assignee,summary,issuelinks,labels,components,"
+                      "issuetype,status,parent,project,reporter,created,updated")
             return [self._to_ticket(i) for i in self._search_issues(jql, fields)]
         # acli search only allows navigable fields — it rejects issuelinks /
         # components, and never returns issuelinks regardless. So list results
@@ -651,7 +686,8 @@ class JiraAdapter(Adapter):
         # issuelinks ARE available). REST mode (above) returns the full set.
         # `--paginate` fetches every match; a `--limit` would silently drop
         # candidates past it, as the old 25 did.
-        fields = "priority,assignee,summary,labels,issuetype,status,parent"
+        fields = ("priority,assignee,summary,labels,issuetype,status,parent,"
+                  "project,reporter,created,updated")
         issues = self._acli_json("jira", "workitem", "search", "--jql", jql,
                                  "--fields", fields, "--paginate")
         return [self._to_ticket(i) for i in (issues or [])]

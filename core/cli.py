@@ -16,12 +16,18 @@ from .schema import ActivityEvent, Check, Ticket
 def _print_ticket_human(t: Ticket) -> None:
     print(f"{t.key}  [{t.type}/{t.type_class}]  {t.priority}")
     print(f"  status:   {t.status}  (role: {t.status_role})")
+    if t.project or t.project_name:
+        name = f" ({t.project_name})" if t.project and t.project_name else ""
+        print(f"  project:  {t.project or t.project_name}{name}")
     print(f"  assignee: {t.assignee or '-'}")
+    if t.reporter:
+        print(f"  reporter: {t.reporter}")
     print(f"  summary:  {t.summary}")
     if t.labels:
         print(f"  labels:   {', '.join(t.labels)}")
     dates = [f"{n}={v}" for n, v in
-             (("due", t.due), ("scheduled", t.scheduled), ("completed", t.completed)) if v]
+             (("due", t.due), ("scheduled", t.scheduled), ("completed", t.completed),
+              ("created", t.created), ("updated", t.updated)) if v]
     if dates:
         print(f"  dates:    {', '.join(dates)}")
     unresolved = t.unresolved_blockers()
