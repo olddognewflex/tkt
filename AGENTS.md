@@ -249,8 +249,8 @@ Every sync installs the base layer, whatever harnesses are selected:
 | `enforcement/` (minus `*.test.mjs`) | `.sdlc/enforcement/` |
 
 Codex needs no surface of its own: it reads the base layer plus `AGENTS.md`.
-The manifest records these dest dirs under `base_layer`, and a prune never
-removes them. `standards/` ships once the pack has one; until then that row is
+The manifest records these dest dirs under `base_layer`, so a future
+`--prune` (TKT-22) will skip them. `standards/` ships once the pack has one; until then that row is
 a no-op. The checker ships executable, for consumer CI and hooks; `tkt`'s own
 format gates always run the copy in `tkt`'s checkout.
 
@@ -259,7 +259,8 @@ format gates always run the copy in `tkt`'s checkout.
 A bare `tkt sync-pack` installs the base layer plus the default harnesses
 (`claude`, `copilot`, `kiro`). Harness selection only adds surfaces on top of
 the base layer; it can never remove it. `agents` is accepted for old
-manifests and scripts, and on its own means "base layer only". Name others to add them to an already-synced project:
+manifests and scripts, and on its own means "base layer only". Name others
+to add them to an already-synced project:
 
 ```sh
 tkt sync-pack cursor              # add Cursor to this repo

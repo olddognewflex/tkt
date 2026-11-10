@@ -23,7 +23,7 @@ Guarantees:
 Base layer: some dirs ship on every sync, whatever harnesses are selected
 (`_BASE_LAYER`): the `.agents/skills` mirror, `.agents/workflows`,
 `standards/` -> `docs/sdlc/` and `enforcement/` -> `.sdlc/enforcement/`. The
-manifest records their dest prefixes as `base_layer` so a prune never
+manifest records their dest prefixes as `base_layer` so a future prune never
 removes them. The `.agents/skills` and `.kiro/skills` mirrors are derived
 from the canonical `skills/` at sync time; they are not stored in the pack.
 
@@ -116,7 +116,7 @@ _BASE_DESTS = [d for _, d in _BASE_LAYER]
 
 # File-name globs left out of a tree, keyed by pack-relative source.
 _EXCLUDE_GLOBS: dict[str, tuple[str, ...]] = {
-    "enforcement": ("*.test.mjs",),          # the pack's own self-tests
+    "enforcement": ("*.test.mjs", ".DS_Store"),  # self-tests, OS junk
 }
 
 # Installed unless the caller narrows the set.

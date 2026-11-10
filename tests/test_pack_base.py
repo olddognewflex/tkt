@@ -159,6 +159,14 @@ class NarrowSelection(TempPack):
         self.assertTrue((self.consumer / "AGENTS.md").is_file())
         self.assertEqual(self.manifest()["harnesses"], ["agents"])
 
+    def test_agents_alone_stays_alone_on_a_bare_resync(self):
+        # The recorded selection is non-empty, so defaults must not return.
+        self.sync(harnesses=["agents"])
+        self.sync()
+        for d in (".claude", ".github", ".kiro"):
+            self.assertFalse((self.consumer / d).exists(), d)
+        self.assertEqual(self.manifest()["harnesses"], ["agents"])
+
     def test_unknown_harness_still_rejected(self):
         with self.assertRaises(UsageError):
             self.sync(harnesses=["nope"])
@@ -222,6 +230,13 @@ class RealPackAntiRot(unittest.TestCase):
             sources += [s for s, _ in dirs]
         for stored in (".agents/skills", ".kiro/skills"):
             self.assertNotIn(stored, sources)
+
+    def test_stored_mirror_dirs_are_absent(self):
+        # sync-pack never reads these, so a copy that comes back (say, from
+        # a branch cut before they were deleted) would drift unnoticed.
+        for stored in (".agents/skills", ".kiro/skills"):
+            self.assertFalse((pack.PACK_ROOT / stored).exists(),
+                             f"{stored} is derived from skills/; do not store it")
 
     def test_mirror_dests_map_to_canonical_files(self):
         canonical = pack.PACK_ROOT / "skills"

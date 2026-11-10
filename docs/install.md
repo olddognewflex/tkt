@@ -72,8 +72,10 @@ tail, path-verbatim.
 
 Codex reads the base layer plus `AGENTS.md`, so it needs no harness of its own.
 Harness selection only adds surfaces on top: no selection, however narrow, drops
-the base layer. The manifest records these dirs under `base_layer`, and a prune
-never removes them.
+the base layer. The manifest records these dirs under `base_layer`, so a future
+`--prune` (TKT-22) will skip them. A file of your own at one of these paths is
+overwritten, with a warning, on the first sync that ships it; keep your own
+files outside these dirs.
 
 ### Harnesses
 
@@ -111,8 +113,9 @@ that manifest list and deleting its directory by hand.
 
 The default set applies only when you name nothing **and** the manifest records
 nothing. A repo set up with `tkt init --link-skills` has symlinks in `.claude/`
-and no manifest, so `tkt sync-pack cursor` there installs `.cursor/` plus the
-`AGENTS.md` block only — it will not lay committed copies over the symlinks.
+and no manifest, so `tkt sync-pack cursor` there installs the base layer,
+`.cursor/` and the `AGENTS.md` block — it will not lay committed copies over
+the `.claude/` symlinks.
 
 Notes:
 - The `sync-skills` meta-skill is pack-internal and never shipped to a consumer.

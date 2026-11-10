@@ -158,7 +158,7 @@ Two layers, connected only by the verb contract and the normalized schema:
     refreshes every harness the project ever added. `_BASE_LAYER` ships on
     every sync regardless (`.agents/skills`, `.agents/workflows`,
     `standards/` → `docs/sdlc/`, `enforcement/` → `.sdlc/enforcement/`) and
-    is recorded as `base_layer` so a prune skips it. The `.agents/skills`
+    is recorded as `base_layer` so a future `--prune` (TKT-22) skips it. The `.agents/skills`
     and `.kiro/skills` mirrors are derived from `skills/` at sync time, not
     stored in this repo.
   - `__init__.py` / `version.py` — `__version__` is the single place the release
