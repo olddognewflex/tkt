@@ -52,6 +52,10 @@ _DONE_STATUSES = {"done", "archived"}
 # are the same edge, so both spellings route to `_set_parent`.
 _CHILD_LINKS = ("child", "has child")
 _PARENT_LINKS = ("parent", "child of", "is child of")
+# `KEY blocks TO` and `TO is blocked by KEY` are the same edge, so both
+# route to `_set_blocks`.
+_BLOCKS_LINKS = ("blocks",)
+_BLOCKED_BY_LINKS = ("is blocked by", "depends on")
 
 
 def _now() -> str:
@@ -276,20 +280,42 @@ class OpenKanbanAdapter(Adapter):
             return self._set_parent(parent=key, child=to)
         if lt in _PARENT_LINKS:
             return self._set_parent(parent=to, child=key)
+        if lt in _BLOCKS_LINKS:
+            return self._set_blocks(blocker=key, blocked=to)
+        if lt in _BLOCKED_BY_LINKS:
+            return self._set_blocks(blocker=to, blocked=key)
         store, raw = self._get_raw(key)
-        meta = _meta(raw)  # tolerates `"meta": null`
-        bucket = "blocked_by" if lt in ("is blocked by", "depends on") else \
-                 "blocks" if lt == "blocks" else None
-        if bucket is None:
-            # record other relation types in meta verbatim
-            meta[link_type] = to
-        else:
-            cur = [x for x in (meta.get(bucket) or "").split(",") if x]
-            if to not in cur:
-                cur.append(to)
-            meta[bucket] = ",".join(cur)
+        # record other relation types in meta verbatim
+        _meta(raw)[link_type] = to  # tolerates `"meta": null`
         raw["updated_at"] = _now()
         self._save_store(store)
+
+    def _set_blocks(self, blocker: str, blocked: str) -> None:
+        """Record that `blocker` blocks `blocked`, writing both edges: the
+        blocker's `meta.blocks` and the blocked ticket's `meta.blocked_by`.
+        `tkt blockers` reads only `meta.blocked_by`, so a link written from
+        the blocker's side alone would leave the blocked ticket selectable.
+
+        Both edits land in a single atomic `_save_store`, and the store is
+        not saved when both edges already exist."""
+        if blocker.casefold() == blocked.casefold():
+            raise UsageError(f"link: {blocker} cannot block itself")
+        store, braw = self._get_raw(blocker)
+        draw = store["tickets"].get(blocked)
+        if not draw:
+            raise NotFoundError(f"no openkanban ticket {blocked}")
+        changed = False
+        for raw, field, other in ((braw, "blocks", blocked),
+                                  (draw, "blocked_by", blocker)):
+            meta = _meta(raw)  # tolerates `"meta": null`
+            cur = [x for x in (meta.get(field) or "").split(",") if x]
+            if other in cur:
+                continue
+            meta[field] = ",".join(cur + [other])
+            raw["updated_at"] = _now()
+            changed = True
+        if changed:
+            self._save_store(store)
 
     def _set_parent(self, parent: str, child: str) -> None:
         """Make `parent` the parent of `child`, writing both edges: the

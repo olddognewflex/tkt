@@ -79,6 +79,10 @@ def _parse_scalar(raw: str):
 # are the same edge, so both spellings route to `_set_parent`.
 _CHILD_LINKS = ("child", "has child")
 _PARENT_LINKS = ("parent", "child of", "is child of")
+# `tkt link` types that record a blocker. `KEY blocks TO` and `TO is blocked
+# by KEY` are the same edge, so both route to `_set_blocks`.
+_BLOCKS_LINKS = ("blocks",)
+_BLOCKED_BY_LINKS = ("is blocked by", "depends on")
 
 
 def _coerce_parent(value, key: str = "") -> str:
@@ -101,8 +105,9 @@ def _as_list(value) -> list:
 
 
 class _TicketIdentity:
-    """Which board keys name the same ticket file, for one `_set_parent`
-    or one hierarchy self-reference check (`_without_self`).
+    """Which board keys name the same ticket file, for one `_set_parent`,
+    one `_set_blocks`, or one hierarchy self-reference check
+    (`_without_self`).
 
     On a case-insensitive filesystem `tkt-3` and `TKT-3` open one file, so
     key strings alone miss existing edges. Keys are compared by file
@@ -559,28 +564,48 @@ class MarkdownAdapter(Adapter):
             return self._set_parent(parent=key, child=to)
         if lt in _PARENT_LINKS:
             return self._set_parent(parent=to, child=key)
+        if lt in _BLOCKS_LINKS:
+            return self._set_blocks(blocker=key, blocked=to)
+        if lt in _BLOCKED_BY_LINKS:
+            return self._set_blocks(blocker=to, blocked=key)
         fm, body = self._read_raw(key)
-        if lt == "is blocked by":
-            cur = fm.get("blocked_by", []) or []
-            if isinstance(cur, str):
-                cur = [cur]
-            if to not in cur:
-                cur.append(to)
-            fm["blocked_by"] = cur
-        elif lt == "blocks":
-            cur = fm.get("blocks", []) or []
-            if isinstance(cur, str):
-                cur = [cur]
-            if to not in cur:
-                cur.append(to)
-            fm["blocks"] = cur
-        else:
-            cur = fm.get("links", []) or []
-            if isinstance(cur, str):
-                cur = [cur]
-            cur.append(f"{link_type}:{to}")
-            fm["links"] = cur
+        fm["links"] = _as_list(fm.get("links")) + [f"{link_type}:{to}"]
         self._write_raw(key, fm, body)
+
+    def _set_blocks(self, blocker: str, blocked: str) -> None:
+        """Record that `blocker` blocks `blocked`, writing both edges: the
+        blocker's `blocks:` and the blocked ticket's `blocked_by:`.
+        `tkt blockers` reads only `blocked_by:`, so a link written from the
+        blocker's side alone would leave the blocked ticket selectable.
+
+        Keys are compared by file identity (see `_TicketIdentity`), as
+        `_set_parent` does, and written in their on-disk spelling. The one
+        exception is the up-front self-link check, which case-folds like
+        `_set_parent`'s: on a case-sensitive filesystem `TKT-1 blocks
+        tkt-1` is rejected even if both files exist."""
+        # Before any read, so the error does not depend on whether the
+        # filesystem folds case.
+        if blocker.casefold() == blocked.casefold():
+            raise UsageError(f"link: {blocker} cannot block itself")
+        # Read both before writing either, so a missing ticket leaves the
+        # board untouched.
+        sides = {blocker: self._read_raw(blocker), blocked: self._read_raw(blocked)}
+        ids = _TicketIdentity(self.board_dir)
+        if ids.same(blocker, blocked):  # two names for one file (a hard link)
+            raise UsageError(f"link: {blocker} cannot block itself")
+        canon = {k: ids.canonical(k) for k in sides}
+        # Two independent writes. A crash between them leaves a one-sided
+        # link that re-running the same link repairs: an edge already
+        # present (under any spelling) is skipped, and an unchanged file is
+        # not rewritten.
+        for key, field, other in ((blocker, "blocks", blocked),
+                                  (blocked, "blocked_by", blocker)):
+            fm, body = sides[key]
+            cur = _as_list(fm.get(field))
+            if any(ids.same(k, other) for k in cur):
+                continue
+            fm[field] = cur + [canon[other]]
+            self._write_raw(canon[key], fm, body)
 
     def _set_parent(self, parent: str, child: str) -> None:
         """Make `parent` the parent of `child`, writing both edges: the
