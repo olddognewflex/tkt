@@ -6,8 +6,9 @@ resolved thread with no visible answer on it. Every answer, fix summary and
 "won't fix" justification belongs on the thread, via
 `pulls/comments/<id>/replies`.
 
-The skill ships in several harness surfaces. The full copies must stay
-byte-identical to the canonical one; the condensed mirrors must each name the
+The skill ships in several harness surfaces. The full copies
+(`.agents/skills`, `.kiro/skills`) are derived from the canonical one at sync
+time (see test_pack_base.py); the condensed mirrors must each name the
 in-thread call, or a harness reading only its mirror repeats the bug. Fully
 offline. Run from the repo root:
 
@@ -21,11 +22,6 @@ from pathlib import Path
 ROOT = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 CANONICAL = ROOT / "skills/respond-to-review/SKILL.md"
-
-FULL_COPIES = [
-    ".agents/skills/respond-to-review/SKILL.md",
-    ".kiro/skills/respond-to-review/SKILL.md",
-]
 
 CONDENSED_MIRRORS = [
     ".agents/workflows/respond-to-review.md",
@@ -87,12 +83,6 @@ class CanonicalSkill(unittest.TestCase):
 
 
 class Mirrors(unittest.TestCase):
-    def test_full_copies_match_canonical(self):
-        want = CANONICAL.read_bytes()
-        for rel in FULL_COPIES:
-            with self.subTest(path=rel):
-                self.assertEqual((ROOT / rel).read_bytes(), want)
-
     def test_condensed_mirrors_name_the_in_thread_call(self):
         for rel in CONDENSED_MIRRORS:
             with self.subTest(path=rel):

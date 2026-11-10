@@ -20,9 +20,17 @@ Guarantees:
     (a symlinked file or parent directory) is left alone, and a file that
     cannot be chmod'ed is a warning rather than an aborted sync.
 
+Base layer: some dirs ship on every sync, whatever harnesses are selected
+(`_BASE_LAYER`): the `.agents/skills` mirror, `.agents/workflows`,
+`standards/` -> `docs/sdlc/` and `enforcement/` -> `.sdlc/enforcement/`. The
+manifest records their dest prefixes as `base_layer` so a future prune never
+removes them. The `.agents/skills` and `.kiro/skills` mirrors are derived
+from the canonical `skills/` at sync time; they are not stored in the pack.
+
 Runs BEFORE config exists (a consumer may sync before `tkt init`), so it never
 calls Config.load(). Stdlib only.
 """
+import fnmatch
 import hashlib
 import json
 import stat
@@ -48,9 +56,10 @@ END = "<!-- tkt-pack:end -->"
 _EXCLUDE_SKILLS = {"sync-skills"}
 
 # Named harnesses. Each maps to (pack-relative source, consumer-relative dest)
-# pairs; every Tier-B dir is copied path-verbatim, so source == dest for all but
-# Claude Code (whose sources are the pack's top-level skills/ and agents/).
-# Only files present in THIS repo are copied — an absent source is a no-op.
+# pairs. Most dirs are copied path-verbatim; the skill mirrors (Claude Code,
+# Kiro, and the base layer's `.agents/skills`) all come from the canonical
+# top-level skills/. Only files present in THIS repo are copied — an absent
+# source is a no-op.
 _HARNESSES: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "claude": ("Claude Code", [
         ("skills", ".claude/skills"),
@@ -62,7 +71,7 @@ _HARNESSES: dict[str, tuple[str, list[tuple[str, str]]]] = {
     # Kiro does not read AGENTS.md — steering is its only project-convention
     # surface, so it ships by default rather than opt-in.
     "kiro": ("Kiro", [
-        (".kiro/skills", ".kiro/skills"),
+        ("skills", ".kiro/skills"),          # derived, not stored
         (".kiro/steering", ".kiro/steering"),
         (".kiro/agents", ".kiro/agents"),
     ]),
@@ -73,10 +82,9 @@ _HARNESSES: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "gemini": ("Gemini CLI", [
         (".gemini/commands", ".gemini/commands"),
     ]),
-    "agents": ("Antigravity / Junie / Codex", [
-        (".agents/skills", ".agents/skills"),
-        (".agents/workflows", ".agents/workflows"),
-    ]),
+    # Its dirs moved to the base layer. Kept so old manifests and
+    # `tkt sync-pack agents` stay valid; alone it means "base layer only".
+    "agents": ("Antigravity / Junie / Codex", []),
     "windsurf": ("Windsurf", [
         (".windsurf/workflows", ".windsurf/workflows"),
     ]),
@@ -92,6 +100,23 @@ _HARNESSES: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "opencode": ("OpenCode", [
         (".opencode/commands", ".opencode/commands"),
     ]),
+}
+
+# Always installed, whatever the harness selection; never pruned. Codex
+# needs no surface of its own: it reads these plus AGENTS.md.
+_BASE_LAYER: list[tuple[str, str]] = [
+    ("skills", ".agents/skills"),            # derived, not stored
+    (".agents/workflows", ".agents/workflows"),
+    ("standards", "docs/sdlc"),              # no-op until standards/ exists
+    ("enforcement", ".sdlc/enforcement"),
+]
+# Recorded in the manifest as `base_layer`. Always the full list, even when
+# a source is absent, so the manifest does not change when one appears.
+_BASE_DESTS = [d for _, d in _BASE_LAYER]
+
+# File-name globs left out of a tree, keyed by pack-relative source.
+_EXCLUDE_GLOBS: dict[str, tuple[str, ...]] = {
+    "enforcement": ("*.test.mjs", ".DS_Store"),  # self-tests, OS junk
 }
 
 # Installed unless the caller narrows the set.
@@ -185,35 +210,47 @@ def _load_manifest(path: Path) -> dict:
 
 # ---- source → destination plan --------------------------------------------
 
-def _add_tree(plan: list, base: Path, dest_prefix: str) -> None:
+def _add_tree(plan: list, base: Path, dest_prefix: str,
+              exclude: tuple[str, ...] = ()) -> None:
     """Map every file under `base` to `<dest_prefix>/<relative path>`, skipping
-    any pack-internal excluded skill dir."""
+    any pack-internal excluded skill dir and any file matching `exclude`."""
     for f in _walk(base):
         rel_in = f.relative_to(base)
         if rel_in.parts and rel_in.parts[0] in _EXCLUDE_SKILLS:
+            continue
+        if any(fnmatch.fnmatch(f.name, pat) for pat in exclude):
             continue
         plan.append((f, f"{dest_prefix}/{rel_in.as_posix()}"))
 
 
 def _plan_for(harnesses: list[str]) -> list:
-    """Source→dest plan for the selected harnesses, de-duplicated on dest so two
-    harnesses sharing a directory can't queue the same write twice."""
+    """Source→dest plan for the base layer plus the selected harnesses,
+    de-duplicated on dest so two entries sharing a directory can't queue the
+    same write twice."""
     plan: list = []
     seen: set[str] = set()
+    pairs = list(_BASE_LAYER)
     for name in harnesses:
-        for src_rel, dest_rel in _HARNESSES[name][1]:
-            for src, rel in _sub_plan(src_rel, dest_rel):
-                if rel in seen:
-                    continue
-                seen.add(rel)
-                plan.append((src, rel))
+        pairs += _HARNESSES[name][1]
+    for src_rel, dest_rel in pairs:
+        for src, rel in _sub_plan(src_rel, dest_rel):
+            if rel in seen:
+                continue
+            seen.add(rel)
+            plan.append((src, rel))
     return plan
 
 
 def _sub_plan(src_rel: str, dest_rel: str) -> list:
     plan: list = []
-    _add_tree(plan, PACK_ROOT / src_rel, dest_rel)
+    _add_tree(plan, PACK_ROOT / src_rel, dest_rel, _EXCLUDE_GLOBS.get(src_rel, ()))
     return plan
+
+
+def _is_base(rel: str, prefixes: list[str] = _BASE_DESTS) -> bool:
+    """True when consumer path `rel` sits in a base-layer dir. Matches whole
+    path segments, so `.agents/skillsX/a` is not under `.agents/skills`."""
+    return any(rel == p or rel.startswith(p + "/") for p in prefixes)
 
 
 def _resolve_harnesses(requested: list[str], all_harnesses: bool,
@@ -253,11 +290,13 @@ def _manifest_harnesses(manifest: dict) -> list[str]:
 def list_harnesses(target_dir: str) -> int:
     installed = set(_manifest_harnesses(
         _load_manifest(Path(target_dir).expanduser().resolve() / MANIFEST_REL)))
+    print(f"  base layer (always installed): {', '.join(_BASE_DESTS)}")
+    print()
     for name, (label, dirs) in _HARNESSES.items():
         mark = "*" if name in installed else " "
         default = " (default)" if name in _DEFAULT_HARNESSES else ""
         print(f" {mark} {name:<10} {label}{default}")
-        print(f"     {', '.join(d for _, d in dirs)}")
+        print(f"     {', '.join(d for _, d in dirs) or '(base layer only)'}")
     print()
     print("  * = recorded in this project's pack manifest")
     print("  add one with: tkt sync-pack <name>")
@@ -468,6 +507,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                 if cur_region_sha != block_sha:
                     outdated.append(f"{AGENTS_REL} (tkt-pack block)")
         print(f"harnesses: {', '.join(selected)}")
+        print(f"base layer: {', '.join(_BASE_DESTS)}")
         _report_check(missing, locally_mod, outdated, not_exec)
         return 1 if (missing or locally_mod or outdated or not_exec) else 0
 
@@ -498,9 +538,11 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         "pack_commit": _git_head(PACK_ROOT),
         "pack_root": str(PACK_ROOT),
         "harnesses": selected,
+        "base_layer": _BASE_DESTS,
         "files": new_files,
     }
-    old_material = {k: old.get(k) for k in ("pack_commit", "pack_root", "harnesses", "files")}
+    old_material = {k: old.get(k) for k in
+                    ("pack_commit", "pack_root", "harnesses", "base_layer", "files")}
     wrote_manifest = False
     if material != old_material or not manifest_path.exists():
         manifest = dict(material)

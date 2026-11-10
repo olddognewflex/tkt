@@ -23,10 +23,13 @@ ones — see "When NOT to Sync") gets a copy here.
 
 | # | Location | Format | Used By |
 |---|----------|--------|---------|
-| 1 | `.agents/skills/<name>/SKILL.md` | Agent Skills (YAML + MD) | Codex, Antigravity, JetBrains Junie |
-| 2 | `.kiro/skills/<name>/SKILL.md` | Agent Skills (YAML + MD) | AWS Kiro |
-| 3 | `.github/prompts/<name>.prompt.md` | Copilot Prompt (YAML + MD) | GitHub Copilot |
-| 4 | `.gemini/commands/<name>.toml` | TOML | Gemini CLI |
+| 1 | `.github/prompts/<name>.prompt.md` | Copilot Prompt (YAML + MD) | GitHub Copilot |
+| 2 | `.gemini/commands/<name>.toml` | TOML | Gemini CLI |
+
+The Agent Skills copies (`.agents/skills/<name>/` for Codex, Antigravity and
+JetBrains Junie; `.kiro/skills/<name>/` for AWS Kiro) are **not** synced by
+hand and are not stored in this repo. `tkt sync-pack` derives them
+byte-for-byte from `skills/` when it installs the pack into a consumer repo.
 
 ### Tier B — Selective per-skill workflows (sync the high-value ~7 only)
 
@@ -88,18 +91,8 @@ guardrail policy or MCP servers change.
 
 ### 1. Agent Skills Standard (`.agents/skills/` and `.kiro/skills/`)
 
-Identical to the source format:
-
-```markdown
----
-name: <skill-name>
-description: <one-line description from source>
----
-
-# <Title>
-
-<body — same markdown content as source skill>
-```
+No template: `tkt sync-pack` copies `skills/<name>/` as-is into consumer repos.
+Never hand-copy it.
 
 ### 2. GitHub Copilot Prompt (`.github/prompts/<name>.prompt.md`)
 
@@ -270,14 +263,10 @@ hardcoded repo or toolchain values.
 
 Read `skills/<name>/SKILL.md` — extract `name`, `description`, and body.
 
-### 2. Tier A: byte-identical copies (always)
+### 2. Agent Skills copies: nothing to do
 
-Copy to:
-- `.agents/skills/<name>/SKILL.md`
-- `.kiro/skills/<name>/SKILL.md`
-
-Codex consumes the `.agents/skills/<name>/SKILL.md` copy directly — keep it
-byte-identical to the `skills/<name>/SKILL.md` source.
+`.agents/skills/` and `.kiro/skills/` are derived by `tkt sync-pack` from
+`skills/`; never hand-copy them. Editing `skills/<name>/SKILL.md` is enough.
 
 ### 3. Tier A: condensed translations (always)
 
@@ -301,7 +290,7 @@ If the skill is one of `select-ticket`, `triage-ticket`, `plan-ticket`, `open-pr
 
 ```shell
 NAME=<skill-name>
-for p in skills/$NAME/SKILL.md .agents/skills/$NAME/SKILL.md .kiro/skills/$NAME/SKILL.md .github/prompts/$NAME.prompt.md .gemini/commands/$NAME.toml; do
+for p in skills/$NAME/SKILL.md .github/prompts/$NAME.prompt.md .gemini/commands/$NAME.toml; do
   test -f "$p" && echo "✓ $p" || echo "✗ $p MISSING"
 done
 ```
@@ -317,22 +306,22 @@ done
 
 `tkt` skills are the canonical source. Tier A targets get every non-meta skill.
 
-| Skill | Source | Agents | Kiro | Copilot | Gemini | Tier B? |
-|-------|--------|--------|------|---------|--------|---------|
-| automated-sdlc | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| check-blockers | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| ci-fix | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| complete-deliverable | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| deploy-preview | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| deploy-ready | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| hotfix-revert | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| open-pr | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| plan-ticket | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| respond-to-review | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| resume-from-revise | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| select-ticket | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| self-review | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| triage-ticket | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Skill | Source | Copilot | Gemini | Tier B? |
+|-------|--------|---------|--------|---------|
+| automated-sdlc | ✓ | ✓ | ✓ | |
+| check-blockers | ✓ | ✓ | ✓ | |
+| ci-fix | ✓ | ✓ | ✓ | |
+| complete-deliverable | ✓ | ✓ | ✓ | |
+| deploy-preview | ✓ | ✓ | ✓ | |
+| deploy-ready | ✓ | ✓ | ✓ | ✓ |
+| hotfix-revert | ✓ | ✓ | ✓ | |
+| open-pr | ✓ | ✓ | ✓ | ✓ |
+| plan-ticket | ✓ | ✓ | ✓ | ✓ |
+| respond-to-review | ✓ | ✓ | ✓ | ✓ |
+| resume-from-revise | ✓ | ✓ | ✓ | |
+| select-ticket | ✓ | ✓ | ✓ | ✓ |
+| self-review | ✓ | ✓ | ✓ | ✓ |
+| triage-ticket | ✓ | ✓ | ✓ | ✓ |
 
 `sync-skills` itself is meta — only in `skills/`.
 

@@ -128,10 +128,14 @@ For shared repos and CI, install the pack as **committed copies** with
 `tkt sync-pack` instead of symlinks — see [docs/install.md](docs/install.md) for
 the full guide.
 
-- `tkt sync-pack` writes real, tracked files into the repo (`.claude/skills`,
-  `.github/prompts`, `.kiro/skills`, an `AGENTS.md` managed block, and a
-  `.sdlc/pack-manifest.json`). Cloud harnesses, CI, and teammates only see tracked
-  files, so this is the option that works off your machine.
+- `tkt sync-pack` writes real, tracked files into the repo: the always-on
+  base layer (`.agents/skills`, `.agents/workflows`, `.sdlc/enforcement`, and
+  `docs/sdlc` once the pack has `standards/`), the default harnesses
+  (`.claude/skills`, `.github/prompts`, `.kiro/skills`, ...), an `AGENTS.md`
+  managed block, and a `.sdlc/pack-manifest.json`. The `.agents/skills` and
+  `.kiro/skills` mirrors are derived from `skills/` at sync time. Cloud
+  harnesses, CI, and teammates only see tracked files, so this is the option
+  that works off your machine.
 - Adding a harness to a project that is already set up: name it —
   `tkt sync-pack cursor`. The choice is additive and sticky (recorded in the
   manifest), so later bare `tkt sync-pack` runs keep it in sync. `--all-harnesses`
@@ -539,8 +543,8 @@ packages, no `package.json`) with a paired `*.test.mjs` self-test. Run them
 with `node --test enforcement/*.test.mjs`; CI runs the same glob. Node is a
 CI/dev dependency for this directory; `tkt` itself stays stdlib Python and
 only uses Node, when present, for the format gates below.
-Copying `enforcement/` into consumer repos is not done yet: it is pending
-TKT-36 (sync-pack base layer), so `sync-pack` does not install it today.
+`sync-pack` installs `enforcement/` into consumer repos as
+`.sdlc/enforcement/` (part of the base layer; the self-tests are left out).
 
 **`check-artifact-format.mjs`** checks the mechanical shape of a ticket, PR,
 note or comment body: required sections and their order, first and last

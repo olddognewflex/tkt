@@ -183,8 +183,9 @@ Branch on these — errors always go to stderr with a non-zero exit:
 Canonical source: `skills/<name>/SKILL.md`. Harness-specific translations live in
 per-tool folders (`.opencode/commands/`, `.cursor/commands/`, `.cursor/skills/`,
 `.continue/prompts/`, `.windsurf/workflows/`, `.clinerules/workflows/`,
-`.augment/commands/`, `.agents/workflows/`, `.agents/skills/`, `.kiro/skills/`,
-`.github/prompts/`, `.gemini/commands/`).
+`.augment/commands/`, `.agents/workflows/`, `.github/prompts/`,
+`.gemini/commands/`). `.agents/skills/` and `.kiro/skills/` are not stored:
+`sync-pack` derives them byte-for-byte from `skills/` at sync time.
 
 | Skill | Purpose |
 |-------|---------|
@@ -236,10 +237,30 @@ executable, and a lost bit is repaired on re-sync. `tkt doctor` does **not** run
 this check: it only reports whether the pack checkout has moved since the last
 sync (`pack_commit`), as a non-fatal hint.
 
+### Base layer
+
+Every sync installs the base layer, whatever harnesses are selected:
+
+| Pack source | Consumer dest |
+| --- | --- |
+| `skills/` (derived mirror) | `.agents/skills/` |
+| `.agents/workflows/` | `.agents/workflows/` |
+| `standards/` | `docs/sdlc/` |
+| `enforcement/` (minus `*.test.mjs`) | `.sdlc/enforcement/` |
+
+Codex needs no surface of its own: it reads the base layer plus `AGENTS.md`.
+The manifest records these dest dirs under `base_layer`, so a future
+`--prune` (TKT-22) will skip them. `standards/` ships once the pack has one; until then that row is
+a no-op. The checker ships executable, for consumer CI and hooks; `tkt`'s own
+format gates always run the copy in `tkt`'s checkout.
+
 ### Harness selection
 
-A bare `tkt sync-pack` installs the default harnesses (`claude`, `copilot`,
-`kiro`). Name others to add them to an already-synced project:
+A bare `tkt sync-pack` installs the base layer plus the default harnesses
+(`claude`, `copilot`, `kiro`). Harness selection only adds surfaces on top of
+the base layer; it can never remove it. `agents` is accepted for old
+manifests and scripts, and on its own means "base layer only". Name others
+to add them to an already-synced project:
 
 ```sh
 tkt sync-pack cursor              # add Cursor to this repo

@@ -74,8 +74,9 @@ without subagent support run the pipeline unchanged.
 
 The `sync-skills` skill defines how the canonical skill is translated:
 
-- **Tier A — every skill:** `.agents/skills/`, `.kiro/skills/`, `.github/prompts/*.prompt.md`,
-  `.gemini/commands/*.toml`.
+- **Tier A — every skill:** `.github/prompts/*.prompt.md`, `.gemini/commands/*.toml`.
+  The `.agents/skills/` and `.kiro/skills/` copies are derived by `tkt sync-pack`
+  from `skills/` at sync time and are not stored in this repo.
 - **Tier B — the seven core pipeline skills only** (`select-ticket`, `triage-ticket`,
   `plan-ticket`, `open-pr`, `self-review`, `respond-to-review`, `deploy-ready`):
   `.cursor/`, `.windsurf/`, `.clinerules/`, `.continue/`, `.augment/`,

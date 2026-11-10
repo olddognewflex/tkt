@@ -50,8 +50,9 @@ Load `context/skill-pack.md` for the full tier table and the trust scoping of `a
    - Genuinely infra-specific steps get marked `PROJECT-SPECIFIC`.
 
 3. **Decide the translation scope**, per the `sync-skills` tiers:
-   - **Tier A — every skill:** `.agents/skills/`, `.kiro/skills/`,
-     `.github/prompts/<name>.prompt.md`, `.gemini/commands/<name>.toml`.
+   - **Tier A — every skill:** `.github/prompts/<name>.prompt.md`,
+     `.gemini/commands/<name>.toml`. (`.agents/skills/` and `.kiro/skills/` are
+     derived by `tkt sync-pack`; never hand-copy them.)
    - **Tier B — only the seven core pipeline skills** (`select-ticket`,
      `triage-ticket`, `plan-ticket`, `open-pr`, `self-review`, `respond-to-review`,
      `deploy-ready`): `.cursor/skills/`, `.cursor/commands/`, `.windsurf/workflows/`,
