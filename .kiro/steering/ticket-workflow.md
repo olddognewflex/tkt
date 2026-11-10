@@ -64,7 +64,7 @@ WL=$(tkt worklog "$KEY" --from-role in_progress --note "PR opened" --json)
 
 # Post comment with the time
 tkt comment "$KEY" "PR opened. Time in In Progress: \
-$(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+$(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 ### When to annotate
@@ -110,7 +110,7 @@ in config if unsure.
 ```shell
 # Check for unresolved blockers
 BLOCKERS=$(tkt blockers "$KEY" --json)
-COUNT=$(echo "$BLOCKERS" | jq 'length')
+COUNT=$(printf '%s\n' "$BLOCKERS" | jq 'length')
 
 # If blocked, transition and comment
 if [ "$COUNT" -gt 0 ]; then
@@ -118,7 +118,7 @@ if [ "$COUNT" -gt 0 ]; then
   tkt transition "$KEY" blocked
   tkt comment "$KEY" "BLOCKED: <description>. \
 Waiting on: <who>. Need: <what unblocks>. \
-Time in In Progress: $(echo "$WL" | jq -r .human)."
+Time in In Progress: $(printf '%s\n' "$WL" | jq -r .human)."
 fi
 ```
 

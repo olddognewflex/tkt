@@ -14,7 +14,7 @@ Picks up tickets in `revise` after a failed QA round and a human dev fix. Re-ent
 2. Annotate revise time:
    ```shell
    WL=$(tkt worklog "$KEY" --from-role revise --note "Resuming from revise" --json)
-   tkt comment "$KEY" "Resuming from revise. Time in Revise: $(echo "$WL" | jq -r .human)"
+   tkt comment "$KEY" "Resuming from revise. Time in Revise: $(printf '%s\n' "$WL" | jq -r .human)"
    ```
 3. Transition to `in_progress`.
 4. Verify local state: `git status`, build/test via `tkt cfg build.*`.

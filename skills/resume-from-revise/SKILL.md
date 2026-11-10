@@ -28,7 +28,7 @@ If not `revise`, stop and ask.
 ```shell
 WL=$(tkt worklog "$KEY" --from-role revise --note "Resuming from revise — human fix complete" --json)
 tkt comment "$KEY" "Resuming from revise — fix complete. Time in Revise: \
-$(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+$(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 ### 3. Transition back to in_progress
@@ -82,8 +82,8 @@ WL2=$(tkt worklog "$KEY" --from-role review --note "Revise cycle — re-review p
 tkt transition "$KEY" qa_ready
 tkt edit "$KEY" --agent-status waiting
 tkt comment "$KEY" "Re-review complete and approved. Back in qa_ready — preview updated: <url>. \
-In Progress (revise): $(echo "$WL1" | jq -r .human) (worklog $(echo "$WL1" | jq -r .worklog_id)) | \
-review (re-review): $(echo "$WL2" | jq -r .human) (worklog $(echo "$WL2" | jq -r .worklog_id))."
+In Progress (revise): $(printf '%s\n' "$WL1" | jq -r .human) (worklog $(printf '%s\n' "$WL1" | jq -r .worklog_id)) | \
+review (re-review): $(printf '%s\n' "$WL2" | jq -r .human) (worklog $(printf '%s\n' "$WL2" | jq -r .worklog_id))."
 ```
 
 QA picks it back up.

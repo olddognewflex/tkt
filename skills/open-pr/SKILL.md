@@ -100,7 +100,7 @@ if [ "$CLASS" = "full_sdlc" ]; then
   tkt transition "$KEY" review
   tkt edit "$KEY" --agent-status waiting
   tkt comment "$KEY" "PR opened: $PR_URL. Review requested. Time in In Progress: \
-$(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+$(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 else
   tkt comment "$KEY" "PR opened: $PR_URL. Review requested. (Deliverable type — staying in In Progress until merge + Done.)"
 fi

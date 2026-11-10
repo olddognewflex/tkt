@@ -40,7 +40,7 @@ Execute it. A config change may still open a tiny PR (CI + one self-review pass,
 WL=$(tkt worklog "$KEY" --from-role in_progress --note "Deliverable shipped — <summary>" --json)
 tkt comment "$KEY" "Deliverable complete: <summary>.
 Link: <url>
-Time in In Progress: $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+Time in In Progress: $(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 tkt transition "$KEY" done
 tkt edit "$KEY" --agent-status done
 ```
