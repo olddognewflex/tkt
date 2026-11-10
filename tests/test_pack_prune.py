@@ -6,6 +6,9 @@ the manifest are never pruned; `_safe_rel` refuses paths that could leave
 the consumer tree; a locally modified file is kept and reported; empty
 parent dirs are removed, never the consumer root; a plain sync carries
 retired files forward under `retired`; `--check --prune` writes nothing.
+Aliases of a live path (`./x`, `a//b`, a case-only difference, a symlinked
+dir inside the tree) are never pruned; an unreadable entry or a failed
+unlink never crashes a sync.
 
 Every case points `core.pack.PACK_ROOT` at a temp pack. Offline.
 
@@ -297,8 +300,10 @@ class RemoveEmptyParents(unittest.TestCase):
 
 class CheckPrune(TempPack):
     def snapshot(self) -> dict:
-        return {p.relative_to(self.consumer).as_posix(): p.read_bytes()
-                for p in self.consumer.rglob("*") if p.is_file()}
+        # Dirs too (as None), so a stray mkdir is caught.
+        return {p.relative_to(self.consumer).as_posix():
+                (p.read_bytes() if p.is_file() else None)
+                for p in self.consumer.rglob("*")}
 
     def test_lists_and_writes_nothing(self):
         self.retire_extra()
@@ -339,6 +344,185 @@ class NoChurn(TempPack):
         _, out = self.sync(prune=True)
         self.assertEqual(self.manifest_path.read_bytes(), before)
         self.assertIn("up to date", out)
+
+
+def case_insensitive(d: Path) -> bool:
+    probe = d / "CaseProbe"
+    probe.write_text("x")
+    try:
+        return (d / "cASEpROBE").exists()
+    finally:
+        probe.unlink()
+
+
+def is_root() -> bool:
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+class Aliases(TempPack):
+    PLANNED = ".claude/skills/demo/SKILL.md"
+
+    def plant_retired(self, *aliases: str) -> Path:
+        self.sync()
+        planned = self.consumer / self.PLANNED
+        m = self.manifest()
+        m["retired"] = {a: sha(planned) for a in aliases}
+        self.write_manifest(m)
+        return planned
+
+    def test_non_canonical_aliases_of_a_planned_file_survive(self):
+        aliases = ("./" + self.PLANNED, ".claude//skills/demo/SKILL.md",
+                   self.PLANNED + "/", ".claude/./skills/demo/SKILL.md")
+        planned = self.plant_retired(*aliases)
+        _, out = self.sync(prune=True)
+        self.assertTrue(planned.is_file())
+        self.assertNotIn("pruned:", out)
+        for a in aliases:
+            self.assertIn(f"skipped unsafe manifest path: {a}", out)
+        self.assertNotIn("retired", self.manifest())
+
+    def test_case_alias_of_a_planned_file_survives(self):
+        if not case_insensitive(self.consumer):
+            self.skipTest("needs a case-insensitive filesystem")
+        alias = ".CLAUDE/skills/demo/SKILL.md"
+        planned = self.plant_retired(alias)
+        _, out = self.sync(prune=True)
+        self.assertTrue(planned.is_file())
+        self.assertIn(f"skipped (same file as a live path): {alias}", out)
+        self.assertNotIn("retired", self.manifest())
+
+    def test_case_only_rename_in_the_pack_keeps_the_live_file(self):
+        if not case_insensitive(self.consumer):
+            self.skipTest("needs a case-insensitive filesystem")
+        self.sync()
+        (self.pack_root / "skills" / "extra").rename(self.pack_root / "skills" / "Extra")
+        _, out = self.sync(prune=True)
+        self.assertNotIn("pruned:", out)
+        self.assertTrue((self.consumer / ".claude/skills/Extra/SKILL.md").is_file())
+        self.assertTrue((self.consumer / ".kiro/skills/Extra/SKILL.md").is_file())
+        rc, _ = self.sync(check=True)
+        self.assertEqual(rc, 0)
+
+    def test_plain_sync_does_not_retire_a_case_alias(self):
+        if not case_insensitive(self.consumer):
+            self.skipTest("needs a case-insensitive filesystem")
+        self.sync()
+        (self.pack_root / "skills" / "extra").rename(self.pack_root / "skills" / "Extra")
+        self.sync()
+        self.assertNotIn("retired", self.manifest())
+
+
+@unittest.skipUnless(hasattr(os, "symlink"), "needs os.symlink")
+class SymlinkedDirsInsideTheTree(TempPack):
+    def link(self, at: str, to: str) -> None:
+        path = self.consumer / at
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.symlink(to, path)
+        except OSError as e:
+            self.skipTest(f"cannot create symlinks: {e}")
+
+    def test_link_into_the_base_layer_never_prunes_base_files(self):
+        # A common layout: Claude's skills dir is a link to the base mirror.
+        self.link(".claude/skills", "../.agents/skills")
+        self.sync()
+        base = self.consumer / ".agents/skills/extra/SKILL.md"
+        self.assertTrue(base.is_file())
+        shutil.rmtree(self.pack_root / "skills" / "extra")
+        _, out = self.sync(prune=True)
+        self.assertTrue(base.is_file())
+        self.assertNotIn("pruned: .claude/skills/extra/SKILL.md", out)
+        self.assertIn("skipped unsafe manifest path: .claude/skills/extra/SKILL.md", out)
+
+    def test_link_to_a_planned_tree_never_prunes_planned_files(self):
+        self.sync()
+        planned = self.consumer / ".claude/skills/demo/SKILL.md"
+        self.link("alias", ".claude/skills")
+        m = self.manifest()
+        m["retired"] = {"alias/demo/SKILL.md": sha(planned)}
+        self.write_manifest(m)
+        _, out = self.sync(prune=True)
+        self.assertTrue(planned.is_file())
+        self.assertIn("skipped unsafe manifest path: alias/demo/SKILL.md", out)
+
+
+class Robustness(TempPack):
+    def lock(self, d: Path, mode: int) -> None:
+        if is_root() or not hasattr(os, "geteuid"):
+            self.skipTest("permission bits are not enforced here")
+        d.chmod(mode)
+        self.addCleanup(d.chmod, 0o755)
+
+    def test_unreadable_entry_never_crashes_a_sync(self):
+        self.retire_extra()
+        self.lock(self.extra.parent, 0o000)
+        rc, _ = self.sync()
+        self.assertEqual(rc, 0)
+        self.assertIn(".claude/skills/extra/SKILL.md", self.manifest()["retired"])
+        rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("kept (unreadable): .claude/skills/extra/SKILL.md", out)
+
+    def test_failed_unlink_is_reported_and_stays_retired(self):
+        self.retire_extra()
+        self.lock(self.extra.parent, 0o555)
+        rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.extra.is_file())
+        self.assertIn("1 could NOT be pruned", out)
+        self.assertIn(".claude/skills/extra/SKILL.md", self.manifest()["retired"])
+
+    def test_dir_where_a_file_was_is_not_a_file(self):
+        self.retire_extra()
+        self.extra.unlink()
+        self.extra.mkdir()
+        _, out = self.sync(prune=True)
+        self.assertTrue(self.extra.is_dir())
+        self.assertIn("skipped (not a file): .claude/skills/extra/SKILL.md", out)
+        self.assertNotIn(".claude/skills/extra/SKILL.md",
+                         self.manifest().get("retired", {}))
+
+    def test_changed_between_classify_and_unlink_is_kept(self):
+        self.retire_extra()
+        real = pack._classify_retired
+
+        def classify_then_edit(*a, **kw):
+            res = real(*a, **kw)
+            self.extra.write_text("edited at the last moment\n")
+            return res
+
+        with mock.patch.object(pack, "_classify_retired", classify_then_edit):
+            _, out = self.sync(prune=True)
+        self.assertTrue(self.extra.is_file())
+        self.assertIn("kept (locally modified): .claude/skills/extra/SKILL.md", out)
+
+
+class ManifestEdges(TempPack):
+    def test_empty_retired_key_causes_no_rewrite(self):
+        self.sync()
+        m = self.manifest()
+        m["retired"] = {}
+        self.write_manifest(m)
+        before = self.manifest_path.read_bytes()
+        _, out = self.sync()
+        self.assertEqual(self.manifest_path.read_bytes(), before)
+        self.assertIn("up to date", out)
+
+    def test_reshipped_retired_file_is_not_reported_as_preexisting(self):
+        self.retire_extra()
+        d = self.pack_root / "skills" / "extra"
+        d.mkdir()
+        (d / "SKILL.md").write_text(skill_md("extra") + "\nnew line\n")
+        _, out = self.sync()
+        self.assertNotIn("pre-existing file overwritten: .claude/", out)
+        self.assertNotIn("pre-existing file overwritten: .kiro/", out)
+
+    def test_hint_counts_only_files_prune_would_remove(self):
+        self.retire_extra()
+        self.extra.write_text("edited\n")
+        (self.consumer / ".kiro/skills/extra/SKILL.md").write_text("edited\n")
+        _, out = self.sync()
+        self.assertNotIn("re-run with --prune", out)
 
 
 class Cli(TempPack):

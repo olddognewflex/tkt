@@ -93,7 +93,10 @@ tracked files — the symlinks `tkt init --link-skills` writes are invisible to 
 
 Its guarantees, all of which are load-bearing:
 
-- Only ever writes paths it records in `.sdlc/pack-manifest.json`. **Never deletes.**
+- Only ever writes paths it records in `.sdlc/pack-manifest.json`. **Deletes only
+  on `--prune`**, and then only unmodified files the previous manifest recorded,
+  never the base layer, `AGENTS.md`, the manifest, a path through a symlinked
+  dir, or an alias of a live file.
 - **Idempotent**: a second run with an unchanged pack makes zero changes on disk,
   including the manifest, so `git status` stays clean.
 - Never touches content outside the `AGENTS.md` marker region it manages.

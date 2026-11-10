@@ -293,12 +293,16 @@ writes nothing, and exits 1 if any would go. Guarantees:
 - Only paths recorded in the previous manifest (`files` or `retired`) are
   candidates, never an arbitrary consumer file.
 - The base layer, `AGENTS.md` and the manifest itself are never pruned.
-- A manifest path that is absolute, contains `..`, or resolves outside the
-  consumer tree (including through a symlinked parent dir) is skipped and
-  reported, so a corrupted or tampered manifest cannot reach other files.
+- A manifest path that is absolute, not in the canonical form the pack writes
+  (`./x`, `a//b`, `..`, a backslash), or that goes through a symlinked dir
+  (inside or outside the tree) is skipped and reported, so a corrupted or
+  tampered manifest cannot reach other files.
+- A retired path that is the same file as a live one (a case-only rename on a
+  case-insensitive disk, a hard link) is skipped, not deleted.
 - A file whose content changed since the pack wrote it is kept and reported
   (`kept (locally modified)`), and stays retired. So is a file that is now a
-  symlink.
+  symlink, or one prune cannot read. A file that cannot be deleted is warned
+  about, counted in the summary (`could NOT be pruned`), and stays retired.
 - Parent dirs left empty are removed, up to but never including the repo root.
 
 This file — the pack repo's own `AGENTS.md` — has no managed block and is

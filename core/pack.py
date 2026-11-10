@@ -42,6 +42,7 @@ calls Config.load(). Stdlib only.
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import stat
 import subprocess
@@ -269,22 +270,28 @@ _DRIVE = re.compile(r"^[A-Za-z]:")
 
 
 def _safe_rel(target: Path, rel) -> Path | None:
-    """The consumer path for manifest entry `rel`, or None when it could
-    reach outside `target`: a corrupted or tampered manifest must never make
-    prune delete an arbitrary file. Containment is checked on the resolved
-    parent, so a symlinked parent dir that escapes the tree is refused, and
-    a leaf symlink is never followed."""
-    if not isinstance(rel, str) or not rel or "\0" in rel:
+    """The consumer path for manifest entry `rel`, or None when prune must
+    not act on it: a corrupted or tampered manifest must never make prune
+    delete an arbitrary file.
+
+    `rel` must be in the canonical form the pack writes (`a/b/c`: no empty,
+    `.` or `..` parts, no backslash), so an alias of a live path such as
+    `./a/b` or `a//b` is refused rather than compared as a different
+    string. Every parent dir must be a real dir: a symlink anywhere in the
+    middle, pointing inside or outside the tree, is refused. The leaf is not
+    followed here; callers check `is_symlink()` themselves."""
+    if not isinstance(rel, str) or not rel or "\0" in rel or "\\" in rel:
         return None
-    if rel.startswith(("/", "\\")) or _DRIVE.match(rel):
+    if rel.startswith("/") or _DRIVE.match(rel):
         return None
-    parts = rel.replace("\\", "/").split("/")
-    if ".." in parts:
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts):
         return None
-    dst = target / rel
-    try:
-        dst.parent.resolve().relative_to(target)
-    except (OSError, ValueError):
+    dst = target.joinpath(*parts)
+    parent = dst.parent
+    if not parent.exists():
+        return dst                     # nothing can be there to remove
+    if parent.resolve() != target.joinpath(*parts[:-1]):
         return None
     return dst
 
@@ -303,14 +310,21 @@ def _protected(rel: str, base_prefixes: list[str]) -> bool:
     return _is_base(norm, [b.casefold() for b in base_prefixes])
 
 
+def _base_prefixes(old: dict) -> list[str]:
+    """Current base-layer dests plus any an old manifest recorded."""
+    old_base = old.get("base_layer")
+    prefixes = list(_BASE_DESTS)
+    if isinstance(old_base, list):
+        prefixes += [b for b in old_base if isinstance(b, str) and b not in prefixes]
+    return prefixes
+
+
 def _prune_candidates(old: dict, old_files: dict, planned: set[str]) -> dict:
     """{rel: sha last written} for files a previous sync wrote (old `files`,
     plus anything already `retired`) that the current plan no longer ships,
-    minus protected paths."""
-    old_base = old.get("base_layer")
-    base_prefixes = list(_BASE_DESTS)
-    if isinstance(old_base, list):
-        base_prefixes += [b for b in old_base if isinstance(b, str)]
+    minus protected paths. A non-canonical `rel` stays in, so `_safe_rel`
+    reports it as unsafe and it drops out of `retired`."""
+    base_prefixes = _base_prefixes(old)
     old_retired = old.get("retired") if isinstance(old.get("retired"), dict) else {}
     out: dict = {}
     # `files` wins over `retired`: it holds the most recent write.
@@ -321,33 +335,89 @@ def _prune_candidates(old: dict, old_files: dict, planned: set[str]) -> dict:
     return out
 
 
-def _classify_retired(target: Path, candidates: dict) -> dict[str, list[str]]:
+def _file_id(path: Path) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _live_ids(target: Path, planned: set[str], base_prefixes: list[str]) -> set:
+    """(st_dev, st_ino) of every file prune must never remove: each planned
+    dest, AGENTS.md, the manifest, and every file under a base-layer dir.
+    Comparing identities, not strings, catches the aliases a string check
+    misses: a case-only difference on a case-insensitive disk, or a hard
+    link."""
+    ids = set()
+    for rel in list(planned) + [AGENTS_REL, MANIFEST_REL]:
+        fid = _file_id(target / rel)
+        if fid:
+            ids.add(fid)
+    for prefix in base_prefixes:
+        root = target / prefix
+        for d, _dirs, files in os.walk(root, followlinks=False):
+            for name in files:
+                fid = _file_id(Path(d) / name)
+                if fid:
+                    ids.add(fid)
+    return ids
+
+
+_BUCKETS = ("prune", "modified", "symlink", "unreadable", "unsafe", "notfile", "alias")
+
+
+def _classify_one(target: Path, rel: str, sha, live: set) -> str | None:
+    """The bucket for one candidate, or None when it has vanished."""
+    dst = _safe_rel(target, rel)
+    if dst is None:
+        return "unsafe"
+    # lstat, not Path.exists()/is_symlink(): those swallow EACCES on newer
+    # Pythons, which would make an unreadable file look vanished.
+    try:
+        st = os.lstat(dst)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if stat.S_ISLNK(st.st_mode):
+        return "symlink"
+    if not stat.S_ISREG(st.st_mode):
+        return "notfile"               # the pack only ever writes files
+    if _file_id(dst) in live:
+        return "alias"
+    cur = _sha_bytes(dst.read_bytes())
+    return "prune" if cur == sha else "modified"
+
+
+def _classify_retired(target: Path, candidates: dict,
+                      live: set | None = None) -> dict[str, list[str]]:
     """Sort candidates into prune (unchanged since the pack wrote it), kept
-    (locally modified, symlink, unreadable) and unsafe. Vanished files are
-    dropped: there is nothing left to remove."""
-    res: dict[str, list[str]] = {k: [] for k in
-                                 ("prune", "modified", "symlink", "unreadable", "unsafe")}
+    (locally modified, symlink, unreadable) and skipped (unsafe path, not a
+    file, same file as a live path). Vanished files are dropped: there is
+    nothing left to remove."""
+    res: dict[str, list[str]] = {k: [] for k in _BUCKETS}
+    live = live or set()
     for rel in sorted(candidates):
-        dst = _safe_rel(target, rel)
-        if dst is None:
-            res["unsafe"].append(rel)
-            continue
-        if dst.is_symlink():
-            res["symlink"].append(rel)
-            continue
-        if not dst.exists():
-            continue
-        if not dst.is_file():
-            # The pack only ever writes files; a dir here is not ours.
-            res["unsafe"].append(rel)
-            continue
         try:
-            cur = _sha_bytes(dst.read_bytes())
+            bucket = _classify_one(target, rel, candidates[rel], live)
         except OSError:
-            res["unreadable"].append(rel)
-            continue
-        res["prune" if cur == candidates[rel] else "modified"].append(rel)
+            # e.g. a parent dir with no permissions: keep it, carry it on.
+            bucket = "unreadable"
+        if bucket:
+            res[bucket].append(rel)
     return res
+
+
+def _prune_one(target: Path, rel: str, sha) -> str:
+    """Re-check a file just before deleting it and delete it if nothing
+    changed since it was classified. Returns "pruned", "modified" (it
+    changed in the meantime) or raises OSError."""
+    dst = _safe_rel(target, rel)
+    if (dst is None or not stat.S_ISREG(os.lstat(dst).st_mode)
+            or _sha_bytes(dst.read_bytes()) != sha):
+        return "modified"
+    dst.unlink()
+    _remove_empty_parents(dst, target)
+    return "pruned"
 
 
 def _remove_empty_parents(path: Path, target: Path) -> None:
@@ -522,6 +592,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     manifest_path = target / MANIFEST_REL
     old = _load_manifest(manifest_path)
     old_files = old.get("files", {}) if isinstance(old.get("files"), dict) else {}
+    old_retired = old.get("retired") if isinstance(old.get("retired"), dict) else {}
 
     selected = _resolve_harnesses(harnesses or [], all_harnesses, old)
     added = [n for n in selected if n not in _manifest_harnesses(old)]
@@ -558,7 +629,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                 missing.append(rel)
                 continue
             cur_sha = _sha_bytes(dst.read_bytes())
-            man_sha = old_files.get(rel)
+            # A retired file the pack ships again was still written by us.
+            man_sha = old_files.get(rel, old_retired.get(rel))
             if man_sha is not None and cur_sha != man_sha:
                 locally_mod.append(rel)
             # A file both out of date and non-executable reports once, as
@@ -571,7 +643,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
         if dst.exists():
             cur_sha = _sha_bytes(dst.read_bytes())
-            man_sha = old_files.get(rel)
+            man_sha = old_files.get(rel, old_retired.get(rel))
             if man_sha is None:
                 # Present on disk but never synced by us (e.g. a consumer that
                 # already had .github/prompts/select-ticket.prompt.md with its
@@ -594,9 +666,12 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             _try_grant_exec(dst, rel, chmod_failed)
         writes += 1
 
-    # Files a previous sync wrote that this plan no longer ships.
-    retired = _classify_retired(
-        target, candidates := _prune_candidates(old, old_files, {r for _, r in plan}))
+    # Files a previous sync wrote that this plan no longer ships. Live ids
+    # are taken after the writes, so a file this run just wrote is covered.
+    planned = {r for _, r in plan}
+    candidates = _prune_candidates(old, old_files, planned)
+    live = _live_ids(target, planned, _base_prefixes(old)) if candidates else set()
+    retired = _classify_retired(target, candidates, live)
 
     # AGENTS.md managed block.
     block = _agents_block()
@@ -627,7 +702,9 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                                ("kept, locally modified", "modified"),
                                ("kept, symlink", "symlink"),
                                ("kept, unreadable", "unreadable"),
-                               ("skipped, unsafe manifest path", "unsafe")):
+                               ("skipped, unsafe manifest path", "unsafe"),
+                               ("skipped, not a file", "notfile"),
+                               ("skipped, same file as a live path", "alias")):
                 if retired[key]:
                     print(f"{title} ({len(retired[key])}):")
                     for r in retired[key]:
@@ -649,19 +726,23 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
     # Retired files: delete (with --prune) or carry forward under `retired`.
     pruned = 0
+    prune_failed = 0
     keep = retired["modified"] + retired["symlink"] + retired["unreadable"]
     if prune:
         for rel in retired["prune"]:
-            dst = target / rel
             try:
-                dst.unlink()
+                outcome = _prune_one(target, rel, candidates[rel])
             except OSError as e:
                 print(f"warning: could not prune {rel} ({e})", file=sys.stderr)
+                keep.append(rel)
+                prune_failed += 1
+                continue
+            if outcome == "modified":
+                retired["modified"].append(rel)
                 keep.append(rel)
                 continue
             print(f"pruned: {rel}")
             pruned += 1
-            _remove_empty_parents(dst, target)
         for label, key in (("locally modified", "modified"), ("symlink", "symlink"),
                            ("unreadable", "unreadable")):
             for rel in retired[key]:
@@ -670,6 +751,10 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         keep += retired["prune"]
     for rel in retired["unsafe"]:
         print(f"skipped unsafe manifest path: {rel}")
+    for rel in retired["notfile"]:
+        print(f"skipped (not a file): {rel}")
+    for rel in retired["alias"]:
+        print(f"skipped (same file as a live path): {rel}")
     new_retired = {rel: candidates[rel] for rel in sorted(keep)}
 
     for rel, reason in warnings:
@@ -709,16 +794,18 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         print(f"harnesses added: {', '.join(added)}")
     # A failed repair is not "up to date": `--check` would report the file
     # as not-executable straight after.
-    if new_retired and not prune:
-        print(f"note: {len(new_retired)} retired file(s) left in place; "
+    if retired["prune"] and not prune:
+        print(f"note: {len(retired['prune'])} retired file(s) left in place; "
               f"re-run with --prune to remove them")
     if (writes == 0 and modes == 0 and not warnings and not wrote_manifest
-            and not chmod_failed and not pruned):
+            and not chmod_failed and not pruned and not prune_failed):
         print(f"sync-pack: up to date ({len(new_files)} entries) at {target}")
     else:
         summary = f"sync-pack: {writes} file(s) written to {target}"
         if pruned:
             summary += f", {pruned} pruned"
+        if prune_failed:
+            summary += f", {prune_failed} could NOT be pruned"
         if modes:
             summary += f", {modes} exec bit(s) repaired"
         if chmod_failed:

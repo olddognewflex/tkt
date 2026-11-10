@@ -258,6 +258,7 @@ set -e
 grep -q '"retired"' "$C9/.sdlc/pack-manifest.json" || { ok=0; echo "  no retired key"; }
 "$TKT" sync-pack --prune --dir "$C9" >/dev/null
 [ ! -e "$C9/.gemini" ] || { ok=0; echo "  .gemini left after --prune"; }
+[ -f "$C9/.sdlc/pack-manifest.json" ] || { ok=0; echo "  manifest missing after prune"; }
 ! grep -q '"retired"' "$C9/.sdlc/pack-manifest.json" || { ok=0; echo "  retired key left"; }
 check_base "$C9" || ok=0
 [ -f "$C9/AGENTS.md" ] || { ok=0; echo "  AGENTS.md removed"; }
