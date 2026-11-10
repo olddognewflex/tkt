@@ -20,10 +20,52 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 # `echo ...` whose output reaches jq through a pipeline, possibly via other
-# filters. A pipe inside a `$(...)` in the echo's own arguments belongs to
-# that substitution (`echo "x: $(printf ... | jq ...)"` is fine), so the
-# echo's own segment may not contain `$(`.
-ECHO_JQ = re.compile(r"\becho\b(?:(?!\$\()[^|\n])*\|(?:[^|\n]*\|)*\s*jq\b")
+# filters. Applied to one command level at a time (see `levels`), so a pipe
+# inside a `$(...)` is judged with that substitution, not the outer line.
+_ECHO_JQ_FLAT = re.compile(r"\becho\b[^|\n]*\|(?:[^|\n]*\|)*\s*jq\b")
+
+
+def levels(line: str) -> list[str]:
+    """The line with each top-level `$(...)` replaced by a placeholder, then
+    the inside of every substitution, recursively. `||` is not a pipe."""
+    out, inner, buf = [], [], []
+    depth, start, i = 0, 0, 0
+    while i < len(line):
+        if line.startswith("$(", i):
+            if depth == 0:
+                start = i + 2
+            depth += 1
+            i += 2
+            continue
+        ch = line[i]
+        if depth:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    inner.append(line[start:i])
+                    buf.append("SUBST")
+        else:
+            buf.append(ch)
+        i += 1
+    if depth:                      # unbalanced: judge the tail as written
+        buf.append(line[start - 2:])
+    out.append("".join(buf).replace("||", " OR "))
+    for part in inner:
+        out += levels(part)
+    return out
+
+
+class _EchoJq:
+    """`ECHO_JQ.search(line)`: true when any command level pipes echo into jq."""
+
+    @staticmethod
+    def search(line: str) -> bool:
+        return any(_ECHO_JQ_FLAT.search(level) for level in levels(line))
+
+
+ECHO_JQ = _EchoJq()
 
 
 def tracked_files() -> list[Path]:
@@ -64,7 +106,9 @@ class NoEchoIntoJq(unittest.TestCase):
                     'echo "$X"|jq .',
                     'echo -n "$X" | jq .',
                     'echo "Body: $X" | jq .',
-                    'echo "$X" | tr -d x | jq .'):
+                    'echo "$X" | tr -d x | jq .',
+                    'echo "$(tkt view "$KEY" --json)" | jq .',
+                    'R=$(echo "$(tkt view K --json)" | jq -r .key)'):
             with self.subTest(bad=bad):
                 self.assertTrue(ECHO_JQ.search(bad))
         [(_, joined)] = logical_lines('echo "$X" \\\n  | jq .')
@@ -74,6 +118,7 @@ class NoEchoIntoJq(unittest.TestCase):
         for good in ("""$(printf '%s\\n' "$WL" | jq -r .human)""",
                      """echo "DEFERRED: $(printf '%s\\n' "$D" | jq -r .k)" """,
                      'echo "STOP: $1" >&2',
+                     'echo "$X" || jq .',
                      "jq -r .human <<<\"$WL\""):
             with self.subTest(good=good):
                 self.assertFalse(ECHO_JQ.search(good))
