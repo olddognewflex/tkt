@@ -34,7 +34,8 @@ _which = shutil.which
 # Roles whose entry is gated. Earlier lanes are work in progress.
 GATED_ROLES = frozenset({"review", "qa_ready", "qa", "deploy_ready", "done"})
 
-# Resolved from tkt's own checkout: consumer repos have no enforcement/.
+# Always tkt's own copy, so a stale consumer copy in .sdlc/enforcement/
+# (shipped for consumer CI and hooks) cannot change gate behaviour.
 CHECKER = (Path(__file__).resolve().parent.parent / "enforcement"
            / "check-artifact-format.mjs")
 RULES_NAME = "artifact-format.rules.json"
