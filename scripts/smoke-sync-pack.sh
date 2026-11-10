@@ -36,7 +36,8 @@ want_kiro=$want_skills
 want_agents=$(find "$PACK/agents" -maxdepth 1 -type f -name '*.md' | wc -l | tr -d ' ')
 want_steer=$(find "$PACK/.kiro/steering" -maxdepth 1 -type f | wc -l | tr -d ' ')
 want_wf=$(find "$PACK/.agents/workflows" -maxdepth 1 -type f | wc -l | tr -d ' ')
-want_enf=$(find "$PACK/enforcement" -maxdepth 1 -type f ! -name '*.test.mjs' | wc -l | tr -d ' ')
+# Same exclusions as pack.py's _EXCLUDE_GLOBS["enforcement"].
+want_enf=$(find "$PACK/enforcement" -maxdepth 1 -type f ! -name '*.test.mjs' ! -name '.DS_Store' | wc -l | tr -d ' ')
 
 # check_base DIR: the base layer is present and matches the pack. Prints
 # what is wrong; returns 1 if anything is.
