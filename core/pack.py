@@ -33,8 +33,10 @@ Pruning: a file the last sync wrote that the current plan no longer ships is
 "retired". A plain sync leaves it in place and records it under the
 manifest's `retired` key, so a later `--prune` can still reach it. `--prune`
 deletes it only when it is still byte-identical to what the pack wrote, and
-only through a manifest path that stays inside the consumer tree. The base
-layer, AGENTS.md and the manifest are never pruned.
+only through a canonical manifest path inside a pack dest dir (`_PACK_DESTS`,
+never under `.git`). The base layer, AGENTS.md and the manifest are never
+pruned; a base-layer file the pack stops shipping is tracked under
+`base_retired` so a later re-ship is not reported as pre-existing.
 
 Runs BEFORE config exists (a consumer may sync before `tkt init`), so it never
 calls Config.load(). Stdlib only.
@@ -268,6 +270,32 @@ def _is_base(rel: str, prefixes: list[str] = _BASE_DESTS) -> bool:
 
 _DRIVE = re.compile(r"^[A-Za-z]:")
 
+# Dest dirs the pack used in earlier versions but no longer writes. Files a
+# previous sync left there are still the pack's to prune. Empty today: every
+# dest dir the pack has ever written is still in use.
+_RETIRED_DESTS: tuple[str, ...] = ()
+
+# Every dir the pack writes into, now or before. Prune only acts inside these.
+_PACK_DESTS = sorted({d for _, dirs in _HARNESSES.values() for _, d in dirs}
+                     | set(_BASE_DESTS) | set(_RETIRED_DESTS))
+
+
+def _canonical(rel) -> bool:
+    """`rel` is in the form the pack writes: `a/b/c`, relative, with no
+    empty, `.` or `..` parts, no backslash and no NUL."""
+    if not isinstance(rel, str) or not rel or "\0" in rel or "\\" in rel:
+        return False
+    if rel.startswith("/") or _DRIVE.match(rel):
+        return False
+    return not any(p in ("", ".", "..") for p in rel.split("/"))
+
+
+def _pack_owned(rel: str) -> bool:
+    """`rel` sits in a dir the pack writes into, and never under `.git`."""
+    if any(p.casefold() == ".git" for p in rel.split("/")):
+        return False
+    return _is_base(rel, _PACK_DESTS)
+
 
 def _safe_rel(target: Path, rel) -> Path | None:
     """The consumer path for manifest entry `rel`, or None when prune must
@@ -280,13 +308,9 @@ def _safe_rel(target: Path, rel) -> Path | None:
     string. Every parent dir must be a real dir: a symlink anywhere in the
     middle, pointing inside or outside the tree, is refused. The leaf is not
     followed here; callers check `is_symlink()` themselves."""
-    if not isinstance(rel, str) or not rel or "\0" in rel or "\\" in rel:
-        return None
-    if rel.startswith("/") or _DRIVE.match(rel):
+    if not _canonical(rel):
         return None
     parts = rel.split("/")
-    if any(p in ("", ".", "..") for p in parts):
-        return None
     dst = target.joinpath(*parts)
     parent = dst.parent
     if not parent.exists():
@@ -311,12 +335,42 @@ def _protected(rel: str, base_prefixes: list[str]) -> bool:
 
 
 def _base_prefixes(old: dict) -> list[str]:
-    """Current base-layer dests plus any an old manifest recorded."""
+    """Current base-layer dests plus any an old manifest recorded. An old
+    entry counts only when it is canonical and inside a pack dest dir, so a
+    tampered manifest cannot point the identity walk outside the target."""
     old_base = old.get("base_layer")
     prefixes = list(_BASE_DESTS)
     if isinstance(old_base, list):
-        prefixes += [b for b in old_base if isinstance(b, str) and b not in prefixes]
+        prefixes += [b for b in old_base
+                     if _canonical(b) and _is_base(b, _PACK_DESTS)
+                     and b not in prefixes]
     return prefixes
+
+
+def _str_dict(v) -> dict:
+    """A manifest map of {rel: sha} with non-string values dropped."""
+    if not isinstance(v, dict):
+        return {}
+    return {k: x for k, x in v.items() if isinstance(k, str) and isinstance(x, str)}
+
+
+def _base_retired(target: Path, old: dict, old_files: dict, planned: set[str],
+                  base_prefixes: list[str]) -> dict:
+    """{rel: sha} of base-layer files a previous sync wrote that the pack no
+    longer ships and that are still on disk. Never pruned; kept so a later
+    re-ship knows the pack wrote them and does not warn they pre-existed."""
+    out: dict = {}
+    for rel, sha in {**_str_dict(old.get("base_retired")), **_str_dict(old_files)}.items():
+        if rel in planned or not _canonical(rel) or not _is_base(rel, base_prefixes):
+            continue
+        try:
+            os.lstat(target.joinpath(*rel.split("/")))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            pass                       # can't tell: keep tracking it
+        out[rel] = sha
+    return out
 
 
 def _prune_candidates(old: dict, old_files: dict, planned: set[str]) -> dict:
@@ -343,14 +397,19 @@ def _file_id(path: Path) -> tuple[int, int] | None:
     return (st.st_dev, st.st_ino)
 
 
-def _live_ids(target: Path, planned: set[str], base_prefixes: list[str]) -> set:
+def _live_ids(target: Path, planned: set[str], base_prefixes: list[str],
+              recorded: list[str] = ()) -> set:
     """(st_dev, st_ino) of every file prune must never remove: each planned
-    dest, AGENTS.md, the manifest, and every file under a base-layer dir.
-    Comparing identities, not strings, catches the aliases a string check
-    misses: a case-only difference on a case-insensitive disk, or a hard
-    link."""
+    dest, AGENTS.md, the manifest, every recorded base-layer path, and every
+    file under a base-layer dir. Comparing identities, not strings, catches
+    the aliases a string check misses: a case-only difference on a
+    case-insensitive disk, a hard link, or a symlinked dir. `os.stat`
+    follows links, so a recorded base path behind a per-dir symlink (which
+    the walk does not enter) is covered too."""
     ids = set()
-    for rel in list(planned) + [AGENTS_REL, MANIFEST_REL]:
+    base_recorded = [r for r in recorded
+                     if _canonical(r) and _is_base(r, base_prefixes)]
+    for rel in list(planned) + [AGENTS_REL, MANIFEST_REL] + base_recorded:
         fid = _file_id(target / rel)
         if fid:
             ids.add(fid)
@@ -364,28 +423,41 @@ def _live_ids(target: Path, planned: set[str], base_prefixes: list[str]) -> set:
     return ids
 
 
-_BUCKETS = ("prune", "modified", "symlink", "unreadable", "unsafe", "notfile", "alias")
+_BUCKETS = ("prune", "modified", "symlink", "unreadable", "unsafe", "foreign",
+            "notfile", "alias")
 
 
-def _classify_one(target: Path, rel: str, sha, live: set) -> str | None:
-    """The bucket for one candidate, or None when it has vanished."""
+def _locate(target: Path, rel) -> tuple[str | None, Path | None]:
+    """(refusal bucket or None, path) for one candidate. Neither set means
+    it has vanished."""
     dst = _safe_rel(target, rel)
     if dst is None:
-        return "unsafe"
+        return "unsafe", None
+    if not _pack_owned(rel):
+        return "foreign", None
     # lstat, not Path.exists()/is_symlink(): those swallow EACCES on newer
     # Pythons, which would make an unreadable file look vanished.
     try:
         st = os.lstat(dst)
     except (FileNotFoundError, NotADirectoryError):
-        return None
+        return None, None
     if stat.S_ISLNK(st.st_mode):
-        return "symlink"
+        return "symlink", dst
     if not stat.S_ISREG(st.st_mode):
-        return "notfile"               # the pack only ever writes files
+        return "notfile", dst          # the pack only ever writes files
+    return None, dst
+
+
+def _classify_one(target: Path, rel: str, sha, live: set) -> str | None:
+    """The bucket for one candidate, or None when it has vanished."""
+    bucket, dst = _locate(target, rel)
+    if bucket or dst is None:
+        return bucket
     if _file_id(dst) in live:
         return "alias"
     cur = _sha_bytes(dst.read_bytes())
-    return "prune" if cur == sha else "modified"
+    # A missing or non-string sha never matches: keep and report it.
+    return "prune" if isinstance(sha, str) and cur == sha else "modified"
 
 
 def _classify_retired(target: Path, candidates: dict,
@@ -409,13 +481,20 @@ def _classify_retired(target: Path, candidates: dict,
 
 def _prune_one(target: Path, rel: str, sha) -> str:
     """Re-check a file just before deleting it and delete it if nothing
-    changed since it was classified. Returns "pruned", "modified" (it
-    changed in the meantime) or raises OSError."""
-    dst = _safe_rel(target, rel)
-    if (dst is None or not stat.S_ISREG(os.lstat(dst).st_mode)
-            or _sha_bytes(dst.read_bytes()) != sha):
-        return "modified"
-    dst.unlink()
+    changed since it was classified. Returns "pruned", "gone" (already
+    removed), a refusal bucket ("unsafe", "foreign", "symlink", "notfile"),
+    "modified" (its content changed), or raises OSError."""
+    try:
+        bucket, dst = _locate(target, rel)
+        if bucket:
+            return bucket
+        if dst is None:
+            return "gone"
+        if _sha_bytes(dst.read_bytes()) != sha:
+            return "modified"
+        dst.unlink()
+    except FileNotFoundError:
+        return "gone"
     _remove_empty_parents(dst, target)
     return "pruned"
 
@@ -592,7 +671,16 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     manifest_path = target / MANIFEST_REL
     old = _load_manifest(manifest_path)
     old_files = old.get("files", {}) if isinstance(old.get("files"), dict) else {}
-    old_retired = old.get("retired") if isinstance(old.get("retired"), dict) else {}
+    old_retired = _str_dict(old.get("retired"))
+    old_base_retired = _str_dict(old.get("base_retired"))
+
+    def last_sha(rel: str) -> str | None:
+        """What the pack last wrote at `rel`, from any manifest map."""
+        for m in (old_files, old_retired, old_base_retired):
+            v = m.get(rel)
+            if isinstance(v, str):
+                return v
+        return None
 
     selected = _resolve_harnesses(harnesses or [], all_harnesses, old)
     added = [n for n in selected if n not in _manifest_harnesses(old)]
@@ -630,7 +718,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                 continue
             cur_sha = _sha_bytes(dst.read_bytes())
             # A retired file the pack ships again was still written by us.
-            man_sha = old_files.get(rel, old_retired.get(rel))
+            man_sha = last_sha(rel)
             if man_sha is not None and cur_sha != man_sha:
                 locally_mod.append(rel)
             # A file both out of date and non-executable reports once, as
@@ -643,7 +731,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
         if dst.exists():
             cur_sha = _sha_bytes(dst.read_bytes())
-            man_sha = old_files.get(rel, old_retired.get(rel))
+            man_sha = last_sha(rel)
             if man_sha is None:
                 # Present on disk but never synced by us (e.g. a consumer that
                 # already had .github/prompts/select-ticket.prompt.md with its
@@ -669,9 +757,13 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     # Files a previous sync wrote that this plan no longer ships. Live ids
     # are taken after the writes, so a file this run just wrote is covered.
     planned = {r for _, r in plan}
+    base_prefixes = _base_prefixes(old)
     candidates = _prune_candidates(old, old_files, planned)
-    live = _live_ids(target, planned, _base_prefixes(old)) if candidates else set()
+    live = (_live_ids(target, planned, base_prefixes,
+                      list(old_files) + list(old_base_retired))
+            if candidates else set())
     retired = _classify_retired(target, candidates, live)
+    new_base_retired = _base_retired(target, old, old_files, planned, base_prefixes)
 
     # AGENTS.md managed block.
     block = _agents_block()
@@ -703,6 +795,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                                ("kept, symlink", "symlink"),
                                ("kept, unreadable", "unreadable"),
                                ("skipped, unsafe manifest path", "unsafe"),
+                               ("skipped, not a pack path", "foreign"),
                                ("skipped, not a file", "notfile"),
                                ("skipped, same file as a live path", "alias")):
                 if retired[key]:
@@ -737,9 +830,13 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                 keep.append(rel)
                 prune_failed += 1
                 continue
-            if outcome == "modified":
-                retired["modified"].append(rel)
-                keep.append(rel)
+            if outcome == "gone":
+                continue
+            if outcome != "pruned":
+                # Changed since it was classified: report it in its new bucket.
+                retired[outcome].append(rel)
+                if outcome in ("modified", "symlink"):
+                    keep.append(rel)
                 continue
             print(f"pruned: {rel}")
             pruned += 1
@@ -751,6 +848,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         keep += retired["prune"]
     for rel in retired["unsafe"]:
         print(f"skipped unsafe manifest path: {rel}")
+    for rel in retired["foreign"]:
+        print(f"skipped (not a pack path): {rel}")
     for rel in retired["notfile"]:
         print(f"skipped (not a file): {rel}")
     for rel in retired["alias"]:
@@ -777,10 +876,13 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         # Omitted when empty, so a consumer with nothing retired keeps a
         # byte-identical manifest.
         "retired": new_retired or None,
+        # Never pruned; lets a re-shipped base file skip the pre-existing warning.
+        "base_retired": new_base_retired or None,
     }
     old_material = {k: old.get(k) for k in
                     ("pack_commit", "pack_root", "harnesses", "base_layer", "files")}
     old_material["retired"] = old.get("retired") or None
+    old_material["base_retired"] = old.get("base_retired") or None
     wrote_manifest = False
     if material != old_material or not manifest_path.exists():
         manifest = {k: v for k, v in material.items() if v is not None}

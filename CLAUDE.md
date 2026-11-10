@@ -161,7 +161,9 @@ Two layers, connected only by the verb contract and the normalized schema:
     `standards/` → `docs/sdlc/`, `enforcement/` → `.sdlc/enforcement/`) and
     is recorded as `base_layer` so `--prune` skips it. Files the plan no
     longer ships are carried under the manifest's `retired` key until
-    `--prune` deletes them (`_prune_candidates`, `_safe_rel`). The `.agents/skills`
+    `--prune` deletes them (`_prune_candidates`, `_safe_rel`); prune only acts
+    inside `_PACK_DESTS` and never under `.git`. Stale base-layer files are
+    tracked under `base_retired`, never pruned. The `.agents/skills`
     and `.kiro/skills` mirrors are derived from `skills/` at sync time, not
     stored in this repo.
   - `__init__.py` / `version.py` — `__version__` is the single place the release

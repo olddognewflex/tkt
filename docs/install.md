@@ -180,11 +180,14 @@ tkt sync-pack --check --prune   # list what would be removed; writes nothing, ex
 tkt sync-pack --prune           # remove it
 ```
 
-`--prune` only considers paths the previous manifest recorded, never the base
-layer, `AGENTS.md` or the manifest. It skips any recorded path that is absolute,
-not in the form the pack writes, or goes through a symlinked directory, and any
-path that turns out to be the same file as one still shipped (for example a
-case-only rename on macOS or Windows). A retired file you edited since the
+`--prune` only considers paths the previous manifest recorded, and only inside
+the directories the pack writes into (never anything under `.git`). It never
+touches the base layer, `AGENTS.md` or the manifest. It skips any recorded path
+that is absolute, not in the form the pack writes, or goes through a symlinked
+directory, and any path that turns out to be the same file as one still shipped
+(for example a case-only rename on macOS, or a hard link). On Windows a path
+whose on-disk case differs from the manifest is refused as unsafe instead: it
+is left in place and dropped from `retired`, never deleted. A retired file you edited since the
 last sync is kept and reported as `kept (locally modified)`; delete it yourself
 once you have saved what you need. Empty directories left behind are removed.
 

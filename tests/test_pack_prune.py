@@ -384,11 +384,13 @@ class Aliases(TempPack):
     def test_case_alias_of_a_planned_file_survives(self):
         if not case_insensitive(self.consumer):
             self.skipTest("needs a case-insensitive filesystem")
+        # Pack dirs match case-exactly, so a case alias is refused before
+        # the identity check; the case-only rename test covers that check.
         alias = ".CLAUDE/skills/demo/SKILL.md"
         planned = self.plant_retired(alias)
         _, out = self.sync(prune=True)
         self.assertTrue(planned.is_file())
-        self.assertIn(f"skipped (same file as a live path): {alias}", out)
+        self.assertIn(f"skipped (not a pack path): {alias}", out)
         self.assertNotIn("retired", self.manifest())
 
     def test_case_only_rename_in_the_pack_keeps_the_live_file(self):
@@ -433,6 +435,37 @@ class SymlinkedDirsInsideTheTree(TempPack):
         self.assertTrue(base.is_file())
         self.assertNotIn("pruned: .claude/skills/extra/SKILL.md", out)
         self.assertIn("skipped unsafe manifest path: .claude/skills/extra/SKILL.md", out)
+
+    def test_reverse_link_from_the_base_layer_never_prunes_base_files(self):
+        # `.agents/skills` links to Claude's dir: the base copy and the
+        # Claude copy are one file. Drop the manifest's record of the base
+        # path (as an older manifest would), so only the base-layer walk
+        # can see it.
+        (self.consumer / ".claude/skills").mkdir(parents=True)
+        self.link(".agents/skills", "../.claude/skills")
+        self.sync()
+        base = self.consumer / ".agents/skills/extra/SKILL.md"
+        m = self.manifest()
+        del m["files"][".agents/skills/extra/SKILL.md"]
+        self.write_manifest(m)
+        shutil.rmtree(self.pack_root / "skills" / "extra")
+        _, out = self.sync(prune=True)
+        self.assertTrue(base.is_file())
+        self.assertIn("skipped (same file as a live path): "
+                      ".claude/skills/extra/SKILL.md", out)
+
+    def test_per_skill_link_from_the_base_layer_never_prunes_base_files(self):
+        # Only one skill dir is a link; the walk does not enter linked
+        # dirs, so the recorded base path is what protects it.
+        (self.consumer / ".claude/skills/extra").mkdir(parents=True)
+        self.link(".agents/skills/extra", "../../.claude/skills/extra")
+        self.sync()
+        base = self.consumer / ".agents/skills/extra/SKILL.md"
+        shutil.rmtree(self.pack_root / "skills" / "extra")
+        _, out = self.sync(prune=True)
+        self.assertTrue(base.is_file())
+        self.assertIn("skipped (same file as a live path): "
+                      ".claude/skills/extra/SKILL.md", out)
 
     def test_link_to_a_planned_tree_never_prunes_planned_files(self):
         self.sync()
@@ -496,6 +529,115 @@ class Robustness(TempPack):
         self.assertTrue(self.extra.is_file())
         self.assertIn("kept (locally modified): .claude/skills/extra/SKILL.md", out)
 
+    def after_classify(self, change):
+        real = pack._classify_retired
+
+        def wrapped(*a, **kw):
+            res = real(*a, **kw)
+            change()
+            return res
+        return mock.patch.object(pack, "_classify_retired", wrapped)
+
+    def test_vanished_before_unlink_is_not_a_failure(self):
+        self.retire_extra()
+        with self.after_classify(self.extra.unlink):
+            rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("could NOT", out)
+        self.assertNotIn(".claude/skills/extra/SKILL.md",
+                         self.manifest().get("retired", {}))
+
+    def test_turned_into_a_dir_before_unlink_is_labelled_not_a_file(self):
+        self.retire_extra()
+
+        def to_dir():
+            self.extra.unlink()
+            self.extra.mkdir()
+        with self.after_classify(to_dir):
+            _, out = self.sync(prune=True)
+        self.assertTrue(self.extra.is_dir())
+        self.assertIn("skipped (not a file): .claude/skills/extra/SKILL.md", out)
+        self.assertNotIn("locally modified", out)
+
+    def test_turned_into_a_symlink_before_unlink_is_kept(self):
+        self.retire_extra()
+        other = self.tmp / "elsewhere.md"
+        other.write_text(skill_md("extra"))
+
+        def to_link():
+            self.extra.unlink()
+            try:
+                os.symlink(other, self.extra)
+            except OSError as e:
+                self.skipTest(f"cannot create symlinks: {e}")
+        with self.after_classify(to_link):
+            _, out = self.sync(prune=True)
+        self.assertTrue(other.is_file())
+        self.assertIn("kept (symlink): .claude/skills/extra/SKILL.md", out)
+
+    def test_lstat_permission_error_is_unreadable_on_every_python(self):
+        # Newer Pythons hide EACCES in Path.exists(); lstat must surface it.
+        self.retire_extra()
+        real = os.lstat
+        target = os.fspath(self.extra.resolve())
+
+        def deny(path, *a, **kw):
+            if os.fspath(path) == target:
+                raise PermissionError(13, "Permission denied", target)
+            return real(path, *a, **kw)
+
+        with mock.patch.object(pack.os, "lstat", deny):
+            rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.extra.is_file())
+        self.assertIn("kept (unreadable): .claude/skills/extra/SKILL.md", out)
+        self.assertIn(".claude/skills/extra/SKILL.md", self.manifest()["retired"])
+
+
+class PackOwnedOnly(TempPack):
+    def test_tampered_entries_outside_pack_dirs_are_never_deleted(self):
+        self.sync()
+        src = self.consumer / "src/auth.py"
+        src.parent.mkdir()
+        src.write_text("secret = 1\n")
+        head = self.consumer / ".git/HEAD"
+        head.parent.mkdir()
+        head.write_text("ref: refs/heads/main\n")
+        inner_git = self.consumer / ".claude/skills/.git/config"
+        inner_git.parent.mkdir(parents=True)
+        inner_git.write_text("[core]\n")
+        m = self.manifest()
+        m["retired"] = {r: sha(self.consumer / r) for r in
+                        ("src/auth.py", ".git/HEAD", ".claude/skills/.git/config")}
+        self.write_manifest(m)
+        _, out = self.sync(prune=True)
+        for f in (src, head, inner_git):
+            self.assertTrue(f.is_file(), f)
+        for r in ("src/auth.py", ".git/HEAD", ".claude/skills/.git/config"):
+            self.assertIn(f"skipped (not a pack path): {r}", out)
+        self.assertNotIn("retired", self.manifest())
+
+    def test_tampered_base_layer_never_walks_outside_the_target(self):
+        self.retire_extra()
+        m = self.manifest()
+        m["base_layer"] = m["base_layer"] + ["/", "/usr/share", "../../x", "src"]
+        self.write_manifest(m)
+        self.assertEqual(pack._base_prefixes(m), pack._BASE_DESTS)
+        roots = []
+        real_walk = os.walk
+
+        def spy(top, *a, **kw):
+            roots.append(Path(top))
+            return real_walk(top, *a, **kw)
+
+        with mock.patch.object(pack.os, "walk", spy):
+            self.sync(check=True, prune=True)
+            self.sync()
+        self.assertTrue(roots)
+        consumer = self.consumer.resolve()
+        for r in roots:
+            self.assertIn(consumer, r.resolve().parents, r)
+
 
 class ManifestEdges(TempPack):
     def test_empty_retired_key_causes_no_rewrite(self):
@@ -514,8 +656,28 @@ class ManifestEdges(TempPack):
         d.mkdir()
         (d / "SKILL.md").write_text(skill_md("extra") + "\nnew line\n")
         _, out = self.sync()
-        self.assertNotIn("pre-existing file overwritten: .claude/", out)
-        self.assertNotIn("pre-existing file overwritten: .kiro/", out)
+        self.assertNotIn("pre-existing file overwritten", out)
+        self.assertNotIn("base_retired", self.manifest())
+
+    def test_stale_base_files_are_tracked_but_never_pruned(self):
+        self.retire_extra()
+        base = ".agents/skills/extra/SKILL.md"
+        self.assertIn(base, self.manifest()["base_retired"])
+        self.assertNotIn(base, self.manifest().get("retired", {}))
+        self.sync(prune=True)
+        self.assertTrue((self.consumer / base).is_file())
+        (self.consumer / base).unlink()
+        self.sync()
+        self.assertNotIn("base_retired", self.manifest())
+
+    def test_non_string_sha_is_kept_never_pruned(self):
+        self.retire_extra()
+        m = self.manifest()
+        m["retired"][".claude/skills/extra/SKILL.md"] = 5
+        self.write_manifest(m)
+        _, out = self.sync(prune=True)
+        self.assertTrue(self.extra.is_file())
+        self.assertIn("kept (locally modified): .claude/skills/extra/SKILL.md", out)
 
     def test_hint_counts_only_files_prune_would_remove(self):
         self.retire_extra()

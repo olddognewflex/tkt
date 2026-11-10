@@ -151,9 +151,10 @@ the full guide.
   (only ever added, never stripped); see `docs/install.md`.
 - Removing: files the selection no longer ships (a dropped harness, a retired
   skill) are kept and recorded until you run `tkt sync-pack --prune`, which
-  deletes only unmodified files the previous sync recorded, never the base layer,
-  `AGENTS.md`, the manifest, a path through a symlinked dir, or an alias of a
-  file still shipped. `--check --prune` previews it.
+  deletes only unmodified files the previous sync recorded inside the pack's
+  own dirs, never the base layer, `AGENTS.md`, the manifest, anything under
+  `.git`, a path through a symlinked dir, or an alias of a file still shipped.
+  `--check --prune` previews it.
 
 ## Verb contract
 

@@ -291,14 +291,21 @@ it in place, records it under `retired` in the manifest, and prints a note.
 writes nothing, and exits 1 if any would go. Guarantees:
 
 - Only paths recorded in the previous manifest (`files` or `retired`) are
-  candidates, never an arbitrary consumer file.
-- The base layer, `AGENTS.md` and the manifest itself are never pruned.
+  candidates, never an arbitrary consumer file, and only inside a dir the
+  pack writes into (`.claude/`, `.kiro/skills/`, ...). Anything else, and any
+  path with a `.git` segment, is skipped as `not a pack path`.
+- The base layer, `AGENTS.md` and the manifest itself are never pruned. A
+  base-layer file the pack stops shipping stays on disk and is tracked under
+  `base_retired`, so re-shipping it later does not warn that it pre-existed.
+  An old manifest's `base_layer` entries count only when they name a pack
+  dir, so a tampered list cannot point the sync outside the repo.
 - A manifest path that is absolute, not in the canonical form the pack writes
   (`./x`, `a//b`, `..`, a backslash), or that goes through a symlinked dir
   (inside or outside the tree) is skipped and reported, so a corrupted or
   tampered manifest cannot reach other files.
 - A retired path that is the same file as a live one (a case-only rename on a
-  case-insensitive disk, a hard link) is skipped, not deleted.
+  case-insensitive disk, a hard link, a base-layer dir linked to another
+  surface) is skipped, not deleted.
 - A file whose content changed since the pack wrote it is kept and reported
   (`kept (locally modified)`), and stays retired. So is a file that is now a
   symlink, or one prune cannot read. A file that cannot be deleted is warned
