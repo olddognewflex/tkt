@@ -223,6 +223,11 @@ per-tool folders (`.opencode/commands/`, `.cursor/commands/`, `.cursor/skills/`,
   genuinely infra-specific steps are marked `PROJECT-SPECIFIC` in the skill text.
 - Editing a skill's frontmatter `description` changes the `sync-pack` managed
   block in consumer repos — it is generated from the first sentence.
+- Pipe JSON into `jq` with `printf '%s\n' "$VAR" | jq`, never `echo "$VAR"`:
+  zsh's and dash's `echo` expand the `\n` escapes inside JSON strings and
+  hand `jq` invalid JSON. Inside a TOML `"""` string use `printf '%s'`, since
+  TOML would turn `\n` into a real newline. `tests/test_no_echo_jq.py`
+  enforces both.
 
 ## Distributing the pack
 

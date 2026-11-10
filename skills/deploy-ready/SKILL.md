@@ -58,8 +58,8 @@ misconfigured; the snippet then fails closed and holds labeled tickets, loudly.
 
 ```shell
 if SCHED=$(tkt schedule --json); then
-  AH_LABEL=$(echo "$SCHED" | jq -r '.label // ""')
-  IN_WINDOW=$(echo "$SCHED" | jq -r '.in_window')
+  AH_LABEL=$(printf '%s\n' "$SCHED" | jq -r '.label // ""')
+  IN_WINDOW=$(printf '%s\n' "$SCHED" | jq -r '.in_window')
 else
   echo "WARNING: [schedule] is misconfigured (see above); holding after-hours tickets" >&2
   AH_LABEL=$(tkt cfg schedule.after_hours_label 2>/dev/null) || AH_LABEL=""
@@ -172,7 +172,7 @@ safe side for a manual gate, and it needs no commit-message key convention.
 
 ```shell
 if SCHED=$(tkt schedule --json); then
-  AH_LABEL=$(echo "$SCHED" | jq -r '.label // ""'); IN_WINDOW=$(echo "$SCHED" | jq -r '.in_window')
+  AH_LABEL=$(printf '%s\n' "$SCHED" | jq -r '.label // ""'); IN_WINDOW=$(printf '%s\n' "$SCHED" | jq -r '.in_window')
 else
   echo "WARNING: [schedule] is misconfigured (see above); treating now as business hours" >&2
   AH_LABEL=$(tkt cfg schedule.after_hours_label 2>/dev/null) || AH_LABEL=""; IN_WINDOW=true
@@ -180,7 +180,7 @@ fi
 PENDING_AH=""
 if [ -n "$AH_LABEL" ] && [ "$IN_WINDOW" = "true" ]; then
   if DR=$(tkt list --query deploy_ready --json); then
-    PENDING_AH=$(echo "$DR" | jq -r --arg l "$AH_LABEL" \
+    PENDING_AH=$(printf '%s\n' "$DR" | jq -r --arg l "$AH_LABEL" \
       '[.[] | select((.labels // []) | index($l)) | .key] | join(" ")')
   else
     PENDING_AH="unknown, the list failed"    # fail closed: warn

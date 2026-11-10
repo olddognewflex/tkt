@@ -15,7 +15,7 @@ For tickets whose `type_class` is `deliverable` (by default Task, Sub-task, Epic
 3. Record lane time and transition:
    ```shell
    WL=$(tkt worklog "$KEY" --from-role in_progress --note "Deliverable shipped" --json)
-   tkt comment "$KEY" "Deliverable complete: <summary>. Link: <url>. Time: $(echo "$WL" | jq -r .human)"
+   tkt comment "$KEY" "Deliverable complete: <summary>. Link: <url>. Time: $(printf '%s\n' "$WL" | jq -r .human)"
    tkt transition "$KEY" done
    ```
 

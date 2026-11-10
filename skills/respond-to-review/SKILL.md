@@ -32,7 +32,7 @@ WL=$(tkt worklog "$KEY" --from-role revise --note "Addressing review feedback" -
 tkt transition "$KEY" in_progress
 tkt edit "$KEY" --agent-status processing
 tkt comment "$KEY" "Addressing review feedback. Time in Revise: \
-$(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+$(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 (Skip the revise annotation if the ticket wasn't in `revise` — e.g. first review
@@ -73,7 +73,7 @@ while : ; do
           }
         } } } }' \
     -F owner="$OWNER" -F repo="$NAME" -F pr="$PR" -F after="$CURSOR")
-  echo "$RESP" | jq -c '.data.repository.pullRequest.reviewThreads.nodes[]'
+  printf '%s\n' "$RESP" | jq -c '.data.repository.pullRequest.reviewThreads.nodes[]'
   [ "$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<<"$RESP")" = "true" ] || break
   CURSOR=$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor' <<<"$RESP")
 done
@@ -207,7 +207,7 @@ WL=$(tkt worklog "$KEY" --from-role in_progress --note "Revise cycle — fixes p
 tkt transition "$KEY" review
 tkt edit "$KEY" --agent-status waiting
 tkt comment "$KEY" "Pushed fixes, re-requested review. Time in In Progress (revise cycle): \
-$(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id)). \
+$(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id)). \
 Resolved $RESOLVED_COUNT review thread(s); $OPEN_COUNT left open for the reviewer."
 ```
 
@@ -229,7 +229,7 @@ thread (`pulls/$PR/comments/<comment-id>/replies`, as in step 4) with a one-line
 gh pr comment "$PR" --repo "$REPO" --body "5 review cycles complete. Remaining items need human judgment — requesting sync review."
 WL=$(tkt worklog "$KEY" --from-role review --note "Review cycling unresolved after 5 attempts" --json)
 tkt comment "$KEY" "Review cycling unresolved after 5 attempts — needs human sync. \
-Time in review so far: $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+Time in review so far: $(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 (`$KEY` is the ticket; `$PR` is the PR number — unrelated. Always pass `$PR`
@@ -240,7 +240,7 @@ explicitly to `gh pr comment`.)
 ```shell
 WL=$(tkt worklog "$KEY" --from-role review --note "Review loop complete. Cycles: <N>" --json)
 tkt comment "$KEY" "Review loop complete. Cycles: <N>. Time in review (this round): \
-$(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+$(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 ## Output

@@ -102,7 +102,9 @@ adapter and its `view` rendering (`test_children_jira.py`,
 `test_parent_markdown.py`, `test_parent_openkanban.py`,
 `test_parent_cli.py`), the two-sided `link --type blocks|"is blocked by"`
 on the local boards (`test_blocks_markdown.py`,
-`test_blocks_openkanban.py`), `tkt --version` (`test_version.py`), and the
+`test_blocks_openkanban.py`), `tkt --version` (`test_version.py`), shipped shell snippets
+piping JSON into `jq` with `printf`, never `echo`
+(`test_no_echo_jq.py`), and the
 transition/comment format gates: warn/strict/off, lane-name resolution,
 every cannot-judge path, `[enforcement]` validation, the hierarchy checks,
 `artifact_body` per adapter and the doctor row, with one end-to-end run of

@@ -94,7 +94,7 @@ both values:
 ```shell
 WL=$(tkt worklog "$KEY" --from-role in_progress --note "PR opened" --json)
 tkt comment "$KEY" "PR opened. Time in In Progress: \
-$(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+$(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 Annotate on: in_progress → review, review → qa_ready, deploy_ready → done, any
@@ -216,7 +216,7 @@ WL=$(tkt worklog "$KEY" --from-role review --note "Approved — promoting to QA"
 tkt transition "$KEY" qa_ready
 tkt edit "$KEY" --agent-status waiting
 tkt comment "$KEY" "Preview: <url>. PR open and approved, awaiting QA. \
-Time in review (incl. loops): $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+Time in review (incl. loops): $(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 **Stop here.** QA owns the next move: `qa_ready → qa` (testing), then `→ deploy_ready`
@@ -241,7 +241,7 @@ WL=$(tkt worklog "$KEY" --from-role in_progress --note "Blocked — <desc>" --js
 tkt transition "$KEY" blocked
 tkt edit "$KEY" --agent-status blocked
 tkt comment "$KEY" "BLOCKED: <desc>. Waiting on: <who>. Need: <what unblocks>. \
-Time in In Progress before blocking: $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+Time in In Progress before blocking: $(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 ```
 
 Then stop. Run `check-blockers` periodically to recommend unblock actions.

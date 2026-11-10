@@ -143,7 +143,7 @@ gh run watch <prod-run-id> --repo "$REPO" --exit-status
 ```shell
 WL=$(tkt worklog "$HOTFIX_KEY" --from-role in_progress --note "Hotfix run complete — awaiting verification" --json)
 tkt comment "$HOTFIX_KEY" "Production workflow completed. Verify the revert serves prod traffic, then transition to Done. \
-Agent lane time: $(echo "$WL" | jq -r .human) (worklog $(echo "$WL" | jq -r .worklog_id))."
+Agent lane time: $(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id))."
 tkt comment "$TARGET_TICKET" "Reverted by $HOTFIX_KEY due to a production regression. Redo the work with the regression addressed before re-attempting."
 # If your prod workflow truly deploys: tkt transition "$HOTFIX_KEY" done; tkt edit "$HOTFIX_KEY" --agent-status done
 ```
