@@ -89,7 +89,8 @@ markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`
 and being accepted by every adapter (`test_list_all_projects.py`),
 markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
 `sync-pack`'s exec-bit handling (`test_pack_exec.py`), its always-on base
-layer and derived skill mirrors (`test_pack_base.py`), `respond-to-review`
+layer and derived skill mirrors (`test_pack_base.py`), `--prune` and its
+safety guards (`test_pack_prune.py`), `respond-to-review`
 replying in-thread across the skill and every mirror
 (`test_respond_to_review.py`), `Ticket.children` normalization in every
 adapter and its `view` rendering (`test_children_jira.py`,
@@ -151,14 +152,18 @@ Two layers, connected only by the verb contract and the normalized schema:
     adapters map the parsed result onto their own storage.
   - `pack.py` — implements `tkt sync-pack` and its `doctor` check. Copies pack files
     into a consumer tree, tracks them in `.sdlc/pack-manifest.json`, and maintains a
-    marker-delimited managed block in the consumer's `AGENTS.md`. Never deletes, never
-    writes outside recorded paths, and is idempotent. `_HARNESSES` is the registry of
+    marker-delimited managed block in the consumer's `AGENTS.md`. Deletes only on
+    `--prune`, never writes outside recorded paths, and is idempotent. `_HARNESSES` is the registry of
     named harnesses → (pack source, consumer dest) dirs; the installed set is
     additive and persisted in the manifest's `harnesses` list, so a bare re-run
     refreshes every harness the project ever added. `_BASE_LAYER` ships on
     every sync regardless (`.agents/skills`, `.agents/workflows`,
     `standards/` → `docs/sdlc/`, `enforcement/` → `.sdlc/enforcement/`) and
-    is recorded as `base_layer` so a future `--prune` (TKT-22) skips it. The `.agents/skills`
+    is recorded as `base_layer` so `--prune` skips it. Files the plan no
+    longer ships are carried under the manifest's `retired` key until
+    `--prune` deletes them (`_prune_candidates`, `_safe_rel`); prune only acts
+    inside `_PACK_DESTS` and never under `.git`. Stale base-layer files are
+    tracked under `base_retired`, never pruned. The `.agents/skills`
     and `.kiro/skills` mirrors are derived from `skills/` at sync time, not
     stored in this repo.
   - `__init__.py` / `version.py` — `__version__` is the single place the release

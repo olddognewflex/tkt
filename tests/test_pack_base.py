@@ -4,7 +4,7 @@
 The base layer (`.agents/skills`, `.agents/workflows`, `standards/` ->
 `docs/sdlc/`, `enforcement/` -> `.sdlc/enforcement/`) ships on every sync,
 whatever harnesses are selected, and the manifest records its dest prefixes
-as `base_layer` so a later prune can skip them.
+as `base_layer` so `--prune` skips them.
 
 Most cases point `core.pack.PACK_ROOT` at a temp pack; the last class checks
 the real pack so a stored mirror can never come back unnoticed. Offline.

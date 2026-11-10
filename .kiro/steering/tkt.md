@@ -61,7 +61,7 @@ never through a backend API directly.
 | `tkt edit KEY [--summary/--body/--agent-status/...]` | field-level update |
 | `tkt cfg DOTTED.KEY ...` | read config with template substitution |
 | `tkt init --provider P [...]` | scaffold `.sdlc/` in a project |
-| `tkt sync-pack [--dir D] [--check]` | install the pack as committed copies |
+| `tkt sync-pack [HARNESS ...] [--dir D] [--check] [--prune]` | install the pack as committed copies |
 | `tkt run [KEY] [--status/--stop/--dry-run]` | external loop driver, one phase per invocation |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
 

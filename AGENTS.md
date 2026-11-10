@@ -86,7 +86,7 @@ separate harness-specific files).
 | `tkt schedule [--at ISO]` | is it business hours now, per `[schedule]` (config + clock, no backend) |
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
 | `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
-| `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check]` | install the pack into a consumer repo as committed copies |
+| `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check] [--prune]` | install the pack into a consumer repo as committed copies |
 | `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
 | `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every run at once (local read; no backend without `--enrich`) |
 | `tkt doctor` | validate auth + reachability + board model + pack sync |
@@ -229,8 +229,8 @@ per-tool folders (`.opencode/commands/`, `.cursor/commands/`, `.cursor/skills/`,
 `tkt sync-pack` installs the pack into a consumer repo as **committed copies**,
 not symlinks: cloud harnesses and CI only see tracked files, so the symlinks
 `tkt init --link-skills` writes are invisible to them. It only writes paths it
-records in `.sdlc/pack-manifest.json`, never deletes, and is idempotent (a second
-run with an unchanged pack leaves `git status` clean).
+records in `.sdlc/pack-manifest.json`, deletes only on `--prune`, and is
+idempotent (a second run with an unchanged pack leaves `git status` clean).
 
 In a consumer repo it also maintains a generated block inside that repo's
 `AGENTS.md`, delimited by markers — content outside the markers is preserved
@@ -252,9 +252,9 @@ Every sync installs the base layer, whatever harnesses are selected:
 | `enforcement/` (minus `*.test.mjs`) | `.sdlc/enforcement/` |
 
 Codex needs no surface of its own: it reads the base layer plus `AGENTS.md`.
-The manifest records these dest dirs under `base_layer`, so a future
-`--prune` (TKT-22) will skip them. `standards/` ships once the pack has one; until then that row is
-a no-op. The checker ships executable, for consumer CI and hooks; `tkt`'s own
+The manifest records these dest dirs under `base_layer`, and `--prune` never
+removes them. `standards/` ships once the pack has one; until then that row
+is a no-op. The checker ships executable, for consumer CI and hooks; `tkt`'s own
 format gates always run the copy in `tkt`'s checkout.
 
 ### Harness selection
@@ -275,13 +275,45 @@ tkt sync-pack --list-harnesses    # names, target dirs, what's installed here
 Selection is **additive and sticky**: the resulting set is recorded under
 `harnesses` in `.sdlc/pack-manifest.json`, so a later bare `tkt sync-pack` keeps
 every added harness up to date rather than reverting to the default three.
-Removing a harness means dropping it from that list by hand — `sync-pack` never
-deletes files.
+To remove a harness, drop it from that list, then run `tkt sync-pack --prune`.
 
 The defaults apply only when nothing is named **and** nothing is recorded. So in
 a repo that was set up with `tkt init --link-skills` (symlinked `.claude/`, no
-manifest), `tkt sync-pack cursor` installs `.cursor/` and the `AGENTS.md` block
-and nothing else — it will not drop committed copies on top of the symlinks.
+manifest), `tkt sync-pack cursor` installs the base layer, `.cursor/` and the
+`AGENTS.md` block — it will not drop committed copies on top of the symlinks.
+
+### Pruning
+
+A file a previous sync wrote that the current selection no longer ships (a
+dropped harness, a skill the pack removed) is **retired**. A plain sync leaves
+it in place, records it under `retired` in the manifest, and prints a note.
+`tkt sync-pack --prune` deletes retired files; `--check --prune` lists them,
+writes nothing, and exits 1 if any would go. Guarantees:
+
+- Only paths recorded in the previous manifest (`files` or `retired`) are
+  candidates, never an arbitrary consumer file, and only inside a dir the
+  pack writes into (`.claude/`, `.kiro/skills/`, ...). Anything else, and any
+  path with a `.git` segment, is skipped as `not a pack path`.
+- The base layer, `AGENTS.md` and the manifest itself are never pruned. A
+  base-layer file the pack stops shipping stays on disk and is tracked under
+  `base_retired`, so re-shipping it later does not warn that it pre-existed.
+  An old manifest's `base_layer` entries count only when they name a pack
+  dir, so a tampered list cannot point the sync outside the repo.
+- A manifest path that is absolute, not in the canonical form the pack writes
+  (`./x`, `a//b`, `..`, a backslash), or that goes through a symlinked dir
+  (inside or outside the tree) is skipped and reported, so a corrupted or
+  tampered manifest cannot reach other files.
+- A retired path that is the same file as a live one (a case-only rename on a
+  case-insensitive disk, a hard link, a base-layer dir linked to another
+  surface, or a link you added under a base-layer dir) is skipped, not
+  deleted. Links under base-layer dirs are followed while they stay inside
+  the repo. If part of the base layer cannot be read, prune deletes nothing
+  and reports each candidate as `kept (could not verify)`.
+- A file whose content changed since the pack wrote it is kept and reported
+  (`kept (locally modified)`), and stays retired. So is a file that is now a
+  symlink, or one prune cannot read. A file that cannot be deleted is warned
+  about, counted in the summary (`could NOT be pruned`), and stays retired.
+- Parent dirs left empty are removed, up to but never including the repo root.
 
 This file — the pack repo's own `AGENTS.md` — has no managed block and is
 hand-maintained.

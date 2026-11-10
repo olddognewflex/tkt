@@ -128,8 +128,10 @@ project has no packaging).
 **Consequences:** Consumers carry a copy that can drift, so `sync-pack --check` and
 `tkt doctor` both report staleness. Idempotency is a hard requirement — a second run
 with an unchanged pack must leave `git status` clean — which is why the writer hashes
-before writing and never deletes. Harness selection is additive and sticky: once a
-harness is recorded in the manifest, later bare runs keep it in sync.
+before writing and deletes only on an explicit `--prune` (TKT-22: unmodified,
+manifest-recorded files only, never the base layer, `AGENTS.md` or the manifest).
+Harness selection is additive and sticky: once a harness is recorded in the
+manifest, later bare runs keep it in sync.
 
 ### `tkt run` drives one phase per harness invocation and never touches VCS
 **Date:** 2026-07-27

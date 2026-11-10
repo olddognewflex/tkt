@@ -2,7 +2,8 @@
 # Smoke test for `tkt sync-pack`. Exercises fresh install, idempotency, local
 # modification restore + warning, --check exit status, --all-harnesses,
 # AGENTS.md custom-content preservation, named/sticky harness selection, the
-# exec bit, and the always-on base layer (incl. under a narrow selection).
+# exec bit, the always-on base layer (incl. under a narrow selection), and
+# --prune of a dropped harness.
 # Prints PASS/FAIL per case.
 set -euo pipefail
 
@@ -24,7 +25,7 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}" "${C9:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 # Expected counts are derived from the pack, not hardcoded, so adding a skill
@@ -234,6 +235,35 @@ check_base "$C8" || ok=0
 [ -d "$C8/.cursor/commands" ] || { ok=0; echo "  .cursor/commands missing"; }
 [ "$ok" = "1" ] && pass "case11 cursor-only sync still installs the base layer" \
                 || fail "case11 narrow selection base layer"
+
+# ---- case 12: --prune removes a dropped harness's files ---------------------
+# Selection is sticky, so a harness is dropped by editing the manifest list.
+C9="$(mktemp -d)"
+"$TKT" sync-pack gemini --dir "$C9" >/dev/null
+python3 - "$C9/.sdlc/pack-manifest.json" <<'PY'
+import json, sys
+p = sys.argv[1]; m = json.load(open(p))
+m["harnesses"] = [h for h in m["harnesses"] if h != "gemini"]
+json.dump(m, open(p, "w"), indent=2, sort_keys=True)
+PY
+ok=1
+set +e
+out12="$("$TKT" sync-pack --check --prune --dir "$C9" 2>&1)"; rc12=$?
+set -e
+[ "$rc12" = 1 ] && echo "$out12" | grep -q "would prune" \
+  || { ok=0; echo "  --check --prune rc=$rc12: $out12"; }
+[ -d "$C9/.gemini/commands" ] || { ok=0; echo "  --check --prune deleted files"; }
+"$TKT" sync-pack --dir "$C9" >/dev/null           # plain sync: kept, recorded
+[ -d "$C9/.gemini/commands" ] || { ok=0; echo "  plain sync deleted files"; }
+grep -q '"retired"' "$C9/.sdlc/pack-manifest.json" || { ok=0; echo "  no retired key"; }
+"$TKT" sync-pack --prune --dir "$C9" >/dev/null
+[ ! -e "$C9/.gemini" ] || { ok=0; echo "  .gemini left after --prune"; }
+[ -f "$C9/.sdlc/pack-manifest.json" ] || { ok=0; echo "  manifest missing after prune"; }
+! grep -q '"retired"' "$C9/.sdlc/pack-manifest.json" || { ok=0; echo "  retired key left"; }
+check_base "$C9" || ok=0
+[ -f "$C9/AGENTS.md" ] || { ok=0; echo "  AGENTS.md removed"; }
+[ "$ok" = "1" ] && pass "case12 --prune removes a dropped harness, keeps base layer" \
+                || fail "case12 prune"
 
 echo
 if [ "$fails" = "0" ]; then

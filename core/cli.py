@@ -232,6 +232,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--check", action="store_true",
                     help="report-only: list missing/locally-modified/out-of-date/"
                          "not-executable pack files and exit 1 if any; writes nothing")
+    sp.add_argument("--prune", action="store_true",
+                    help="delete files a previous sync wrote that the current "
+                         "selection no longer ships, if unmodified; with --check, "
+                         "list them and write nothing")
 
     sp = add("run")
     sp.add_argument("key", nargs="?", default=None,
@@ -381,7 +385,8 @@ def main(argv: list[str]) -> int:
             names = [n.strip()
                      for raw in (args.harnesses + args.harness_flag)
                      for n in raw.split(",") if n.strip()]
-            return sync_pack(args.dir, args.all_harnesses, args.check, names)
+            return sync_pack(args.dir, args.all_harnesses, args.check, names,
+                             prune=args.prune)
 
         # `agents --dir` is the escape hatch for a caller (a TUI) started in a
         # directory with no config of its own: the named roots carry theirs.

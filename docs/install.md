@@ -72,8 +72,8 @@ tail, path-verbatim.
 
 Codex reads the base layer plus `AGENTS.md`, so it needs no harness of its own.
 Harness selection only adds surfaces on top: no selection, however narrow, drops
-the base layer. The manifest records these dirs under `base_layer`, so a future
-`--prune` (TKT-22) will skip them. A file of your own at one of these paths is
+the base layer. The manifest records these dirs under `base_layer`, and
+`--prune` never removes them. A file of your own at one of these paths is
 overwritten, with a warning, on the first sync that ships it; keep your own
 files outside these dirs.
 
@@ -108,8 +108,8 @@ tkt sync-pack --list-harnesses    # names, dirs, and what this repo installs
 The selection is **additive and sticky**: it is recorded under `harnesses` in
 `.sdlc/pack-manifest.json`, so subsequent bare `tkt sync-pack` runs (and
 `--check`) cover every added harness instead of reverting to the default three.
-`sync-pack` never deletes, so removing a harness means dropping its name from
-that manifest list and deleting its directory by hand.
+Because selection is sticky, removing a harness means dropping its name from
+that manifest list and then running `tkt sync-pack --prune` (see §4).
 
 The default set applies only when you name nothing **and** the manifest records
 nothing. A repo set up with `tkt init --link-skills` has symlinks in `.claude/`
@@ -166,9 +166,30 @@ intentional: **customizations belong upstream in the pack, not in a consumer
 repo.** If you need a skill to behave differently, change it in the pack and let
 `sync-pack` propagate it everywhere.
 
-`sync-pack` never deletes files and only ever writes the paths recorded in
-`.sdlc/pack-manifest.json`. A re-run against an unchanged pack makes zero changes
-on disk (the manifest included), so `git status` stays clean.
+`sync-pack` only ever writes the paths recorded in `.sdlc/pack-manifest.json`,
+and deletes nothing unless you pass `--prune`. A re-run against an unchanged pack
+makes zero changes on disk (the manifest included), so `git status` stays clean.
+
+**Pruning retired files.** When the current selection stops shipping a file a
+previous sync wrote (you dropped a harness from the manifest list, or the pack
+removed a skill), that file is *retired*. A plain sync keeps it, records it under
+`retired` in the manifest and prints a note, so a later prune can still find it.
+
+```sh
+tkt sync-pack --check --prune   # list what would be removed; writes nothing, exit 1 if any
+tkt sync-pack --prune           # remove it
+```
+
+`--prune` only considers paths the previous manifest recorded, and only inside
+the directories the pack writes into (never anything under `.git`). It never
+touches the base layer, `AGENTS.md` or the manifest. It skips any recorded path
+that is absolute, not in the form the pack writes, or goes through a symlinked
+directory, and any path that turns out to be the same file as one still shipped
+(for example a case-only rename on macOS, or a hard link). On Windows a path
+whose on-disk case differs from the manifest is refused as unsafe instead: it
+is left in place and dropped from `retired`, never deleted. A retired file you edited since the
+last sync is kept and reported as `kept (locally modified)`; delete it yourself
+once you have saved what you need. Empty directories left behind are removed.
 
 ## 5. Committed copies vs. symlinks
 
