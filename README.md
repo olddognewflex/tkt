@@ -311,15 +311,18 @@ read, acli's own output decides.
   `parent = "KEY"` search over REST (every page) or acli (first 100 only,
   `--limit 100`). That search is not scoped to
   `[ticketing].project`, so a child in another project is still listed.
-- **parent** = `fields.parent`, on `list` and `view`, with no extra call.
-- **Identity fields**, on `list` and `view` with no extra call: `project` /
+- **parent** = `fields.parent`, on `view` and REST-mode `list`, with no extra
+  call. acli-mode `list` leaves it `""` (acli search rejects the field).
+- **Identity fields**, on `view` and REST-mode `list` with no extra call
+  (acli-mode `list` fills only the people fields; see below): `project` /
   `project_name` = `fields.project.key` / `.name`; `assignee_id` /
   `reporter_id` = the user's `accountId`; `reporter` = its display name, else
   email (as for `assignee`); `created` / `updated` = Jira's timestamps
   converted to UTC. A missing or null field, or a timestamp without an offset
   or that won't parse, leaves the default (`""` / `null`) rather than failing.
 - In **acli mode** `list` carries no `blocked_by` at all (acli search rejects
-  `issuelinks`), so blocker state must be confirmed per ticket with
+  `issuelinks`), and no `parent`, `project`, `project_name`, `created` or
+  `updated` (acli search rejects those too; `view` fills them), so blocker state must be confirmed per ticket with
   `tkt blockers` — which `select-ticket` does. REST mode returns the full set.
 
 ### github

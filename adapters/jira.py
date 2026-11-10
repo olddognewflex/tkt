@@ -560,7 +560,7 @@ class JiraAdapter(Adapter):
                 blocks.append(outer["key"])
         status = (f.get("status") or {}).get("name", "")
         # The parent (an Epic, or a sub-task's Story) arrives with the issue
-        # itself, so unlike `children` it costs no extra call: `list` and
+        # itself, so unlike `children` it costs no extra call: REST `list` and
         # `view(hierarchy=False)` carry it too.
         parent = f.get("parent")
         parent = (parent.get("key") or "") if isinstance(parent, dict) else ""
@@ -686,8 +686,11 @@ class JiraAdapter(Adapter):
         # issuelinks ARE available). REST mode (above) returns the full set.
         # `--paginate` fetches every match; a `--limit` would silently drop
         # candidates past it, as the old 25 did.
-        fields = ("priority,assignee,summary,labels,issuetype,status,parent,"
-                  "project,reporter,created,updated")
+        # acli search also rejects `parent`, `project`, `created` and
+        # `updated` ("fields ... are not allowed"), failing the whole call,
+        # so acli-mode list results leave those at their defaults; `view`
+        # (`*all`) fills them.
+        fields = "priority,assignee,summary,labels,issuetype,status,reporter"
         issues = self._acli_json("jira", "workitem", "search", "--jql", jql,
                                  "--fields", fields, "--paginate")
         return [self._to_ticket(i) for i in (issues or [])]

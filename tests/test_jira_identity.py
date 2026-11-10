@@ -137,9 +137,12 @@ class FullPayload(unittest.TestCase):
         [t] = StubRestJira().list(tier=1)
         self.assert_identity(t)
 
-    def test_acli_list_populates_all_seven(self):
+    def test_acli_list_populates_people_fields(self):
+        # acli search can't request project/created/updated (see
+        # ListFieldStrings), so only the people fields are promised here.
         [t] = StubAcliJira().list(tier=1)
-        self.assert_identity(t)
+        self.assertEqual((t.assignee, t.assignee_id, t.reporter, t.reporter_id),
+                         ("Ann", "acc-ann", "Bob", "acc-bob"))
 
     def test_to_dict_carries_the_values(self):
         d = StubRestJira().view("PROJ-1").to_dict()
@@ -246,12 +249,20 @@ class ListFieldStrings(unittest.TestCase):
         [search] = a.searches
         self.assertLessEqual(self.WANTED, set(search["fields"].split(",")))
 
-    def test_acli_search_requests_identity_fields(self):
+    # Fields a live `acli jira workitem search --fields` accepted (checked
+    # 2026-11-10). It refuses `parent`, `project`, `created` and `updated`,
+    # and one refused name fails the whole search, so the acli field string
+    # must stay inside this set.
+    ACLI_SEARCH_ALLOWED = {"priority", "assignee", "summary", "labels",
+                           "issuetype", "status", "reporter"}
+
+    def test_acli_search_stays_inside_allowed_fields(self):
         a = StubAcliJira()
         a.list(tier=1)
         [call] = [c for c in a.acli_calls if c[:3] == ("jira", "workitem", "search")]
-        fields = call[call.index("--fields") + 1]
-        self.assertLessEqual(self.WANTED, set(fields.split(",")))
+        fields = set(call[call.index("--fields") + 1].split(","))
+        self.assertLessEqual(fields, self.ACLI_SEARCH_ALLOWED)
+        self.assertIn("reporter", fields)
 
     def test_existing_fields_still_requested(self):
         a = StubRestJira()

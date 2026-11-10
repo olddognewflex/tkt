@@ -106,13 +106,14 @@ separate harness-specific files).
 
 ### Ticket identity fields
 
-`tkt view --json` (and `list --json`) also carry `project` / `project_name`
+`tkt view --json` (and, partly, `list --json`) also carry `project` / `project_name`
 (key and display name), `assignee_id`, `reporter` / `reporter_id` (display
 name, else email, and account id) and `created` / `updated` (canonical UTC,
 `...T06:28:36.123Z`). Only jira fills them today; every other backend leaves
 `""` / `null`, so treat an empty value as "unknown", not as a fact. A
 timestamp jira can't parse is `null` here, never an error (unlike
-`tkt activity`). To match people across tickets, compare account ids, not
+`tkt activity`). On jira's acli fallback, `list` fills only the people
+fields; `view` always fills all of them. To match people across tickets, compare account ids, not
 names. `tkt whoami` prints a name or email, not an account id.
 
 ### Activity semantics
