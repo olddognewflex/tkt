@@ -7,7 +7,9 @@ pack (what `tkt init --link-skills` writes) are invisible to them. sync-pack
 copies the pack's files into the consumer tree so they can be committed.
 
 Guarantees:
-  * Only ever writes paths it records in .sdlc/pack-manifest.json — never deletes.
+  * Only ever writes paths it records in .sdlc/pack-manifest.json. It deletes
+    nothing unless asked: `--prune` removes files a previous sync wrote that
+    the current selection no longer ships (see `_prune_candidates`).
   * Idempotent: a second run with an unchanged pack makes zero changes on disk
     (including the manifest), so `git status` stays clean.
   * Never touches content outside the AGENTS.md marker region it manages.
@@ -23,9 +25,16 @@ Guarantees:
 Base layer: some dirs ship on every sync, whatever harnesses are selected
 (`_BASE_LAYER`): the `.agents/skills` mirror, `.agents/workflows`,
 `standards/` -> `docs/sdlc/` and `enforcement/` -> `.sdlc/enforcement/`. The
-manifest records their dest prefixes as `base_layer` so a future prune never
+manifest records their dest prefixes as `base_layer` so `--prune` never
 removes them. The `.agents/skills` and `.kiro/skills` mirrors are derived
 from the canonical `skills/` at sync time; they are not stored in the pack.
+
+Pruning: a file the last sync wrote that the current plan no longer ships is
+"retired". A plain sync leaves it in place and records it under the
+manifest's `retired` key, so a later `--prune` can still reach it. `--prune`
+deletes it only when it is still byte-identical to what the pack wrote, and
+only through a manifest path that stays inside the consumer tree. The base
+layer, AGENTS.md and the manifest are never pruned.
 
 Runs BEFORE config exists (a consumer may sync before `tkt init`), so it never
 calls Config.load(). Stdlib only.
@@ -33,6 +42,7 @@ calls Config.load(). Stdlib only.
 import fnmatch
 import hashlib
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -253,6 +263,105 @@ def _is_base(rel: str, prefixes: list[str] = _BASE_DESTS) -> bool:
     return any(rel == p or rel.startswith(p + "/") for p in prefixes)
 
 
+# ---- pruning ----------------------------------------------------------------
+
+_DRIVE = re.compile(r"^[A-Za-z]:")
+
+
+def _safe_rel(target: Path, rel) -> Path | None:
+    """The consumer path for manifest entry `rel`, or None when it could
+    reach outside `target`: a corrupted or tampered manifest must never make
+    prune delete an arbitrary file. Containment is checked on the resolved
+    parent, so a symlinked parent dir that escapes the tree is refused, and
+    a leaf symlink is never followed."""
+    if not isinstance(rel, str) or not rel or "\0" in rel:
+        return None
+    if rel.startswith(("/", "\\")) or _DRIVE.match(rel):
+        return None
+    parts = rel.replace("\\", "/").split("/")
+    if ".." in parts:
+        return None
+    dst = target / rel
+    try:
+        dst.parent.resolve().relative_to(target)
+    except (OSError, ValueError):
+        return None
+    return dst
+
+
+def _protected(rel: str, base_prefixes: list[str]) -> bool:
+    """Paths prune never touches: the base layer, AGENTS.md (and its block
+    key) and the manifest. Compared case-folded on a normalized path, so
+    `./agents.md` on a case-insensitive disk is still AGENTS.md."""
+    if not isinstance(rel, str):
+        return False
+    norm = "/".join(p for p in rel.replace("\\", "/").split("/")
+                    if p not in ("", ".")).casefold()
+    if norm in {AGENTS_REL.casefold(), AGENTS_MANIFEST_KEY.casefold(),
+                MANIFEST_REL.casefold()}:
+        return True
+    return _is_base(norm, [b.casefold() for b in base_prefixes])
+
+
+def _prune_candidates(old: dict, old_files: dict, planned: set[str]) -> dict:
+    """{rel: sha last written} for files a previous sync wrote (old `files`,
+    plus anything already `retired`) that the current plan no longer ships,
+    minus protected paths."""
+    old_base = old.get("base_layer")
+    base_prefixes = list(_BASE_DESTS)
+    if isinstance(old_base, list):
+        base_prefixes += [b for b in old_base if isinstance(b, str)]
+    old_retired = old.get("retired") if isinstance(old.get("retired"), dict) else {}
+    out: dict = {}
+    # `files` wins over `retired`: it holds the most recent write.
+    for rel, sha in list(old_retired.items()) + list(old_files.items()):
+        if rel in planned or _protected(rel, base_prefixes):
+            continue
+        out[rel] = sha if isinstance(sha, str) else None
+    return out
+
+
+def _classify_retired(target: Path, candidates: dict) -> dict[str, list[str]]:
+    """Sort candidates into prune (unchanged since the pack wrote it), kept
+    (locally modified, symlink, unreadable) and unsafe. Vanished files are
+    dropped: there is nothing left to remove."""
+    res: dict[str, list[str]] = {k: [] for k in
+                                 ("prune", "modified", "symlink", "unreadable", "unsafe")}
+    for rel in sorted(candidates):
+        dst = _safe_rel(target, rel)
+        if dst is None:
+            res["unsafe"].append(rel)
+            continue
+        if dst.is_symlink():
+            res["symlink"].append(rel)
+            continue
+        if not dst.exists():
+            continue
+        if not dst.is_file():
+            # The pack only ever writes files; a dir here is not ours.
+            res["unsafe"].append(rel)
+            continue
+        try:
+            cur = _sha_bytes(dst.read_bytes())
+        except OSError:
+            res["unreadable"].append(rel)
+            continue
+        res["prune" if cur == candidates[rel] else "modified"].append(rel)
+    return res
+
+
+def _remove_empty_parents(path: Path, target: Path) -> None:
+    """rmdir `path`'s parents while they are empty, stopping at the first
+    non-empty one, any error, or the consumer root (never removed)."""
+    d = path.parent
+    while d != target and target in d.parents:
+        try:
+            d.rmdir()
+        except OSError:
+            return
+        d = d.parent
+
+
 def _resolve_harnesses(requested: list[str], all_harnesses: bool,
                        manifest: dict) -> list[str]:
     """Selection is ADDITIVE and STICKY: the harnesses recorded by a previous
@@ -401,7 +510,7 @@ def _report_check(missing: list, locally_mod: list, outdated: list,
 # ---- entry point -----------------------------------------------------------
 
 def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
-              harnesses: list[str] | None = None) -> int:
+              harnesses: list[str] | None = None, prune: bool = False) -> int:
     target = Path(target_dir).expanduser().resolve()
 
     # Guardrail: never install into the pack checkout itself.
@@ -485,6 +594,10 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             _try_grant_exec(dst, rel, chmod_failed)
         writes += 1
 
+    # Files a previous sync wrote that this plan no longer ships.
+    retired = _classify_retired(
+        target, candidates := _prune_candidates(old, old_files, {r for _, r in plan}))
+
     # AGENTS.md managed block.
     block = _agents_block()
     block_sha = _sha_bytes(block.encode("utf-8"))
@@ -509,7 +622,18 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         print(f"harnesses: {', '.join(selected)}")
         print(f"base layer: {', '.join(_BASE_DESTS)}")
         _report_check(missing, locally_mod, outdated, not_exec)
-        return 1 if (missing or locally_mod or outdated or not_exec) else 0
+        if prune:
+            for title, key in (("would prune", "prune"),
+                               ("kept, locally modified", "modified"),
+                               ("kept, symlink", "symlink"),
+                               ("kept, unreadable", "unreadable"),
+                               ("skipped, unsafe manifest path", "unsafe")):
+                if retired[key]:
+                    print(f"{title} ({len(retired[key])}):")
+                    for r in retired[key]:
+                        print(f"  {r}")
+        return 1 if (missing or locally_mod or outdated or not_exec
+                     or (prune and retired["prune"])) else 0
 
     # write mode for AGENTS.md
     if cur_agents is not None:
@@ -522,6 +646,31 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         agents_path.parent.mkdir(parents=True, exist_ok=True)
         agents_path.write_text(new_agents, encoding="utf-8")
         writes += 1
+
+    # Retired files: delete (with --prune) or carry forward under `retired`.
+    pruned = 0
+    keep = retired["modified"] + retired["symlink"] + retired["unreadable"]
+    if prune:
+        for rel in retired["prune"]:
+            dst = target / rel
+            try:
+                dst.unlink()
+            except OSError as e:
+                print(f"warning: could not prune {rel} ({e})", file=sys.stderr)
+                keep.append(rel)
+                continue
+            print(f"pruned: {rel}")
+            pruned += 1
+            _remove_empty_parents(dst, target)
+        for label, key in (("locally modified", "modified"), ("symlink", "symlink"),
+                           ("unreadable", "unreadable")):
+            for rel in retired[key]:
+                print(f"kept ({label}): {rel}")
+    else:
+        keep += retired["prune"]
+    for rel in retired["unsafe"]:
+        print(f"skipped unsafe manifest path: {rel}")
+    new_retired = {rel: candidates[rel] for rel in sorted(keep)}
 
     for rel, reason in warnings:
         if reason == "preexisting":
@@ -540,12 +689,16 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         "harnesses": selected,
         "base_layer": _BASE_DESTS,
         "files": new_files,
+        # Omitted when empty, so a consumer with nothing retired keeps a
+        # byte-identical manifest.
+        "retired": new_retired or None,
     }
     old_material = {k: old.get(k) for k in
                     ("pack_commit", "pack_root", "harnesses", "base_layer", "files")}
+    old_material["retired"] = old.get("retired") or None
     wrote_manifest = False
     if material != old_material or not manifest_path.exists():
-        manifest = dict(material)
+        manifest = {k: v for k, v in material.items() if v is not None}
         manifest["synced_at"] = _now_iso()
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(
@@ -556,11 +709,16 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         print(f"harnesses added: {', '.join(added)}")
     # A failed repair is not "up to date": `--check` would report the file
     # as not-executable straight after.
+    if new_retired and not prune:
+        print(f"note: {len(new_retired)} retired file(s) left in place; "
+              f"re-run with --prune to remove them")
     if (writes == 0 and modes == 0 and not warnings and not wrote_manifest
-            and not chmod_failed):
+            and not chmod_failed and not pruned):
         print(f"sync-pack: up to date ({len(new_files)} entries) at {target}")
     else:
         summary = f"sync-pack: {writes} file(s) written to {target}"
+        if pruned:
+            summary += f", {pruned} pruned"
         if modes:
             summary += f", {modes} exec bit(s) repaired"
         if chmod_failed:
