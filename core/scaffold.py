@@ -15,7 +15,7 @@ from pathlib import Path, PurePath
 from . import config as config_mod
 from . import tomledit, toolchain
 from .schema import Check
-from .errors import ConfigError, UsageError
+from .errors import ConfigError, NotFoundError, UsageError
 
 PACK_ROOT = Path(__file__).resolve().parent.parent
 
@@ -392,9 +392,15 @@ def doctor_check(config) -> Check | None:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         ex = {}
     hits = []
-    ex_key = _tbl(ex, "ticketing").get("project")
-    if isinstance(ex_key, str) and ex_key and config.project == ex_key:
-        hits.append(f'[ticketing].project = "{ex_key}"')
+    table, key, _ = _PROJECT_KEY.get(config.provider,
+                                     ("ticketing", "project", True))
+    ex_key = _tbl(ex, table).get(key)
+    try:
+        cur = config.get(f"{table}.{key}")
+    except NotFoundError:
+        cur = None
+    if isinstance(ex_key, str) and ex_key and cur == ex_key:
+        hits.append(f'[{table}].{key} = "{ex_key}"')
     repo = config.vcs.get("repo", "") if isinstance(config.vcs, dict) else ""
     if isinstance(repo, str) and repo and \
             repo in _REPO_PLACEHOLDERS | {_tbl(ex, "vcs").get("repo")}:

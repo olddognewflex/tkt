@@ -80,6 +80,20 @@ class TomlEditEdges(unittest.TestCase):
     """QA Author — adversarial: header comments, [[array]] headers, EOF
     without newline, CRLF input."""
 
+    def test_non_string_value_keeps_trailing_comment(self):
+        for old, want in [('build = true  # run it\n', 'build = "x"  # run it\n'),
+                          ('build = ["a#b"] # c\n', 'build = "x" # c\n'),
+                          ('build = 3\n', 'build = "x"\n')]:
+            with self.subTest(old):
+                out = tomledit.set_keys("[build]\n" + old, "build", {"build": "x"})
+                self.assertEqual(out, "[build]\n" + want)
+                self.assertEqual(tomllib.loads(out), {"build": {"build": "x"}})
+
+    def test_replaced_line_keeps_its_line_ending(self):
+        text = '[build]\r\nbuild = true # c\r\nlint = "y"\r\n'
+        out = tomledit.set_keys(text, "build", {"build": "x"})
+        self.assertEqual(out, '[build]\r\nbuild = "x" # c\r\nlint = "y"\r\n')
+
     def test_header_with_trailing_comment(self):
         text = '[build]   # commands\nbuild = "x"\n\n[run]\na = "b"\n'
         out = tomledit.set_keys(text, "build", {"build": "y", "lint": "z"})

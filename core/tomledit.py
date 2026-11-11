@@ -20,6 +20,12 @@ def toml_str(v: str) -> str:
 
 def _code(line: str) -> str:
     """The line with strings and any trailing comment removed."""
+    return _scan(line)[0]
+
+
+def _scan(line: str) -> tuple[str, int]:
+    """(line without strings or comment, index of a trailing `#` comment,
+    or len(line) when there is none)."""
     out, q, i = [], None, 0
     while i < len(line):
         c = line[i]
@@ -36,7 +42,7 @@ def _code(line: str) -> str:
         else:
             out.append(c)
         i += 1
-    return "".join(out)
+    return "".join(out), i
 
 
 def _headers(lines: list[str]) -> list[tuple[int, str]]:
@@ -128,8 +134,15 @@ def set_keys(text: str, table: str, values: dict[str, str],
         seen.add(key)
         val = m.group("val")
         tok = _STR_RE.match(val)
-        rest = val[tok.end():] if tok and keep_comment else ""
-        lines[i] = f"{m.group('lead')}{toml_str(values[key])}{rest}\n"
+        if not keep_comment:
+            rest = ""
+        elif tok:
+            rest = val[tok.end():]
+        else:   # non-string value: keep the padding + comment after it
+            cut = _scan(val)[1]
+            rest = val[len(val[:cut].rstrip()):]
+        eol = lines[i][len(lines[i].rstrip("\r\n")):] or "\n"
+        lines[i] = f"{m.group('lead')}{toml_str(values[key])}{rest}{eol}"
     extra = [f"{k:<9} = {toml_str(v)}\n" for k, v in values.items() if k not in seen]
     if extra:
         if not lines[end - 1].endswith("\n"):

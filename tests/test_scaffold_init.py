@@ -690,6 +690,21 @@ class DoctorEdges(unittest.TestCase):
         self.assertIn('"TKT"', c.detail)
         self.assertNotIn("[vcs]", c.detail)
 
+    def test_provider_project_key_checked_where_it_lives(self):
+        # linear/openkanban keep their project identity outside [ticketing]
+        for provider, table, key in [("linear", "linear", "team_key"),
+                                     ("openkanban", "openkanban", "project")]:
+            ex = tomllib.loads((scaffold.PACK_ROOT / "examples" /
+                                f"config.{provider}.toml").read_text())
+            placeholder = ex[table][key]
+            with self.subTest(provider, value="placeholder"):
+                c = self.check(f'[{table}]\n{key} = "{placeholder}"\n', provider)
+                self.assertIsNotNone(c)
+                self.assertTrue(c.ok)
+                self.assertIn(f'[{table}].{key} = "{placeholder}"', c.detail)
+            with self.subTest(provider, value="changed"):
+                self.assertIsNone(self.check(f'[{table}]\n{key} = "REAL"\n', provider))
+
     def test_empty_repo_not_flagged_alongside_key(self):
         c = self.check('project = "TKT"\n[vcs]\nrepo = ""\n')
         self.assertIn('"TKT"', c.detail)

@@ -122,8 +122,8 @@ resolves outside the repo. When the board is shared and already holds
 `<KEY>-N.md` tickets, `init` warns that another repo may own the key (it still
 writes the config). `--sample` writes `<KEY>-1.md` on a private board and is
 skipped on a shared one. `tkt doctor` adds an always-ok `config placeholders`
-row while the config still carries the example's project key or a placeholder
-`[vcs].repo`.
+row while the config still carries the example's project key (wherever the
+provider keeps it, as for `--project`) or a placeholder `[vcs].repo`.
 
 `init` seeds `[build]` from whatever the project already declares, so skills run
 the project's real commands without hand-editing: `package.json` scripts (runner
