@@ -97,7 +97,7 @@ separate harness-specific files).
 | `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
 | `tkt schedule [--at ISO]` | is it business hours now, per `[schedule]` (config + clock, no backend) |
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
-| `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager) |
+| `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager; markdown joins a parent dir's shared board, key derived from the dir name) |
 | `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check] [--prune]` | install the pack into a consumer repo as committed copies |
 | `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
 | `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every run at once (local read; no backend without `--enrich`) |

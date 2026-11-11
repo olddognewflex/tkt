@@ -13,6 +13,8 @@ import re
 import tomllib
 from pathlib import Path
 
+from . import tomledit
+
 KEYS = ("build", "test", "typecheck", "lint")
 
 # script name -> config key. First match (in this order) per key wins.
@@ -32,12 +34,21 @@ _MAKE_TARGETS: dict[str, tuple[str, ...]] = {
 
 
 def detect(root: Path) -> tuple[dict[str, str], str]:
-    """Return ({key: command}, ecosystem-label). Empty dict when nothing detected."""
-    for probe in (_detect_node, _detect_rust, _detect_go, _detect_python, _detect_make):
+    """Return ({key: command}, ecosystem-label). Empty dict when nothing detected.
+
+    The first language probe that finds anything is the base; Makefile
+    targets fill whatever keys it lacks (label e.g. "go + make")."""
+    make, _ = _detect_make(root)
+    for probe in (_detect_node, _detect_rust, _detect_go, _detect_python):
         found, label = probe(root)
         if found:
+            extra = {k: v for k, v in make.items() if k not in found}
+            if extra:
+                merged = {**extra, **found}
+                found = {k: merged[k] for k in KEYS if k in merged}
+                label += " + make"
             return found, label
-    return {}, ""
+    return (make, "make") if make else ({}, "")
 
 
 # --- node ------------------------------------------------------------------
@@ -62,7 +73,7 @@ def _detect_node(root: Path) -> tuple[dict[str, str], str]:
         return {}, ""
     try:
         pkg = json.loads(manifest.read_text())
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}, ""
     scripts = pkg.get("scripts")
     if not isinstance(scripts, dict):
@@ -112,7 +123,7 @@ def _detect_python(root: Path) -> tuple[dict[str, str], str]:
         return {}, ""
     try:
         data = tomllib.loads(pyproject.read_text())
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return {}, ""
 
     # pyproject has no standard script table, so infer from the tools it configures
@@ -144,7 +155,7 @@ def _make_targets(root: Path) -> set[str]:
         if not path.exists():
             continue
         try:
-            text = path.read_text()
+            text = path.read_text(errors="replace")
         except OSError:
             return set()
         return set(re.findall(r"^([A-Za-z0-9_.-]+)\s*:(?!=)", text, re.MULTILINE))
@@ -166,45 +177,11 @@ def _detect_make(root: Path) -> tuple[dict[str, str], str]:
 
 # --- config rewrite --------------------------------------------------------
 
-_KEY_RE = re.compile(r"^(?P<key>[A-Za-z0-9_]+)(?P<pad>\s*)=")
-
-
 def apply_to_config(text: str, found: dict[str, str]) -> str:
     """Rewrite `key = "..."` lines inside the config's [build] table.
 
-    Only keys present in `found` are touched; alignment padding and every other
-    table are left byte-identical. A [build] table with no line for a detected
-    key gains one at the end of the table.
+    Only keys present in `found` are touched; alignment padding, trailing
+    comments and every other table are left byte-identical. A [build] table
+    with no line for a detected key gains one at the end of the table.
     """
-    if not found:
-        return text
-
-    lines = text.splitlines(keepends=True)
-    start = next((i for i, line in enumerate(lines)
-                  if line.strip() == "[build]"), None)
-    if start is None:
-        block = "\n[build]\n" + "".join(
-            f'{k:<9} = "{v}"\n' for k, v in found.items() if k in KEYS)
-        return text if not block.strip() else text.rstrip("\n") + "\n" + block
-
-    end = next((i for i in range(start + 1, len(lines))
-                if lines[i].lstrip().startswith("[")), len(lines))
-
-    seen = set()
-    for i in range(start + 1, end):
-        m = _KEY_RE.match(lines[i].strip())
-        if not m or m.group("key") not in found:
-            continue
-        key = m.group("key")
-        seen.add(key)
-        pad = _KEY_RE.match(lines[i].lstrip()).group("pad")
-        lines[i] = f'{key}{pad}= "{found[key]}"\n'
-
-    extra = [f'{k:<9} = "{v}"\n' for k, v in found.items()
-             if k in KEYS and k not in seen]
-    if extra:
-        tail = end
-        while tail > start + 1 and not lines[tail - 1].strip():
-            tail -= 1
-        lines[tail:tail] = extra
-    return "".join(lines)
+    return tomledit.set_keys(text, "build", {k: v for k, v in found.items() if k in KEYS})

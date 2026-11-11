@@ -258,6 +258,11 @@ per-repo VCS. The trick is absolute paths in `[markdown]`:
 - Each repo has its *own* `.sdlc/config.toml` with a repo-specific `project`
   prefix and `[vcs]`/`[build]`, but `board_dir`/`state_dir` point at the shared
   absolute paths.
+- Put the shared config at the workspace root (`/path/to/workspace/.sdlc/config.toml`),
+  then run `tkt init --provider markdown` inside each repo: it finds that parent
+  config, copies its board model, derives the repo's key from its directory
+  name (`--project` overrides) and keeps its own `[vcs]`/`[build]`. See
+  README "Use in a project".
 - Walk-up discovery (cwd → parents for `.sdlc/config.toml`) means running `tkt`
   inside a repo finds that repo's config (→ correct VCS/prefix) while all configs
   write to the one board.

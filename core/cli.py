@@ -272,6 +272,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-detect-build", action="store_false", dest="detect_build",
                     help="keep the example's [build] commands instead of seeding "
                          "them from the project's package manager")
+    sp.add_argument("--project", default=None, metavar="KEY",
+                    help="markdown/jira: [ticketing].project (markdown default: "
+                         "derived from the dir name); linear: [linear].team_key; "
+                         "openkanban: [openkanban].project; not for github")
+    sp.add_argument("--board-dir", default=None, dest="board_dir", metavar="PATH",
+                    help="markdown: board dir, written as given (state dir "
+                         "becomes its sibling `state`)")
+    sp.add_argument("--no-inherit", action="store_false", dest="inherit",
+                    help="markdown: ignore a parent dir's shared-board config")
 
     sp = add("sync-pack")
     sp.add_argument("harnesses", nargs="*", metavar="HARNESS",
@@ -433,7 +442,9 @@ def main(argv: list[str]) -> int:
             from .scaffold import init as scaffold_init
             return scaffold_init(args.provider, args.dir, args.force,
                                  args.link_skills, args.sample, interactive=True,
-                                 detect_build=args.detect_build)
+                                 detect_build=args.detect_build,
+                                 project=args.project, board_dir=args.board_dir,
+                                 inherit=args.inherit)
 
         # `sync-pack` installs pack files into a consumer tree; it needs no
         # config and may run before `tkt init`.
@@ -695,6 +706,10 @@ def main(argv: list[str]) -> int:
             pack_c = doctor_check(config)
             if pack_c is not None:
                 checks = checks + [pack_c]
+            from .scaffold import doctor_check as placeholder_check
+            ph = placeholder_check(config)
+            if ph is not None:
+                checks = checks + [ph]
             ok_all = all(c.ok for c in checks)
             if args.json:
                 print(json.dumps([c.to_dict() for c in checks], indent=2))

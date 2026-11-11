@@ -192,8 +192,7 @@ def run_root(config: Config) -> Path:
     setup that shares one board across several repos can share one run-state
     root too and see every run from a single place.
     """
-    cfg_dir = config.path.parent
-    base = cfg_dir.parent if cfg_dir.name == ".sdlc" else cfg_dir
+    base = config.root
     override = str(config._d.get("run", {}).get("state_dir", "") or "")
     if override:
         root = Path(override).expanduser()
