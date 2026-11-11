@@ -70,6 +70,8 @@ class StubGithub(GithubAdapter):
         if args[:2] == ("issue", "view"):
             return {"number": int(args[2]), "title": "mine", "body": "",
                     "state": "OPEN", "url": "", "labels": [], "assignees": []}
+        if args[:2] == ("api", "graphql"):
+            return {"data": {"repository": {}}}   # no issue states
         raise AssertionError(f"unexpected gh call: {args}")
 
     def _gh(self, *args):

@@ -48,9 +48,20 @@ separate harness-specific files).
 4. **Respect `type_class` routing.**
    - `full_sdlc` (Story/Bug): runs select → triage → plan → implement →
      self-review → open-pr → respond-to-review → deploy-ready.
-   - `deliverable` (Task/Sub-task/Epic/Spike/Chore): short-circuits via
+   - `deliverable` (Task/Sub-task/Spike/Chore): short-circuits via
      `complete-deliverable` straight to `done`.
-   - Those lists are the example configs' defaults. `[issue_types]` decides
+   - `container` (Epic): groups other tickets and is never worked.
+     `select-ticket` never selects one, and never selects a ticket with open
+     children; `triage-ticket` and Phase 1.5 stop on one; a human closes it.
+     `tkt view` adds a `rollup` (children closed / total, `ready_to_close`)
+     and `tkt children KEY --json` lists each child's state. Every ticket
+     carries `closed`: a closed role or the backend's own terminal state
+     (a closed GitHub issue, Jira's done category), one rule for parents
+     and children.
+   - Those lists are the example configs' defaults; `container` defaults to
+     `["Epic"]` when absent, `container = []` turns it off, and a type in
+     several lists resolves container > full_sdlc > deliverable.
+     `[issue_types]` decides
      which types fall in each set, and a project can move one, such as
      Sub-task, so branch on `type_class`, not the type name.
 
@@ -75,6 +86,7 @@ separate harness-specific files).
 | `tkt transition KEY ROLE` | move ticket to role's lane (format-gated from `review` on; see below) |
 | `tkt comment KEY BODY` | post activity comment (format-gated) |
 | `tkt blockers KEY --json` | unresolved blockers only |
+| `tkt children KEY --json` | each direct child's `status`, `status_role` and `closed` |
 | `tkt worklog KEY --from-role ROLE [--note T] [--billable\|--no-billable]` | log time since entry → now |
 | `tkt lane-time [KEY] --role ROLE [--keys K1:role,K2:role] [--read-only]` | log time for a closed lane interval; batch via `--keys` |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket (adapter-opt-in) |

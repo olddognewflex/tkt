@@ -30,6 +30,7 @@ blocked     = "Blocked"
 [issue_types]
 full_sdlc   = ["Story", "Bug"]
 deliverable = ["Task", "Chore", "Spike"]
+container   = ["Epic"]   # never worked; a human closes it ([] turns it off)
 
 [queries]                     # tiny JQL subset: field = "v" [AND ...] [ORDER BY field DIR]
 tier1 = 'status = "To Do" AND priority = Highest AND assignee = currentUser() ORDER BY priority DESC'

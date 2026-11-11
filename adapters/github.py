@@ -26,9 +26,10 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from urllib.parse import urlsplit
 
-from core.errors import ConfigError, NotFoundError, ProviderError
+from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
 from core.schema import Check, Ticket, Worklog
 
 from .base import Adapter
@@ -94,11 +95,7 @@ class GithubAdapter(Adapter):
                 if lab.startswith(self.type_label_prefix):
                     return lab[len(self.type_label_prefix):].strip()
             return ""
-        known = self.config.full_sdlc | self.config.deliverable
-        for lab in labels:
-            if lab in known:
-                return lab
-        return ""
+        return self.config.pick_type(labels)
 
     def _priority_from_labels(self, labels: list[str]) -> str:
         for lab in labels:
@@ -146,6 +143,9 @@ class GithubAdapter(Adapter):
             description=body,
             status=status,
             status_role=self.config.lane_to_role(status) if status else "",
+            # `gh issue --json state` says CLOSED, the REST API says closed.
+            closed=self._closed(self.config.lane_to_role(status) if status else "",
+                                str(issue.get("state") or "").lower() == "closed"),
             type_class=self.config.type_class(issue_type),
             assignee=self._assignee_login(issue.get("assignees")),
             priority=self._priority_from_labels(labels),
@@ -191,14 +191,49 @@ class GithubAdapter(Adapter):
         }
         return self._project_meta
 
+    _ITEM_PAGE = 100
+
     def _project_items(self, query: str | None = None) -> list[dict]:
+        """Every item, not only the first page: a child past it would lose
+        its lane. `--limit` is a cap gh pages up to, so a full first page
+        asks the project for its item count and fetches that many."""
         self._require_project()
+        items = self._item_list(self._ITEM_PAGE, query)
+        if len(items) >= self._ITEM_PAGE:
+            view = self._gh_json("project", "view", self.project_number,
+                                 "--owner", self.project_owner, "--format", "json")
+            total = int(((view.get("items") or {}).get("totalCount")) or 0)
+            if total > len(items):
+                items = self._item_list(total, query)
+        return items
+
+    def _item_list(self, limit: int, query: str | None) -> list[dict]:
         args = ["project", "item-list", self.project_number, "--owner", self.project_owner,
-                "--format", "json", "--limit", "100"]
+                "--format", "json", "--limit", str(limit)]
         if query:
             args += ["--query", query]
-        data = self._gh_json(*args)
-        return data.get("items", [])
+        return self._gh_json(*args).get("items", [])
+
+    def _issue_states(self, numbers: list) -> dict[str, str]:
+        """{number: "OPEN" | "CLOSED"} for this repo's issues, in one GraphQL
+        call per 100 (`item-list` carries no issue state)."""
+        owner, _, name = self._repo_name.partition("/")
+        host = _repo_host(self.repo)
+        nums = [str(n) for n in dict.fromkeys(numbers) if str(n).isdigit()]
+        out: dict[str, str] = {}
+        for i in range(0, len(nums), 100):
+            chunk = nums[i:i + 100]
+            fields = " ".join(f"i{n}: issue(number: {n}) {{ state }}" for n in chunk)
+            q = f"query {{ repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {fields} }} }}"
+            args = ["api", "graphql", "-f", f"query={q}"]
+            if host:
+                args += ["--hostname", host]
+            repo = ((self._gh_json(*args).get("data") or {}).get("repository") or {})
+            for n in chunk:
+                state = (repo.get(f"i{n}") or {}).get("state")
+                if state:
+                    out[n] = state
+        return out
 
     def _repo_items(self, query: str | None = None) -> list[dict]:
         """This repo's items only. A Project can span repos, and issue numbers
@@ -231,6 +266,7 @@ class GithubAdapter(Adapter):
             "url": content.get("url", ""),
             "labels": item.get("labels") or content.get("labels"),
             "assignees": item.get("assignees") or content.get("assignees"),
+            "state": content.get("state"),
         }
         status = self._item_status(item, self.status_field)
         return self._issue_to_ticket(issue, status=status, check_resolved=check_resolved,
@@ -256,10 +292,22 @@ class GithubAdapter(Adapter):
         # `all_projects` is a no-op: scoped by `--repo` / the Project itself.
         q = self.config.query(tier=tier, name=query)
         if self.board == "projectv2":
-            items = self._repo_items(query=q)
+            items = [i for i in self._repo_items(query=q)
+                     if (i.get("content", {}) or {}).get("type") == "Issue"]
             opt_names = self._project()["option_names"]
-            return [self._item_to_ticket(i, transitions=opt_names)
-                    for i in items if (i.get("content", {}) or {}).get("type") == "Issue"]
+            try:
+                states = self._issue_states(
+                    [(i.get("content") or {}).get("number") for i in items])
+            except ProviderError as e:
+                # `closed` then falls back to the lane alone.
+                print(f"tkt: warn: issue state unavailable: {e}", file=sys.stderr)
+                states = {}
+            for i in items:
+                content = i.get("content") or {}
+                state = states.get(str(content.get("number")))
+                if state:
+                    i["content"] = {**content, "state": state}
+            return [self._item_to_ticket(i, transitions=opt_names) for i in items]
         # labels mode: GitHub issue search
         issues = self._gh_json("issue", "list", "--repo", self.repo, "--search", q,
                                "--json", self._ISSUE_FIELDS, "--limit", "25")
@@ -304,6 +352,14 @@ class GithubAdapter(Adapter):
         URL, which is canonical whatever `--repo` spelling the config uses.
         `host` is passed whenever known, so a GHES issue is never looked up
         on gh's default host (and vice versa)."""
+        keys = [_related_key(sub, nwo) for sub in self._sub_issues(number, host, nwo)]
+        return [k for k in dict.fromkeys(keys) if k and k != number]
+
+    def _sub_issues(self, number: str, host: str, nwo: str,
+                    strict: bool = False) -> list[dict]:
+        """The raw sub-issue objects of issue `number`; [] on a 404. With
+        `strict`, a 404 for an issue that does not exist raises NotFound
+        (GitHub also answers 404 where the sub-issues API is missing)."""
         args = ["api", f"repos/{nwo}/issues/{number}/sub_issues?per_page=100",
                 "--paginate"]
         if host:
@@ -311,11 +367,53 @@ class GithubAdapter(Adapter):
         try:
             out = self._gh(*args)
         except ProviderError as e:
-            if "HTTP 404" in str(e):
-                return []
-            raise
-        keys = [_related_key(sub, nwo) for sub in _json_pages(out, " ".join(args))]
-        return [k for k in dict.fromkeys(keys) if k and k != number]
+            if "HTTP 404" not in str(e):
+                raise
+            if strict and not self._issue_exists(number):
+                raise NotFoundError(f"no issue #{number} in {self.repo}") from e
+            return []
+        return [s for s in _json_pages(out, " ".join(args)) if isinstance(s, dict)]
+
+    def _issue_exists(self, number: str) -> bool:
+        try:
+            self._gh_json("issue", "view", number, "--repo", self.repo, "--json", "number")
+        except ProviderError:
+            return False
+        return True
+
+    def child_states(self, key, children=None):
+        """One sub-issues call carrying each child's state, not a view per
+        child (which would fail on a cross-repo `owner/repo#N` key). Closed =
+        the issue is closed, or its lane is a closed role. Lane comes from
+        labels, or in projectv2 mode from one item-list call (in-repo
+        children only; GitHub numbers repeat across repos)."""
+        host, nwo = _repo_host(self.repo), self._repo_name
+        number = str(key)
+        number = number[1:] if number.startswith("#") else number
+        if not number.isdigit():
+            raise UsageError(f"children takes an issue number in {self.repo}, got {key!r}")
+        subs = self._sub_issues(number, host, nwo, strict=True)
+        item_status: dict[str, str] = {}
+        if self.board == "projectv2" and subs:
+            for item in self._repo_items():
+                n = (item.get("content", {}) or {}).get("number")
+                if n is not None:
+                    item_status[str(n)] = self._item_status(item, self.status_field)
+        closed_roles = self.config.closed_roles()
+        out, seen = [], set()
+        for sub in subs:
+            k = _related_key(sub, nwo)
+            if not k or k == number or k in seen:
+                continue
+            seen.add(k)
+            if self.board == "labels":
+                status = self._status_from_labels(self._label_names(sub.get("labels")))
+            else:
+                status = item_status.get(k, "") if "#" not in k else ""
+            role = self.config.lane_to_role(status) if status else ""
+            out.append({"key": k, "status": status, "status_role": role,
+                        "closed": sub.get("state") == "closed" or role in closed_roles})
+        return out
 
     def _parent(self, number: str, host: str, nwo: str) -> str:
         """Key of the issue's parent (the issue it is a sub-issue of), keyed

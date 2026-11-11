@@ -9,6 +9,7 @@ Pipeline:
 3. Route by `type_class`:
    - `full_sdlc` → continue
    - `deliverable` → invoke `complete-deliverable`, then stop
+   - `container` (Epic by default) → stop and report child progress; never worked or closed by the agent
 4. `plan-ticket` — implementation plan
 5. Implement + test using `tkt cfg build.*`
 6. `self-review` — adversarial review loop

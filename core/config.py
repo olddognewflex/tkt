@@ -27,6 +27,14 @@ ENFORCEMENT_DEFAULTS = {
     "subtask_types": ["Sub-task", "Subtask"],
 }
 
+# Types that group other tickets and are never worked directly. Used when
+# `[issue_types]` has no `container` key; `container = []` turns it off.
+DEFAULT_CONTAINER_TYPES = ["Epic"]
+
+# Roles that always count as closed, on top of `[board].close_on`.
+CLOSED_ROLES = ("done", "cancelled")
+
+
 class Config:
     def __init__(self, data: dict[str, Any], path: Path):
         self.path = path
@@ -60,6 +68,10 @@ class Config:
         it = data.get("issue_types", {})
         self.full_sdlc = set(it.get("full_sdlc", []))
         self.deliverable = set(it.get("deliverable", []))
+        # Validated on use (see `container`), so a bad value cannot stop
+        # `tkt lane`, `tkt cfg` or a polling `tkt agents` from loading.
+        self._raw_container = it.get("container", DEFAULT_CONTAINER_TYPES)
+        self.container_defaulted = "container" not in it
 
         self.queries: dict[str, str] = dict(data.get("queries", {}))
         self.vcs = data.get("vcs", {})
@@ -93,12 +105,45 @@ class Config:
 
     # ---- issue type routing ------------------------------------------------
 
+    @property
+    def container(self) -> set[str]:
+        raw = self._raw_container
+        if not isinstance(raw, list):
+            raise ConfigError('[issue_types].container must be an array of types, e.g. ["Epic"]')
+        return {str(t) for t in raw}
+
     def type_class(self, issue_type: str) -> str:
+        """`container` wins over `full_sdlc`, which wins over `deliverable`,
+        so a type listed twice (an old config with Epic under deliverable)
+        resolves one fixed way."""
+        if issue_type in self.container:
+            return "container"
         if issue_type in self.full_sdlc:
             return "full_sdlc"
         if issue_type in self.deliverable:
             return "deliverable"
         return "unknown"
+
+    def known_types(self) -> set[str]:
+        """Every type named in `[issue_types]`; label-typed backends match
+        labels against it."""
+        return self.full_sdlc | self.deliverable | self.container
+
+    def pick_type(self, labels: list[str]) -> str:
+        """The type a label list names, for backends that type by label.
+        With several type labels the highest-precedence class wins
+        (container, then full_sdlc, then deliverable), then label order, so
+        an issue labelled both Story and Epic is always a container. "" when
+        no label is a known type."""
+        rank = {"container": 0, "full_sdlc": 1, "deliverable": 2}
+        known = self.known_types()
+        types = [lab for lab in labels if lab in known]
+        return min(types, key=lambda lab: rank[self.type_class(lab)], default="")
+
+    def closed_roles(self) -> set[str]:
+        """Roles whose tickets count as closed: done, cancelled and any
+        `[board].close_on` role."""
+        return set(CLOSED_ROLES) | set(self.close_on)
 
     # ---- named queries -----------------------------------------------------
 

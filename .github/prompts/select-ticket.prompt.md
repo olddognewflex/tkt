@@ -23,7 +23,7 @@ Find the right ticket to work next. All ticketing access goes through `tkt`.
    ```shell
    tkt list --tier N --json
    ```
-3. Filter out blocked tickets with `tkt blockers KEY --json`. Skip a tier only when it is undefined (`tkt cfg queries.tierN` exits 4); any other `tkt` failure stops selection with its error — never skip a failed tier or report nothing to work on. A candidate whose blocker check fails is excluded with a warning, never treated as unblocked.
+3. Filter out blocked tickets with `tkt blockers KEY --json`. Skip a tier only when it is undefined (`tkt cfg queries.tierN` exits 4); any other `tkt` failure stops selection with its error — never skip a failed tier or report nothing to work on. A candidate whose blocker check fails is excluded with a warning, never treated as unblocked. It never selects a container (`type_class` = `container`, Epics by default) or a ticket with open children: `tkt children KEY --json` marks each child `closed`, and any child not closed keeps the parent out. A failed children check excludes the candidate with a warning, like a failed blocker check.
 4. **Tier 1 or 2** (assigned work): auto-select the first candidate, emit `SELECTED: <KEY>`, and hand off to `triage-ticket`.
 5. **Tier 3–5** (unassigned/backlog): print up to 5 ranked recommendations and wait for a human pick.
 
@@ -42,4 +42,4 @@ Configured via the `[schedule]` table and evaluated by `tkt schedule --json`, wh
 ## Rules
 
 - Never auto-select unassigned work.
-- `type_class` tells you if the ticket is `full_sdlc` or `deliverable`.
+- `type_class` tells you if the ticket is `full_sdlc`, `deliverable` or `container`.

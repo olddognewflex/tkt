@@ -161,6 +161,8 @@ class OpenKanbanAdapter(Adapter):
             description=raw.get("description", "") or "",
             status=status,
             status_role=self.config.lane_to_role(status) if status else "",
+            closed=self._closed(self.config.lane_to_role(status) if status else "",
+                                status in _DONE_STATUSES),
             type_class=self.config.type_class(self._type_from_labels(raw.get("labels", []) or [])),
             assignee="",  # openkanban has no assignee
             priority=_PRI_LABEL.get(raw.get("priority", 0), ""),
@@ -176,11 +178,7 @@ class OpenKanbanAdapter(Adapter):
         )
 
     def _type_from_labels(self, labels: list[str]) -> str:
-        known = self.config.full_sdlc | self.config.deliverable
-        for lab in labels:
-            if lab in known:
-                return lab
-        return ""
+        return self.config.pick_type(labels)
 
     def _is_done(self, ticket_id: str) -> bool:
         store = self._load_store()

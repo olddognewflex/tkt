@@ -15,6 +15,7 @@ End-to-end pipeline from "what should I work on?" to "shipped." Orchestrates sub
 3. Route by `type_class`:
    - `full_sdlc` → continue
    - `deliverable` → **complete-deliverable**, then stop
+   - `container` (Epic by default) → stop and report child progress; never worked or closed by the agent
 4. **plan-ticket** — implementation plan
 5. Implement + test (build/test via `tkt cfg build.*`)
 6. **self-review** — adversarial review loop

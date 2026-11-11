@@ -350,7 +350,8 @@ done
 3. **Speak in roles, not lane names.** Use `in_progress`, `review`, `done`, etc.;
    resolve literal lane names with `tkt lane <role>` when needed.
 4. **Keep `type_class` branching.** `full_sdlc` vs `deliverable` drives whether a
-   ticket stops at `complete-deliverable` or runs the full PR/review/deploy loop.
+   ticket stops at `complete-deliverable` or runs the full PR/review/deploy loop;
+   a `container` (Epic by default) is never worked, and a human closes it.
 5. **Respect `tkt worklog` / `tkt lane-time` no-ops.** Backends with
    `[timetracking].provider = "none"` return empty worklogs; comments should still
    read naturally.

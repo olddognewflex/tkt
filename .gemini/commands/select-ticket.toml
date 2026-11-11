@@ -7,7 +7,7 @@ Current user: !{tkt whoami}
 
 Run tiers 1-5 from `.sdlc/config.toml [queries]` in order until one returns selectable tickets:
 1. `tkt list --tier N --json`
-2. For each candidate, filter out tickets with unresolved blockers using `tkt blockers KEY --json`. Skip a tier only when it is undefined (`tkt cfg queries.tierN` exits 4); any other `tkt` failure stops selection with its error — never skip a failed tier or report nothing to work on. A candidate whose blocker check fails is excluded with a warning, never treated as unblocked.
+2. For each candidate, filter out tickets with unresolved blockers using `tkt blockers KEY --json`. Skip a tier only when it is undefined (`tkt cfg queries.tierN` exits 4); any other `tkt` failure stops selection with its error — never skip a failed tier or report nothing to work on. A candidate whose blocker check fails is excluded with a warning, never treated as unblocked. It never selects a container (`type_class` = `container`, Epics by default) or a ticket with open children: `tkt children KEY --json` marks each child `closed`, and any child not closed keeps the parent out. A failed children check excludes the candidate with a warning, like a failed blocker check.
 3. If any selectable tickets remain, stop and process that tier
 
 If Tier 1 or 2 (assigned to current user):
@@ -34,5 +34,5 @@ Estimate guidance:
 Rules:
 - Never auto-select unassigned work
 - All ticketing access goes through `tkt`
-- `type_class` (`full_sdlc` or `deliverable`) determines downstream routing
+- `type_class` (`full_sdlc`, `deliverable` or `container`) determines downstream routing
 """

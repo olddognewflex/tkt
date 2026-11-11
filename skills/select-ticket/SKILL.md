@@ -35,6 +35,11 @@ Tier 4: To Do + any priority     + unassigned       → recommend (human picks)
 Tier 5: Backlog                                       → recommend for promotion
 ```
 
+**Containers and parents wait.** Selection never selects a container
+(`type_class` = `container`, Epics by default) and never selects a ticket that
+has open children, whatever its type: a Story with open sub-tasks waits until
+they are closed. This applies to every tier, recommendations included.
+
 A project that doesn't define a given tier query simply skips it (see Steps).
 Any other `tkt` failure **stops** selection with `tkt`'s error: skipping a tier
 that failed would silently pick from a lower tier, or report "nothing to work
@@ -80,6 +85,17 @@ blocker_state() {
   esac
 }
 
+# children_state KEY -> "none", "open", or "unknown". Unknown (tkt failed,
+# or printed something other than a JSON array) is never read as none.
+children_state() {
+  C=$("$TKT" children "$1" --json) || { echo unknown; return; }
+  case "$(printf '%s\n' "$C" | jq -r 'if type == "array" then ([.[] | select(.closed != true)] | length) else "x" end' 2>/dev/null)" in
+    0) echo none ;;
+    ''|x) echo unknown ;;
+    *) echo open ;;
+  esac
+}
+
 stop() { echo "STOP: $1" >&2; FAILED=1; }
 
 FAILED=""
@@ -102,14 +118,25 @@ for N in 1 2 3 4 5; do
   fi
   [ "$LEN" -gt 0 ] || continue
 
-  # Filter blockers per-candidate via `tkt blockers` (authoritative on every
-  # backend — some list paths don't carry link data via the ticketing backend).
+  # Per candidate: drop containers (no call needed), then check blockers via
+  # `tkt blockers` (authoritative on every backend — some list paths don't
+  # carry link data), then open children via `tkt children`.
   SELECTABLE='[]'; UNKNOWN=""
   for K in $(printf '%s\n' "$OUT" | jq -r '.[].key'); do
+    if printf '%s\n' "$OUT" | jq -e --arg k "$K" \
+        'any(.[]; .key == $k and .type_class == "container")' >/dev/null; then
+      continue
+    fi
     case "$(blocker_state "$K")" in
       clear) ;;
       blocked) continue ;;
       *) echo "WARNING: could not check blockers for $K; excluding it" >&2
+         UNKNOWN=1; continue ;;
+    esac
+    case "$(children_state "$K")" in
+      none) ;;
+      open) continue ;;
+      *) echo "WARNING: could not check children for $K; excluding it" >&2
          UNKNOWN=1; continue ;;
     esac
     SELECTABLE=$(printf '%s\n' "$OUT" | jq --arg k "$K" --argjson acc "$SELECTABLE" \
@@ -118,7 +145,7 @@ for N in 1 2 3 4 5; do
   if [ "$(printf '%s\n' "$SELECTABLE" | jq 'length')" -eq 0 ]; then
     # Falling through would pass over tickets that may well be workable.
     if [ -n "$UNKNOWN" ]; then
-      stop "tier $N has candidates whose blockers could not be checked"; break
+      stop "tier $N has candidates whose blockers or children could not be checked"; break
     fi
     continue
   fi
@@ -135,7 +162,9 @@ done
 report "nothing to work on": the board was not read.
 
 `tkt blockers` returns only **unresolved** blockers (a blocker that's Done is
-dropped), so a non-empty result means genuinely blocked.
+dropped), so a non-empty result means genuinely blocked. `tkt children` marks
+each child `closed` (done, cancelled or a `close_on` role, or the backend's own
+closed state); any child not closed keeps its parent out of selection.
 
 ### 3. Auto-select (Tier 1 / Tier 2) or recommend (Tier 3+)
 
@@ -187,6 +216,7 @@ fresh shell: it reads the tier and candidates from Step 2's files and asks
 - **Tier 3 / 4 / 5** → print up to 5 ranked recommendations and stop. Do not
   transition. Include **Type** (and `type_class`) so the reader knows whether the
   ticket runs the full SDLC (`full_sdlc`) or the deliverable short-circuit.
+  Containers never appear here: step 2 already dropped them.
   Never hard-filter after-hours candidates here (a human is picking): during
   business hours (`tkt schedule --json` reports `"in_window": true`), sort
   deferred candidates to the bottom and mark them in the `After-hours?` column.

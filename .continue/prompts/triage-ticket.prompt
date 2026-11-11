@@ -8,7 +8,7 @@ invokable: true
 
 Read a ticket, extract requirements, transition to `in_progress`, and start tracking. All access via `tkt`.
 
-1. `tkt view "$KEY" --json` — extract key, type + type_class, summary, acceptance, labels, components, blocked_by.
+1. `tkt view "$KEY" --json` — extract key, type + type_class (a `container`, Epic by default, stops triage: no transition, no branch, no comment of its own; a human closes it), summary, acceptance, labels, components, blocked_by.
 2. Identify affected packages from ticket content.
 3. `tkt transition "$KEY" in_progress`.
 4. `tkt comment "$KEY" "Starting work. Affected packages: <pkg1>, <pkg2>"`.

@@ -37,7 +37,8 @@ cancelled    = "Cancelled"
 
 [issue_types]
 full_sdlc   = ["Story", "Bug"]
-deliverable = ["Task", "Sub-task", "Sub-Task", "Chore", "Epic", "Spike"]
+deliverable = ["Task", "Sub-task", "Sub-Task", "Chore", "Spike"]
+container   = ["Epic"]   # never worked; a human closes it ([] turns it off)
 
 # JQL. Unless [query_scopes] marks it "global", each query becomes
 # `(project = "DTB") AND (<your query>)`, with any trailing ORDER BY moved

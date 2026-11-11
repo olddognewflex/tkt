@@ -41,8 +41,12 @@ tkt view "$KEY" --json > /tmp/tkt_ticket.json
 
 Extract from the normalized shape:
 
-- `type` + `type_class` — `full_sdlc` (Story/Bug) vs `deliverable` (Task/Epic/…);
-  drives Phase 1.5 routing in `automated-sdlc`.
+- `type` + `type_class` — `full_sdlc` (Story/Bug), `deliverable` (Task/Spike/…)
+  or `container` (Epic by default); drives Phase 1.5 routing in `automated-sdlc`.
+  **A container stops triage here:** no transition, no branch, no comment of
+  its own (`tkt run` may still write its phase marker).
+  Return its `type`, `type_class` and `rollup` so the orchestrator stops at
+  Phase 1.5. Containers are never worked; a human closes them.
 - `summary`, `description`, `acceptance`
 - `labels`, `components`, `priority`
 - `blocked_by` (unresolved entries mean you should not have been routed here)
@@ -104,7 +108,8 @@ tkt comment "$KEY" "Starting work. Affected packages: <pkg1>, <pkg2>"
 Provide to the next skill:
 
 - Ticket key
-- `type` + `type_class` (so the orchestrator routes full SDLC vs deliverable)
+- `type` + `type_class` (so the orchestrator routes full SDLC, deliverable or
+  container)
 - Summary
 - Acceptance criteria (bullet list)
 - Affected packages

@@ -1,6 +1,6 @@
 ---
 name: complete-deliverable
-description: 'Short-circuit flow for tickets whose type_class is deliverable (by default Task, Sub-task, Epic, Chore, Spike; [issue_types] decides). Produces the deliverable, comments with the artifact link, logs lane time, and transitions straight to Done. Provider-agnostic via tkt.'
+description: 'Short-circuit flow for tickets whose type_class is deliverable (by default Task, Sub-task, Chore, Spike; [issue_types] decides). Produces the deliverable, comments with the artifact link, logs lane time, and transitions straight to Done. Provider-agnostic via tkt.'
 model_tier: standard
 ---
 
@@ -21,6 +21,26 @@ POC, spike notes, runbook). Their lanes are just `todo → in_progress → done`
 - Ticket key (already in `in_progress` from `triage-ticket`)
 
 ## Steps
+
+### 0. Guard
+
+A container is never done by the agent, and neither is a ticket with open
+children. Stop and report either one; do not transition. A failed read
+stops too: an unread ticket is never assumed to be safe to close.
+
+```shell
+if ! T=$(tkt view "$KEY" --json); then
+  echo "STOP: could not read $KEY (see the error above)."
+elif ! CLASS=$(printf '%s\n' "$T" | jq -er .type_class); then
+  echo "STOP: could not read the type of $KEY."
+elif [ "$CLASS" = "container" ]; then
+  echo "STOP: $KEY is a container; a human closes it."
+elif ! C=$(tkt children "$KEY" --json); then
+  echo "STOP: could not check the children of $KEY (see the error above)."
+elif [ "$(printf '%s\n' "$C" | jq '[.[] | select(.closed != true)] | length')" != "0" ]; then
+  echo "STOP: $KEY has open children; it is not done."
+fi
+```
 
 ### 1. Determine the deliverable
 

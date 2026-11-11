@@ -45,7 +45,7 @@ Full pipeline:
 10. Promote to `qa_ready` (human QA gate — agent stops here)
 11. `deploy-ready` — merge, watch staging, gate production
 
-### `deliverable` (by default Task, Sub-task, Chore, Epic, Spike)
+### `deliverable` (by default Task, Sub-task, Chore, Spike)
 
 Short-circuit:
 1. `select-ticket` / `triage-ticket` (same as above)
@@ -53,6 +53,13 @@ Short-circuit:
 3. `complete-deliverable` — comment artifact link, transition straight to `done`
 
 No PR, no review loop, no deploy pipeline.
+
+### `container` (by default Epic)
+
+Never worked by the agent. `select-ticket` skips containers and any ticket with
+open children; `triage-ticket` and Phase 1.5 stop on one with no transition.
+`tkt view` shows child progress (`rollup`); when every child is closed, propose
+closing it to a human.
 
 ## Lane-Time Annotation
 

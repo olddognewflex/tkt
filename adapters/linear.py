@@ -27,7 +27,7 @@ import os
 import re
 import urllib.request
 
-from core.errors import ConfigError, ProviderError
+from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
 from core.query import JqlSubset
 from core.schema import Check, Ticket, Worklog
 
@@ -137,11 +137,7 @@ class LinearAdapter(Adapter):
                 if lab.startswith(self.type_label_prefix):
                     return lab[len(self.type_label_prefix):].strip()
             return ""
-        known = self.config.full_sdlc | self.config.deliverable
-        for lab in labels:
-            if lab in known:
-                return lab
-        return ""
+        return self.config.pick_type(labels)
 
     def _to_ticket(self, issue: dict, transitions=None) -> Ticket:
         labels = [n["name"] for n in (issue.get("labels", {}) or {}).get("nodes", [])]
@@ -177,6 +173,8 @@ class LinearAdapter(Adapter):
             description=issue.get("description", "") or "",
             status=status,
             status_role=self.config.lane_to_role(status) if status else "",
+            closed=self._closed(self.config.lane_to_role(status) if status else "",
+                                state.get("type") in _DONE_STATE_TYPES),
             type_class=self.config.type_class(issue_type),
             assignee=assignee.get("displayName") or assignee.get("name") or assignee.get("email", ""),
             priority=issue.get("priorityLabel", "") or _PRIORITY_LABEL.get(issue.get("priority", 0), ""),
@@ -243,6 +241,49 @@ class LinearAdapter(Adapter):
         # `hierarchy` is ignored: parent and sub-issues come with the issue
         # query.
         return self._to_ticket(self._fetch_issue(key))
+
+    _CHILD_PAGE = 100
+
+    def child_states(self, key, children=None):
+        """Every child of `key`, read page by page with its state. The
+        `children` list from `view` holds only Linear's first page (50), so
+        it is never trusted as complete: a 51st open child would otherwise
+        make the parent look finished."""
+        m = re.match(r"^([A-Za-z]+)-(\d+)$", str(key))
+        if not m:
+            raise UsageError(f"not a Linear identifier: {key}")
+        query = (
+            "query($k:String!,$n:Float!,$c:String){ issues(filter:{team:{key:{eq:$k}},"
+            "number:{eq:$n}}, first:1){ nodes { identifier children(first:"
+            + str(self._CHILD_PAGE) + ", after:$c){ nodes { identifier state { name type } }"
+            " pageInfo { hasNextPage endCursor } } } } }")
+        variables = {"k": m.group(1), "n": int(m.group(2)), "c": None}
+        out, seen, cursors = [], set(), set()
+        while True:
+            nodes = self._gql(query, variables)["issues"]["nodes"]
+            if not nodes:
+                raise NotFoundError(f"no Linear issue {key}")
+            conn = nodes[0].get("children") or {}
+            own = nodes[0].get("identifier") or str(key)
+            for c in conn.get("nodes") or []:
+                k = c.get("identifier")
+                if not k or k == own or k in seen:
+                    continue
+                seen.add(k)
+                state = c.get("state") or {}
+                name = state.get("name", "")
+                role = self.config.lane_to_role(name) if name else ""
+                out.append({"key": k, "status": name, "status_role": role,
+                            "closed": self._closed(role, state.get("type") in _DONE_STATE_TYPES)})
+            info = conn.get("pageInfo") or {}
+            if not info.get("hasNextPage"):
+                return out
+            cursor = info.get("endCursor")
+            if not cursor or cursor in cursors:
+                # A partial list would undercount open children.
+                raise ProviderError(f"Linear children of {key} would not page past {len(out)}")
+            cursors.add(cursor)
+            variables["c"] = cursor
 
     has_artifact_body = True
 

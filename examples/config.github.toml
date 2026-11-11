@@ -52,7 +52,8 @@ cancelled    = "Cancelled"
 
 [issue_types]
 full_sdlc   = ["Story", "Bug"]
-deliverable = ["Task", "Chore", "Spike", "Epic"]
+deliverable = ["Task", "Chore", "Spike"]
+container   = ["Epic"]   # never worked; a human closes it ([] turns it off)
 
 # Queries are GITHUB-NATIVE, not JQL.
 #  - projectv2 mode: Projects filter syntax, passed to `gh project item-list --query`

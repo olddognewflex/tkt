@@ -65,7 +65,8 @@ driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
 (`test_github_close.py`), GitHub projectv2 repo scoping
 (`test_github_scope.py`), `select-ticket` surfacing `tkt` errors instead of
-skipping a tier, run against a stub `tkt` under every available shell
+skipping a tier and never selecting a container or a ticket with open
+children, run against a stub `tkt` under every available shell
 (`test_select_ticket.py`), the after-hours window (`test_schedule.py`), the
 Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
 (`test_jira_transition.py`), `tkt activity` on Jira (window bounds,
@@ -104,7 +105,9 @@ adapter and its `view` rendering (`test_children_jira.py`,
 on the local boards (`test_blocks_markdown.py`,
 `test_blocks_openkanban.py`), `tkt --version` (`test_version.py`), shipped shell snippets
 piping JSON into `jq` with `printf`, never `echo`
-(`test_no_echo_jq.py`), and the
+(`test_no_echo_jq.py`), the `container` type class and its precedence
+(`test_issue_types.py`), `child_states` per adapter (`test_child_states.py`),
+the container rollup and `tkt children` (`test_rollup_cli.py`), and the
 transition/comment format gates: warn/strict/off, lane-name resolution,
 every cannot-judge path, `[enforcement]` validation, the hierarchy checks,
 `artifact_body` per adapter and the doctor row, with one end-to-end run of
@@ -138,7 +141,8 @@ Two layers, connected only by the verb contract and the normalized schema:
     `activity` window lives here so a typo fails before it reaches a backend.
   - `config.py` — loads `.sdlc/config.toml`. Discovery order: `--config` → `$TKT_CONFIG`
     → nearest `.sdlc/config.toml` walking up from cwd. Owns role↔lane mapping, the
-    `close_on` terminal roles, issue-type routing (`full_sdlc` vs `deliverable`), named
+    `close_on` terminal roles and `closed_roles()`, issue-type routing (`full_sdlc` /
+    `deliverable` / `container`, container defaulting to `["Epic"]`), named
     queries and their `[query_scopes]` (project | global), the
     `[enforcement]` table (validated on use, not at load), the
     backend-agnostic priority ordering, and dotted-path `get()`.
@@ -229,7 +233,10 @@ are in `AGENTS.md`.
 ### Ticket schema notes
 
 Beyond the obvious fields, `Ticket` carries `status` (provider lane, verbatim) alongside
-`status_role` (canonical role), `type_class` (`full_sdlc` | `deliverable` | `unknown`),
+`status_role` (canonical role) and `closed` (finished: a closed role, or the
+backend's own terminal state, filled at normalization through
+`Adapter._closed` so parents and children share one rule), `type_class` (`full_sdlc` | `deliverable` | `container` |
+`unknown`),
 the date fields `due` / `scheduled` / `completed`, and `agent_status` (board agent state:
 `idle` | `processing` | `waiting` | `done` | `blocked`, or empty) alongside
 `agent_status_at` (when that state last actually changed, ISO-8601 UTC; stamped by
@@ -240,7 +247,10 @@ parent — are filled on `view` only. Every adapter's `view` takes
 `hierarchy=False` to skip those calls (the rest ignore it); internal callers that
 read neither edge — `blockers`, `create`, `tkt agents --enrich` — pass it. On
 the local boards (markdown, openkanban) `tkt link --type child|parent` writes
-both edges so they cannot drift.
+both edges so they cannot drift. `rollup` (children closed / total, open keys,
+`ready_to_close`) is filled by `cli.py` on `view` of a container only, through
+`Adapter.child_states` (base default: a view per child; jira and github one
+call); `tkt children` prints the same rows. It is `None` everywhere else.
 The identity fields `project` / `project_name` (key and display name),
 `assignee_id`, `reporter` / `reporter_id` (name and account id) and `created` /
 `updated` (canonical UTC from `schema.iso_utc`, `YYYY-MM-DDTHH:MM:SS.mmmZ`) are

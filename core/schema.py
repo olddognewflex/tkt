@@ -16,7 +16,12 @@ class Ticket:
     description: str = ""
     status: str = ""                 # provider lane name, verbatim
     status_role: str = ""            # canonical role resolved from config
-    type_class: str = ""             # "full_sdlc" | "deliverable" | "unknown"
+    # True when the ticket is finished: its role is in the config's closed
+    # roles, or the backend marks it terminal (a closed GitHub issue, Jira's
+    # done status category). Filled at normalization at no extra cost; None
+    # only on a Ticket built outside an adapter.
+    closed: bool | None = None
+    type_class: str = ""             # "full_sdlc" | "deliverable" | "container" | "unknown"
     project: str = ""                # project key (Jira "PROJ"); "" when none
     project_name: str = ""           # project display name; "" when none
     assignee: str = ""
@@ -58,6 +63,9 @@ class Ticket:
     # an extra call for it, so fills it on `view` only.
     parent: str = ""
     transitions: list[str] = field(default_factory=list)  # available next lanes
+    # Child progress, filled by `tkt view` for containers only; None
+    # otherwise: {"total", "closed", "open": [keys], "ready_to_close"}.
+    rollup: dict[str, Any] | None = None
 
     def unresolved_blockers(self) -> list[dict[str, Any]]:
         return [b for b in self.blocked_by if not b.get("resolved")]
