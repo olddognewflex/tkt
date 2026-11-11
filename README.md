@@ -404,7 +404,11 @@ scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode
   across repos. Draft issues and pull requests are never listed. `tkt doctor`
   fails if the Project has items but none are in the repo (a mistyped repo would
   otherwise look like an idle board). `repo` may be `owner/name` or any spelling
-  `gh --repo` accepts (`HOST/owner/name`, a trailing `.git`).
+  `gh --repo` accepts (`HOST/owner/name`, a trailing `.git`). Project items are
+  read in full: when the first 100 fill a page, the Project's item count sets
+  the limit for a second read. `gh project item-list` carries no issue state,
+  so projectv2 `list` fetches it in one GraphQL call per 100 issues; if that
+  call fails it warns and `closed` falls back to the lane.
 - **children** come from the sub-issues API, on `view` only (`list` leaves
   `[]`); `[]` where that API 404s. Host and `owner/name` for that call come
   from the issue's own URL, so any `repo` spelling works. A child in another
@@ -436,7 +440,8 @@ key in env (`[ticketing].auth_env`, default `LINEAR_API_KEY`).
 - **blocked_by/blocks** use Linear's **native issue relations** (`blocks` direction);
   `resolved` = related issue in a completed/canceled state.
 - **children** = the native sub-issue (`children`) connection, on `list` and `view`;
-  only its first page (Linear's default, 50) is read.
+  only its first page (Linear's default, 50) is read. `tkt children` and the
+  container rollup page through every child.
 - **parent** = the native `parent` issue, on `list` and `view`.
 - **priority** = Linear's `priorityLabel` (`Urgent`/`High`/`Medium`/`Low`). With no
   top-level `priorities` list, `tkt cfg priorities` and `ORDER BY priority` use Linear's own

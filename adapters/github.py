@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from urllib.parse import urlsplit
 
 from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
@@ -190,14 +191,49 @@ class GithubAdapter(Adapter):
         }
         return self._project_meta
 
+    _ITEM_PAGE = 100
+
     def _project_items(self, query: str | None = None) -> list[dict]:
+        """Every item, not only the first page: a child past it would lose
+        its lane. `--limit` is a cap gh pages up to, so a full first page
+        asks the project for its item count and fetches that many."""
         self._require_project()
+        items = self._item_list(self._ITEM_PAGE, query)
+        if len(items) >= self._ITEM_PAGE:
+            view = self._gh_json("project", "view", self.project_number,
+                                 "--owner", self.project_owner, "--format", "json")
+            total = int(((view.get("items") or {}).get("totalCount")) or 0)
+            if total > len(items):
+                items = self._item_list(total, query)
+        return items
+
+    def _item_list(self, limit: int, query: str | None) -> list[dict]:
         args = ["project", "item-list", self.project_number, "--owner", self.project_owner,
-                "--format", "json", "--limit", "100"]
+                "--format", "json", "--limit", str(limit)]
         if query:
             args += ["--query", query]
-        data = self._gh_json(*args)
-        return data.get("items", [])
+        return self._gh_json(*args).get("items", [])
+
+    def _issue_states(self, numbers: list) -> dict[str, str]:
+        """{number: "OPEN" | "CLOSED"} for this repo's issues, in one GraphQL
+        call per 100 (`item-list` carries no issue state)."""
+        owner, _, name = self._repo_name.partition("/")
+        host = _repo_host(self.repo)
+        nums = [str(n) for n in dict.fromkeys(numbers) if str(n).isdigit()]
+        out: dict[str, str] = {}
+        for i in range(0, len(nums), 100):
+            chunk = nums[i:i + 100]
+            fields = " ".join(f"i{n}: issue(number: {n}) {{ state }}" for n in chunk)
+            q = f"query {{ repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ {fields} }} }}"
+            args = ["api", "graphql", "-f", f"query={q}"]
+            if host:
+                args += ["--hostname", host]
+            repo = ((self._gh_json(*args).get("data") or {}).get("repository") or {})
+            for n in chunk:
+                state = (repo.get(f"i{n}") or {}).get("state")
+                if state:
+                    out[n] = state
+        return out
 
     def _repo_items(self, query: str | None = None) -> list[dict]:
         """This repo's items only. A Project can span repos, and issue numbers
@@ -256,10 +292,22 @@ class GithubAdapter(Adapter):
         # `all_projects` is a no-op: scoped by `--repo` / the Project itself.
         q = self.config.query(tier=tier, name=query)
         if self.board == "projectv2":
-            items = self._repo_items(query=q)
+            items = [i for i in self._repo_items(query=q)
+                     if (i.get("content", {}) or {}).get("type") == "Issue"]
             opt_names = self._project()["option_names"]
-            return [self._item_to_ticket(i, transitions=opt_names)
-                    for i in items if (i.get("content", {}) or {}).get("type") == "Issue"]
+            try:
+                states = self._issue_states(
+                    [(i.get("content") or {}).get("number") for i in items])
+            except ProviderError as e:
+                # `closed` then falls back to the lane alone.
+                print(f"tkt: warn: issue state unavailable: {e}", file=sys.stderr)
+                states = {}
+            for i in items:
+                content = i.get("content") or {}
+                state = states.get(str(content.get("number")))
+                if state:
+                    i["content"] = {**content, "state": state}
+            return [self._item_to_ticket(i, transitions=opt_names) for i in items]
         # labels mode: GitHub issue search
         issues = self._gh_json("issue", "list", "--repo", self.repo, "--search", q,
                                "--json", self._ISSUE_FIELDS, "--limit", "25")

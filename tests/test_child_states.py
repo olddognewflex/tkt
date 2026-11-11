@@ -200,11 +200,142 @@ class LinearNativeStates(unittest.TestCase):
             "ENG-2": {"identifier": "ENG-2", "state": {"name": "Duplicate", "type": "canceled"}},
             "ENG-3": {"identifier": "ENG-3", "state": {"name": "In Progress", "type": "started"}},
         }
-        a.view = lambda k, hierarchy=True: a._to_ticket(issues[k])
-        states = a.child_states("ENG-1", ["ENG-2", "ENG-3", "ENG-2", "ENG-1"])
+        a._gql = lambda q, v=None: {"issues": {"nodes": [{
+            "identifier": "ENG-1",
+            "children": {"nodes": [issues["ENG-2"], issues["ENG-3"], issues["ENG-2"],
+                                   {"identifier": "ENG-1", "state": {}}],
+                         "pageInfo": {"hasNextPage": False}}}]}}
+        states = a.child_states("ENG-1", ["ENG-2"])
         self.assertEqual([(s["key"], s["closed"]) for s in states],
                          [("ENG-2", True), ("ENG-3", False)])
         self.assertEqual(states[0]["status_role"], "Duplicate")
+
+
+def linear_adapter():
+    return LinearAdapter(Config(
+        {"ticketing": {"provider": "linear"}, "linear": {"team_key": "ENG"},
+         "board": {"roles": dict(ROLES)}, "queries": {"all": ""}},
+        Path("/nonexistent/.sdlc/config.toml")))
+
+
+def linear_page(nodes, cursor=None):
+    return {"issues": {"nodes": [{
+        "identifier": "ENG-1",
+        "children": {"nodes": nodes,
+                     "pageInfo": {"hasNextPage": cursor is not None,
+                                  "endCursor": cursor}}}]}}
+
+
+class LinearReadsEveryChild(unittest.TestCase):
+    """`view` holds only Linear's first page of children (50); child_states
+    must page past it, or an open 51st child makes the parent look done."""
+
+    def test_pages_past_the_first_and_ignores_the_truncated_list(self):
+        a = linear_adapter()
+        done = [{"identifier": f"ENG-{n}", "state": {"name": "Done", "type": "completed"}}
+                for n in range(2, 52)]
+        open_ = [{"identifier": "ENG-99", "state": {"name": "In Progress", "type": "started"}}]
+        calls = []
+
+        def gql(q, v=None):
+            calls.append(dict(v))
+            return linear_page(done, "c1") if v["c"] is None else linear_page(open_)
+
+        a._gql = gql
+        states = a.child_states("ENG-1", [d["identifier"] for d in done])
+        self.assertEqual(len(states), 51)
+        self.assertEqual([s["key"] for s in states if not s["closed"]], ["ENG-99"])
+        self.assertEqual([c["c"] for c in calls], [None, "c1"])
+        t = Ticket(key="ENG-1", type="Epic", type_class="container",
+                   status_role="in_progress", children=[d["identifier"] for d in done])
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertFalse(cli._container_rollup(a, t)["ready_to_close"])
+
+    def test_a_cursor_that_does_not_advance_is_an_error_not_a_partial_list(self):
+        a = linear_adapter()
+        a._gql = lambda q, v=None: linear_page([], "same")
+        with self.assertRaises(ProviderError):
+            a.child_states("ENG-1")
+
+    def test_unknown_and_malformed_keys(self):
+        a = linear_adapter()
+        a._gql = lambda q, v=None: {"issues": {"nodes": []}}
+        with self.assertRaises(NotFoundError):
+            a.child_states("ENG-404")
+        with self.assertRaises(UsageError):
+            a.child_states("not-a-key!")
+
+
+def project_item(n, status, repo="owner/repo"):
+    return {"id": f"I{n}", "status": status,
+            "content": {"type": "Issue", "number": n, "repository": repo}}
+
+
+class GithubProjectPaging(StubGithub):
+    """A project with more items than one item-list page."""
+
+    def __init__(self, items, **kw):
+        super().__init__(gh_config("projectv2"), **kw)
+        self.items = items
+
+    def _gh_json(self, *args):
+        self.calls.append(args)
+        if args[:2] == ("project", "item-list"):
+            limit = int(args[args.index("--limit") + 1])
+            return {"items": self.items[:limit]}
+        if args[:2] == ("project", "view"):
+            return {"items": {"totalCount": len(self.items)}}
+        return super()._gh_json(*args)
+
+
+class GithubReadsEveryProjectItem(unittest.TestCase):
+    def test_child_past_the_first_100_items_keeps_its_lane(self):
+        items = [project_item(n, "Todo") for n in range(1, 120)] + [project_item(120, "Done")]
+        a = GithubProjectPaging(items, pages=([gh_sub(120)],))
+        [state] = a.child_states("1")
+        self.assertEqual((state["status"], state["closed"]), ("Done", True))
+        limits = [c[c.index("--limit") + 1] for c in a.calls if c[:2] == ("project", "item-list")]
+        self.assertEqual(limits, ["100", "120"])
+
+    def test_a_short_project_makes_one_item_list_call(self):
+        a = GithubProjectPaging([project_item(7, "Done")], pages=([gh_sub(7)],))
+        a.child_states("1")
+        self.assertEqual([c[:2] for c in a.calls if c[0] == "project"],
+                         [("project", "item-list")])
+
+
+class GithubListCarriesIssueState(unittest.TestCase):
+    """`gh project item-list` exports no issue state, so a closed issue in a
+    stale lane would list as open; list asks GraphQL for the states."""
+
+    def stub(self, graphql):
+        class S(GithubProjectPaging):
+            def _gh_json(self, *args):
+                if args[:2] == ("api", "graphql"):
+                    self.calls.append(args)
+                    return graphql(args)
+                return super()._gh_json(*args)
+        return S([project_item(7, "In Progress"), project_item(8, "In Progress"),
+                  project_item(9, "Todo", repo="other/repo")])
+
+    def test_closed_issue_in_a_stale_lane_lists_as_closed(self):
+        a = self.stub(lambda args: {"data": {"repository": {
+            "i7": {"state": "CLOSED"}, "i8": {"state": "OPEN"}}}})
+        closed = {t.key: t.closed for t in a.list(tier=1)}
+        self.assertEqual(closed, {"7": True, "8": False})
+        [q] = [c for c in a.calls if c[:2] == ("api", "graphql")]
+        self.assertIn("i7: issue(number: 7)", q[3])
+        self.assertNotIn("number: 9", q[3])     # other repo's item
+
+    def test_a_failed_state_lookup_warns_and_falls_back_to_the_lane(self):
+        def boom(args):
+            raise ProviderError("gh api graphql failed")
+        a = self.stub(boom)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            closed = {t.key: t.closed for t in a.list(tier=1)}
+        self.assertEqual(closed, {"7": False, "8": False})
+        self.assertIn("issue state unavailable", err.getvalue())
 
 
 class ContainerClosedNatively(unittest.TestCase):
