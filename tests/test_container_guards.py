@@ -109,6 +109,24 @@ class Guards(unittest.TestCase):
             with self.subTest(shell=shell):
                 self.assertIn("STOP: could not check the children of T-1", out)
 
+    def test_guard_stops_when_the_ticket_cannot_be_read(self):
+        # Copilot on PR #105: a failed view plus an empty child list used
+        # to pass, letting a container through to the Done transition.
+        spec = {"view": {"rc": 3, "err": "tkt: network error\n"},
+                "children": {"out": "[]"}}
+        for shell, (rc, out, err, log) in self.run_block(GUARD, spec).items():
+            with self.subTest(shell=shell):
+                self.assertIn("STOP: could not read T-1", out)
+                self.assertNotIn("children", log)
+
+    def test_guard_stops_when_the_type_cannot_be_read(self):
+        for body in ("not json", json.dumps({"key": "T-1"})):
+            spec = {"view": {"out": body}, "children": {"out": "[]"}}
+            for shell, (rc, out, err, log) in self.run_block(GUARD, spec).items():
+                with self.subTest(shell=shell, body=body):
+                    self.assertIn("STOP: could not read the type of T-1", out)
+                    self.assertNotIn("children", log)
+
     def test_guard_passes_when_every_child_is_closed(self):
         for children in ([], [{"key": "T-2", "closed": True}]):
             spec = {"view": {"out": ticket()}, "children": {"out": json.dumps(children)}}

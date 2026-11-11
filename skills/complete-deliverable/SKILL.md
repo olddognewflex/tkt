@@ -25,11 +25,15 @@ POC, spike notes, runbook). Their lanes are just `todo → in_progress → done`
 ### 0. Guard
 
 A container is never done by the agent, and neither is a ticket with open
-children. Stop and report either one; do not transition.
+children. Stop and report either one; do not transition. A failed read
+stops too: an unread ticket is never assumed to be safe to close.
 
 ```shell
-T=$(tkt view "$KEY" --json)
-if [ "$(printf '%s\n' "$T" | jq -r .type_class)" = "container" ]; then
+if ! T=$(tkt view "$KEY" --json); then
+  echo "STOP: could not read $KEY (see the error above)."
+elif ! CLASS=$(printf '%s\n' "$T" | jq -er .type_class); then
+  echo "STOP: could not read the type of $KEY."
+elif [ "$CLASS" = "container" ]; then
   echo "STOP: $KEY is a container; a human closes it."
 elif ! C=$(tkt children "$KEY" --json); then
   echo "STOP: could not check the children of $KEY (see the error above)."

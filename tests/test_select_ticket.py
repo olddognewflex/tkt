@@ -371,6 +371,9 @@ class Mirrors(unittest.TestCase):
         "if the ticket is a `container`": [
             ".github/prompts/complete-deliverable.prompt.md",
             ".gemini/commands/complete-deliverable.toml"],
+        "if it can't be read": [
+            ".github/prompts/complete-deliverable.prompt.md",
+            ".gemini/commands/complete-deliverable.toml"],
         "for each `container` that is not already `closed`": [
             ".github/prompts/check-blockers.prompt.md",
             ".gemini/commands/check-blockers.toml"],

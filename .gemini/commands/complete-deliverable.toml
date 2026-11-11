@@ -1,7 +1,7 @@
 description = "Short-circuit flow for deliverable ticket types via tkt."
 
 prompt = """
-For tickets whose `type_class` is `deliverable` (by default Task, Sub-task, Chore, Spike; `[issue_types]` decides). Stop first, without transitioning, if the ticket is a `container` or `tkt children "$KEY" --json` shows any child not `closed`: neither is the agent's to finish. Produce the artifact, comment the link, log lane time, and transition to `done`. All access via `tkt`.
+For tickets whose `type_class` is `deliverable` (by default Task, Sub-task, Chore, Spike; `[issue_types]` decides). Stop first, without transitioning, if the ticket is a `container`, if it can't be read, or if `tkt children "$KEY" --json` shows any child not `closed`: neither is the agent's to finish. Produce the artifact, comment the link, log lane time, and transition to `done`. All access via `tkt`.
 
 Steps:
 1. Read `tkt view "$KEY" --json` — classify deliverable: config change, ADR, design doc, spike, demo, POC, runbook, other
