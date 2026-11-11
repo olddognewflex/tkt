@@ -92,14 +92,21 @@ tkt comment "$K" "Blocker check: blocked <N> days. Blocker <B> status: <status>.
 ### 7. Containers ready to close (optional; a human closes them)
 
 Runs only when `[queries].containers` is defined (`tkt cfg` exits 4 when it is
-not: skip quietly). Reports open containers whose children are all closed.
-Never transitions anything.
+not: skip quietly). Reports open containers whose children are all closed;
+one that is already closed (`closed` in its JSON: a closed lane, or the
+backend's own terminal state) is skipped. Never transitions anything.
 
 ```shell
 if tkt cfg queries.containers >/dev/null 2>&1; then
-  L=$(tkt list --query containers --json)
-  for K in $(printf '%s\n' "$L" | jq -r '.[] | select(.type_class == "container") | .key'); do
-    C=$(tkt children "$K" --json) || continue
+  if ! L=$(tkt list --query containers --json); then
+    echo "WARNING: could not list [queries].containers; skipping containers" >&2
+    L='[]'
+  fi
+  for K in $(printf '%s\n' "$L" | jq -r '.[] | select(.type_class == "container" and .closed != true) | .key'); do
+    if ! C=$(tkt children "$K" --json); then
+      echo "WARNING: could not check the children of $K; not reporting it" >&2
+      continue
+    fi
     if [ "$(printf '%s\n' "$C" | jq 'length > 0 and all(.[]; .closed == true)')" = "true" ]; then
       echo "  $K — every child is closed. Suggest a human close it."
     fi
@@ -107,8 +114,7 @@ if tkt cfg queries.containers >/dev/null 2>&1; then
 fi
 ```
 
-Report them under "Containers ready to close (human closes)". Skip one whose
-own status is already closed.
+Report them under "Containers ready to close (human closes)".
 
 ## Output
 

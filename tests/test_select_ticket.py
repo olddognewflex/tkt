@@ -100,8 +100,10 @@ def tickets(*keys, types=None):
                        for k in keys])
 
 
-@unittest.skipUnless(SHELLS and shutil.which("jq"), "needs a POSIX shell and jq")
-class Step2(unittest.TestCase):
+class Step2Runner:
+    """Runs step 2 (optionally then step 3) under every shell. A mixin, so
+    test classes share it without inheriting each other's tests."""
+
     def run_step2(self, spec, prefix="", then_step3=False):
         """{shell: (exit code, stdout, stderr, selected tier, candidate keys)}."""
         results = {}
@@ -131,6 +133,9 @@ class Step2(unittest.TestCase):
                 results[shell] = (p.returncode, p.stdout, p.stderr, tier, keys)
         return results
 
+
+@unittest.skipUnless(SHELLS and shutil.which("jq"), "needs a POSIX shell and jq")
+class Step2(Step2Runner, unittest.TestCase):
     def test_list_failure_stops_with_tkts_error(self):
         spec = {"cfg": {"1": 0, "2": 0},
                 "list": {"1": {"rc": 3, "err": "tkt: jira: 503 Service Unavailable\n"},
@@ -245,7 +250,7 @@ class Step2(unittest.TestCase):
 
 
 @unittest.skipUnless(SHELLS and shutil.which("jq"), "needs a POSIX shell and jq")
-class ContainersAndChildren(Step2):
+class ContainersAndChildren(Step2Runner, unittest.TestCase):
     """TKT-103: containers and tickets with open children are never selected."""
 
     def calls(self, spec, prefix=""):
@@ -356,6 +361,40 @@ class Mirrors(unittest.TestCase):
                 self.assertIn("never treated as unblocked", text)
                 self.assertIn("never selects a container", text)
                 self.assertIn("open children", text)
+
+    # Condensed copies of the other skills TKT-103 changed, with a phrase
+    # each must keep so none drifts back to "Epic is a deliverable".
+    CONTAINER_COPIES = {
+        "never worked or closed by the agent": [
+            ".github/prompts/automated-sdlc.prompt.md",
+            ".gemini/commands/automated-sdlc.toml"],
+        "if the ticket is a `container`": [
+            ".github/prompts/complete-deliverable.prompt.md",
+            ".gemini/commands/complete-deliverable.toml"],
+        "for each `container` that is not already `closed`": [
+            ".github/prompts/check-blockers.prompt.md",
+            ".gemini/commands/check-blockers.toml"],
+        "stops triage: no transition, no branch": [
+            ".agents/workflows/triage-ticket.md",
+            ".augment/commands/triage-ticket.md",
+            ".clinerules/workflows/triage-ticket.md",
+            ".continue/prompts/triage-ticket.prompt",
+            ".cursor/commands/triage-ticket.md",
+            ".cursor/skills/triage-ticket/SKILL.md",
+            ".gemini/commands/triage-ticket.toml",
+            ".github/prompts/triage-ticket.prompt.md",
+            ".opencode/commands/triage-ticket.md",
+            ".windsurf/workflows/triage-ticket.md"],
+    }
+
+    def test_other_condensed_copies_route_containers(self):
+        for phrase, rels in self.CONTAINER_COPIES.items():
+            for rel in rels:
+                with self.subTest(copy=rel):
+                    text = (ROOT / rel).read_text(encoding="utf-8")
+                    self.assertIn(phrase, text)
+                    self.assertNotIn("Sub-task, Epic", text)
+                    self.assertNotIn("Epic, Spike", text)
 
     def test_gemini_mirror_is_still_valid_toml(self):
         tomllib.loads((ROOT / ".gemini/commands/select-ticket.toml").read_text())

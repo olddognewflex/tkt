@@ -54,10 +54,14 @@ separate harness-specific files).
      `select-ticket` never selects one, and never selects a ticket with open
      children; `triage-ticket` and Phase 1.5 stop on one; a human closes it.
      `tkt view` adds a `rollup` (children closed / total, `ready_to_close`)
-     and `tkt children KEY --json` lists each child's state.
+     and `tkt children KEY --json` lists each child's state. Every ticket
+     carries `closed`: a closed role or the backend's own terminal state
+     (a closed GitHub issue, Jira's done category), one rule for parents
+     and children.
    - Those lists are the example configs' defaults; `container` defaults to
      `["Epic"]` when absent, `container = []` turns it off, and a type in
-     several lists resolves container > full_sdlc > deliverable. `[issue_types]` decides
+     several lists resolves container > full_sdlc > deliverable.
+     `[issue_types]` decides
      which types fall in each set, and a project can move one, such as
      Sub-task, so branch on `type_class`, not the type name.
 

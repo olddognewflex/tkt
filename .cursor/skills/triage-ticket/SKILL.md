@@ -16,7 +16,7 @@ lane, and start time tracking. All access via `tkt`.
    ```shell
    tkt view "$KEY" --json
    ```
-   Extract: key, type + type_class (a `container`, Epic by default, stops triage: no transition, no branch, no comment; a human closes it), summary, acceptance, labels, components, blocked_by.
+   Extract: key, type + type_class (a `container`, Epic by default, stops triage: no transition, no branch, no comment of its own; a human closes it), summary, acceptance, labels, components, blocked_by.
 2. Identify affected packages from ticket content.
 3. Move to In Progress:
    ```shell

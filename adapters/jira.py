@@ -558,7 +558,10 @@ class JiraAdapter(Adapter):
             if (outer.get("key") and outer["key"] != key
                     and outer["key"] not in blocks):
                 blocks.append(outer["key"])
-        status = (f.get("status") or {}).get("name", "")
+        status_obj = f.get("status") if isinstance(f.get("status"), dict) else {}
+        status = status_obj.get("name", "")
+        category = status_obj.get("statusCategory")
+        done_category = isinstance(category, dict) and category.get("key") == "done"
         # The parent (an Epic, or a sub-task's Story) arrives with the issue
         # itself, so unlike `children` it costs no extra call: REST `list` and
         # `view(hierarchy=False)` carry it too.
@@ -575,6 +578,7 @@ class JiraAdapter(Adapter):
             description=desc,
             status=status,
             status_role=self.config.lane_to_role(status),
+            closed=self._closed(self.config.lane_to_role(status), done_category),
             type_class=self.config.type_class(issue_type),
             project=str(project.get("key") or ""),
             project_name=str(project.get("name") or ""),
@@ -742,9 +746,10 @@ class JiraAdapter(Adapter):
             rows = self._search_issues(jql, "status")
         else:
             # acli's default field set carries status; `--fields` is avoided
-            # as in `_children`.
+            # as in `_children`. `--paginate`, not `--limit`: a capped list
+            # could make a parent with 130 children look finished.
             rows = self._acli_json("jira", "workitem", "search", "--jql", jql,
-                                   "--limit", "100")
+                                   "--paginate")
             if isinstance(rows, dict):
                 rows = rows.get("issues") or []
         closed_roles = self.config.closed_roles()

@@ -130,11 +130,14 @@ CLASS=$(printf '%s\n' "$T" | jq -r .type_class)
 case "$CLASS" in
   full_sdlc)   : ;;                               # continue to Phase 2
   deliverable) echo "→ complete-deliverable"; ;;  # invoke complete-deliverable, then stop
-  container)   # never worked or closed by the agent: stop, no transition, no comment
-    MSG=$(printf '%s\n' "$T" | jq -r '"\(.rollup.closed // 0)/\(.rollup.total // 0) children closed"')
+  container)   # never worked or closed by the agent: stop, no transition,
+               # no comment of its own (`tkt run` may still write its phase marker)
+    MSG=$(printf '%s\n' "$T" | jq -r 'if .rollup then "\(.rollup.closed)/\(.rollup.total) children closed" else "progress unavailable" end')
     READY=$(printf '%s\n' "$T" | jq -r '.rollup.ready_to_close // false')
     echo "STOP: $KEY is a container: $MSG. Containers are never worked or closed by the agent; a human closes it."
-    [ "$READY" = "true" ] && echo "All children are closed: propose closing $KEY to a human."
+    if [ "$READY" = "true" ]; then
+      echo "All children are closed: propose closing $KEY to a human."
+    fi
     ;;
   *)           # unknown: fall back to lane availability
     HAS_REVIEW=$(tkt view "$KEY" --json | jq -r '[.transitions[]? == (env.REVIEW_LANE)] | any')

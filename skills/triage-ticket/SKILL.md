@@ -43,7 +43,8 @@ Extract from the normalized shape:
 
 - `type` + `type_class` — `full_sdlc` (Story/Bug), `deliverable` (Task/Spike/…)
   or `container` (Epic by default); drives Phase 1.5 routing in `automated-sdlc`.
-  **A container stops triage here:** no transition, no branch, no comment.
+  **A container stops triage here:** no transition, no branch, no comment of
+  its own (`tkt run` may still write its phase marker).
   Return its `type`, `type_class` and `rollup` so the orchestrator stops at
   Phase 1.5. Containers are never worked; a human closes them.
 - `summary`, `description`, `acceptance`

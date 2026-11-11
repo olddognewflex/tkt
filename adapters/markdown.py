@@ -301,6 +301,7 @@ class MarkdownAdapter(Adapter):
             description="\n".join(description_lines),
             status=status,
             status_role=self.config.lane_to_role(status),
+            closed=self._closed(self.config.lane_to_role(status)),
             type_class=self.config.type_class(issue_type),
             assignee=str(fm.get("assignee", "")),
             priority=str(fm.get("priority", "")),

@@ -38,16 +38,17 @@ def _print_ticket_human(t: Ticket) -> None:
     if t.children:
         print(f"  children: {', '.join(t.children)}")
     if t.rollup is not None:
-        print(f"  progress: {_rollup_line(t.rollup)}")
+        print(f"  progress: {_rollup_line(t.rollup, t.children)}")
     if t.transitions:
         print(f"  next:     {', '.join(t.transitions)}")
     if t.url:
         print(f"  url:      {t.url}")
 
 
-def _rollup_line(r: dict) -> str:
+def _rollup_line(r: dict, children: list[str] | None = None) -> str:
     if not r.get("total"):
-        return "no children"
+        # The lookup found none, yet the ticket lists some: don't claim zero.
+        return "progress unavailable" if children else "no children"
     line = f"{r['closed']}/{r['total']} children closed"
     if r.get("open"):
         line += f" (open: {', '.join(r['open'])})"
@@ -57,17 +58,22 @@ def _rollup_line(r: dict) -> str:
 
 
 def _issue_types_check(config: Config) -> Check:
-    """Config-only, always ok: says which types are containers and where a
-    type sits in more than one list, since precedence then decides."""
-    names = ", ".join(sorted(config.container)) or "none"
+    """Config-only: says which types are containers and where a type sits
+    in more than one list, since precedence then decides. Fails, rather
+    than crashing doctor, when `container` is not an array."""
+    try:
+        containers = config.container
+    except ConfigError as e:
+        return Check("issue types", False, str(e))
+    names = ", ".join(sorted(containers)) or "none"
     detail = f"container: {names}" + (" (default)" if config.container_defaulted else "")
     notes = []
-    for t in sorted(config.container):
+    for t in sorted(containers):
         for label, group in (("full_sdlc", config.full_sdlc),
                              ("deliverable", config.deliverable)):
             if t in group:
                 notes.append(f"{t} also in {label} - container wins")
-    for t in sorted(config.full_sdlc & config.deliverable - config.container):
+    for t in sorted(config.full_sdlc & config.deliverable - containers):
         notes.append(f"{t} in full_sdlc and deliverable - full_sdlc wins")
     if notes:
         detail += "; " + "; ".join(notes)
@@ -86,9 +92,11 @@ def _container_rollup(adapter, t: Ticket) -> dict | None:
         return None
     open_keys = [s["key"] for s in states if not s.get("closed")]
     closed = len(states) - len(open_keys)
+    # The container is judged by the same rule as its children: a closed
+    # role or the backend's own terminal state (`t.closed`).
+    already_closed = bool(t.closed) or t.status_role in adapter.config.closed_roles()
     return {"total": len(states), "closed": closed, "open": open_keys,
-            "ready_to_close": bool(states) and not open_keys
-            and t.status_role not in adapter.config.closed_roles()}
+            "ready_to_close": bool(states) and not open_keys and not already_closed}
 
 
 def _print_ticket_list(tickets: list[Ticket], as_json: bool) -> None:

@@ -16,6 +16,11 @@ class Ticket:
     description: str = ""
     status: str = ""                 # provider lane name, verbatim
     status_role: str = ""            # canonical role resolved from config
+    # True when the ticket is finished: its role is in the config's closed
+    # roles, or the backend marks it terminal (a closed GitHub issue, Jira's
+    # done status category). Filled at normalization at no extra cost; None
+    # only on a Ticket built outside an adapter.
+    closed: bool | None = None
     type_class: str = ""             # "full_sdlc" | "deliverable" | "container" | "unknown"
     project: str = ""                # project key (Jira "PROJ"); "" when none
     project_name: str = ""           # project display name; "" when none

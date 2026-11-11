@@ -137,11 +137,7 @@ class LinearAdapter(Adapter):
                 if lab.startswith(self.type_label_prefix):
                     return lab[len(self.type_label_prefix):].strip()
             return ""
-        known = self.config.known_types()
-        for lab in labels:
-            if lab in known:
-                return lab
-        return ""
+        return self.config.pick_type(labels)
 
     def _to_ticket(self, issue: dict, transitions=None) -> Ticket:
         labels = [n["name"] for n in (issue.get("labels", {}) or {}).get("nodes", [])]
@@ -177,6 +173,8 @@ class LinearAdapter(Adapter):
             description=issue.get("description", "") or "",
             status=status,
             status_role=self.config.lane_to_role(status) if status else "",
+            closed=self._closed(self.config.lane_to_role(status) if status else "",
+                                state.get("type") in _DONE_STATE_TYPES),
             type_class=self.config.type_class(issue_type),
             assignee=assignee.get("displayName") or assignee.get("name") or assignee.get("email", ""),
             priority=issue.get("priorityLabel", "") or _PRIORITY_LABEL.get(issue.get("priority", 0), ""),

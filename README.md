@@ -216,7 +216,7 @@ name, and `tkt transition KEY review` to move.
 {
   "key": "TKT-1", "type": "Story", "type_class": "full_sdlc",
   "summary": "...", "description": "...", "acceptance": ["..."],
-  "status": "In Progress", "status_role": "in_progress",
+  "status": "In Progress", "status_role": "in_progress", "closed": false,
   "project": "TKT", "project_name": "tkt",
   "assignee": "raymond", "assignee_id": "5b10...", "reporter": "Ann",
   "reporter_id": "5c2e...", "priority": "Highest",
@@ -233,6 +233,14 @@ name, and `tkt transition KEY review` to move.
 `{"total": 5, "closed": 3, "open": ["TKT-4", "TKT-5"], "ready_to_close": false}`.
 `ready_to_close` is true when every child is closed and the container is not;
 a human closes it. A failed child lookup warns and leaves `rollup` `null`.
+
+`closed` is true when the ticket is finished: its role is `done`, `cancelled`
+or a `[board].close_on` role, or the backend marks it terminal (a closed
+GitHub issue, Jira's `done` status category, a Linear `completed` or
+`canceled` state, openkanban `done`/`archived`). Every adapter fills it on
+`list` and `view` at no extra cost. Parents and children are judged by this
+one rule, so a closed GitHub Epic whose `Status:` label is stale is never
+reported as ready to close.
 
 `project`, `project_name`, `assignee_id`, `reporter`, `reporter_id`, `created`
 and `updated` are filled by jira only; other backends leave them `""` / `null`.
@@ -274,7 +282,15 @@ container   = ["Epic"]                              # never worked; a human clos
 ```
 
 - `container` defaults to `["Epic"]` when the key is absent; `container = []`
-  turns it off. A non-array value is a config error.
+  turns it off. A non-array value is a config error, raised when a verb first
+  routes a type (`tkt doctor` reports it as a failing `issue types` row);
+  `tkt lane`, `tkt cfg` and `tkt agents` still run.
+- On backends that type tickets by label (github, linear, openkanban, without
+  a `type_label_prefix`), a plain `Epic` label now means `container` even if
+  your config never names Epic. Set `container = []` if Epic is only a tag
+  there. When an issue carries several type labels, the highest-precedence
+  class wins (container, then full_sdlc, then deliverable), then label order:
+  an issue labelled both `Story` and `Epic` is a container.
 - A type in several lists resolves container > full_sdlc > deliverable, so an
   older config listing Epic under `deliverable` now gets `container`. `tkt
   doctor`'s `issue types` row says when that happens.
@@ -282,7 +298,8 @@ container   = ["Epic"]                              # never worked; a human clos
   open children (`tkt children`), whatever its type: a Story with open
   sub-tasks waits. A child is closed when its role is `done`, `cancelled` or a
   `[board].close_on` role, or the backend marks it closed (Jira `done` status
-  category, a closed GitHub issue, openkanban `done`/`archived`).
+  category, a closed GitHub issue, a Linear `completed`/`canceled` state,
+  openkanban `done`/`archived`).
 
 ## Providers
 
@@ -347,7 +364,9 @@ read, acli's own output decides.
   still miss an issue that leaves the query mid-walk.
 - **children** are filled on `view` only (`list` leaves `[]`), by a
   `parent = "KEY"` search over REST (every page) or acli (first 100 only,
-  `--limit 100`). That search is not scoped to
+  `--limit 100`; this cap is on the `children` display field only:
+  `tkt children` and the container rollup page every result in both modes).
+  That search is not scoped to
   `[ticketing].project`, so a child in another project is still listed.
 - **parent** = `fields.parent`, on `view` and REST-mode `list`, with no extra
   call. acli-mode `list` leaves it `""` (acli search rejects the field).

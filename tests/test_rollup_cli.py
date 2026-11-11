@@ -134,6 +134,19 @@ class Rollup(Board):
         self.assertNotIn("progress:", out)
 
 
+class RollupLine(unittest.TestCase):
+    def test_no_children_only_when_the_ticket_lists_none(self):
+        empty = {"total": 0, "closed": 0, "open": [], "ready_to_close": False}
+        self.assertEqual(cli._rollup_line(empty, []), "no children")
+        # The lookup found nothing, yet the ticket lists children.
+        self.assertEqual(cli._rollup_line(empty, ["E-2"]), "progress unavailable")
+
+    def test_counts_and_ready(self):
+        r = {"total": 2, "closed": 2, "open": [], "ready_to_close": True}
+        self.assertEqual(cli._rollup_line(r, ["A", "B"]),
+                         "2/2 children closed - ready to close (a human closes containers)")
+
+
 class ChildrenVerb(Board):
     def test_json_shape(self):
         self.write("TKT-1", "Story", "To Do", ["TKT-2", "TKT-3"])

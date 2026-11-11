@@ -70,10 +70,17 @@ class ContainerConfig(unittest.TestCase):
         self.assertEqual(c.type_class("Initiative"), "container")
         self.assertEqual(c.type_class("Story"), "unknown")
 
-    def test_non_array_container_is_a_config_error(self):
+    def test_non_array_container_is_a_config_error_on_use(self):
+        # Loading still works, so `tkt lane`, `tkt cfg` and `tkt agents`
+        # keep running; the first use of the type routing fails loudly.
         for bad in ("Epic", 1, {"Epic": True}):
-            with self.subTest(bad=bad), self.assertRaises(ConfigError):
-                config({"container": bad})
+            with self.subTest(bad=bad):
+                c = config({"container": bad})
+                self.assertEqual(c.role_to_lane("todo"), "To Do")
+                for use in (lambda: c.type_class("Epic"), c.known_types,
+                            lambda: c.container):
+                    with self.assertRaises(ConfigError):
+                        use()
 
     def test_precedence_across_lists(self):
         c = config({"full_sdlc": ["Story", "Sub-task"],
@@ -84,6 +91,19 @@ class ContainerConfig(unittest.TestCase):
     def test_known_types_is_the_union(self):
         c = config({"full_sdlc": ["Story"], "deliverable": ["Task"]})
         self.assertEqual(c.known_types(), {"Story", "Task", "Epic"})
+
+    def test_pick_type_prefers_the_higher_class(self):
+        c = config({"full_sdlc": ["Story"], "deliverable": ["Task"]})
+        self.assertEqual(c.pick_type(["Story", "Epic"]), "Epic")
+        self.assertEqual(c.pick_type(["Epic", "Story"]), "Epic")
+        self.assertEqual(c.pick_type(["Task", "Story"]), "Story")
+        self.assertEqual(c.pick_type(["bug-ish", "Task"]), "Task")
+        self.assertEqual(c.pick_type(["Task", "Chore"]), "Task")
+        self.assertEqual(c.pick_type(["nothing"]), "")
+
+    def test_pick_type_keeps_label_order_within_a_class(self):
+        c = config({"deliverable": ["Task", "Chore"]})
+        self.assertEqual(c.pick_type(["Chore", "Task"]), "Chore")
 
     def test_closed_roles_include_close_on(self):
         self.assertEqual(config().closed_roles(), {"done", "cancelled"})
@@ -188,6 +208,38 @@ class DoctorRow(unittest.TestCase):
     def test_opt_out_is_reported(self):
         r = self.row('[issue_types]\ncontainer = []\n')
         self.assertEqual(r["detail"], "container: none")
+
+    def test_bad_container_fails_the_row_not_doctor(self):
+        r = self.row('[issue_types]\ncontainer = "Epic"\n')
+        self.assertFalse(r["ok"])
+        self.assertIn("must be an array", r["detail"])
+
+
+class BadContainerKeepsConfigVerbs(unittest.TestCase):
+    """A non-array `container` must not break verbs that never route types."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        board = Path(tmp.name) / "board"
+        board.mkdir()
+        self.cfg = Path(tmp.name) / "config.toml"
+        self.cfg.write_text(MARKDOWN_TOML.format(
+            board=board, extra='[issue_types]\ncontainer = "Epic"\n'))
+
+    def run_cli(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            rc = cli.main(["--config", str(self.cfg), *argv])
+        return rc, out.getvalue()
+
+    def test_lane_cfg_and_agents_still_run(self):
+        self.assertEqual(self.run_cli("lane", "todo"), (0, "To Do\n"))
+        rc, out = self.run_cli("cfg", "queries.tier1")
+        self.assertEqual((rc, out.strip()), (0, 'status = "To Do"'))
+        rc, out = self.run_cli("--json", "agents")
+        self.assertEqual(rc, 0)
+        json.loads(out)
 
 
 if __name__ == "__main__":

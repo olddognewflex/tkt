@@ -23,7 +23,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from adapters.markdown import MarkdownAdapter  # noqa: E402
 from adapters.openkanban import OpenKanbanAdapter  # noqa: E402
 from core.config import Config  # noqa: E402
-from core.errors import ProviderError  # noqa: E402
+from adapters.linear import LinearAdapter  # noqa: E402
+from core import cli  # noqa: E402
+from core.errors import NotFoundError, ProviderError, UsageError  # noqa: E402
+from core.schema import Ticket  # noqa: E402
 
 from tests.test_children_github import StubGithub, make_config as gh_config, sub  # noqa: E402
 from tests.test_children_jira import StubAcliJira, StubRestJira  # noqa: E402
@@ -116,7 +119,9 @@ class JiraOverride(unittest.TestCase):
         searches = [c for c in a.calls if c[:3] == ("jira", "workitem", "search")]
         self.assertEqual(len(searches), 1)
         self.assertNotIn("--fields", searches[0])
-        self.assertIn("--limit", searches[0])
+        # Every page: a capped list could make a parent look finished.
+        self.assertIn("--paginate", searches[0])
+        self.assertNotIn("--limit", searches[0])
 
     def test_children_view_wire_calls_unchanged(self):
         a = StubRestJira(search_issues=[{"key": "PROJ-2"}])
@@ -155,10 +160,100 @@ class GithubOverride(unittest.TestCase):
         self.assertEqual(states["8"]["status"], "")
         self.assertEqual(len([c for c in a.calls if c[:2] == ("project", "item-list")]), 1)
 
-    def test_404_means_no_children(self):
+    def test_404_on_an_existing_issue_means_no_children(self):
+        # e.g. a host without the sub-issues API: the issue itself is there.
         a = StubGithub(gh_config(), api_error=ProviderError(
             "gh api failed: gh: Not Found (HTTP 404)"))
         self.assertEqual(a.child_states("1"), [])
+
+    def test_404_on_a_missing_issue_is_not_found(self):
+        class Missing(StubGithub):
+            def _gh_json(self, *args):
+                if args[:2] == ("issue", "view"):
+                    raise ProviderError("gh issue view failed: no issue")
+                return super()._gh_json(*args)
+
+        a = Missing(gh_config(), api_error=ProviderError(
+            "gh api failed: gh: Not Found (HTTP 404)"))
+        with self.assertRaises(NotFoundError):
+            a.child_states("99999")
+
+    def test_keys_that_are_not_issue_numbers_are_a_usage_error(self):
+        a = StubGithub(gh_config())
+        for bad in ("other/repo#5", "#5#6", "abc", ""):
+            with self.subTest(bad=bad), self.assertRaises(UsageError):
+                a.child_states(bad)
+        self.assertFalse(a.calls)
+        a.child_states("#1")          # one leading `#` is fine
+
+
+class LinearNativeStates(unittest.TestCase):
+    """A canceled-type state (Linear's "Duplicate") is closed whatever the
+    role map says, for children exactly as for blockers."""
+
+    def test_canceled_type_child_counts_as_closed(self):
+        a = LinearAdapter(Config(
+            {"ticketing": {"provider": "linear"}, "linear": {"team_key": "ENG"},
+             "board": {"roles": dict(ROLES)}, "queries": {"all": ""}},
+            Path("/nonexistent/.sdlc/config.toml")))
+        issues = {
+            "ENG-2": {"identifier": "ENG-2", "state": {"name": "Duplicate", "type": "canceled"}},
+            "ENG-3": {"identifier": "ENG-3", "state": {"name": "In Progress", "type": "started"}},
+        }
+        a.view = lambda k, hierarchy=True: a._to_ticket(issues[k])
+        states = a.child_states("ENG-1", ["ENG-2", "ENG-3", "ENG-2", "ENG-1"])
+        self.assertEqual([(s["key"], s["closed"]) for s in states],
+                         [("ENG-2", True), ("ENG-3", False)])
+        self.assertEqual(states[0]["status_role"], "Duplicate")
+
+
+class ContainerClosedNatively(unittest.TestCase):
+    """The container is judged like its children: a native terminal state
+    counts even when its lane or label is stale or unmapped."""
+
+    def rollup(self, adapter, t):
+        adapter.child_states = lambda key, children=None: [
+            {"key": "C-1", "status": "", "status_role": "", "closed": True}]
+        with contextlib.redirect_stderr(io.StringIO()):
+            return cli._container_rollup(adapter, t)
+
+    def test_closed_github_epic_with_stale_label_is_not_ready(self):
+        a = StubGithub(gh_config())
+        t = a._issue_to_ticket({"number": 1, "title": "e", "body": "", "url": "",
+                                "state": "CLOSED", "assignees": [],
+                                "labels": [{"name": "Epic"},
+                                           {"name": "Status: In Progress"}]},
+                               children=["2"])
+        self.assertEqual((t.type_class, t.status_role, t.closed),
+                         ("container", "in_progress", True))
+        self.assertFalse(self.rollup(a, t)["ready_to_close"])
+
+    def test_open_github_epic_with_closed_children_is_ready(self):
+        a = StubGithub(gh_config())
+        t = a._issue_to_ticket({"number": 1, "title": "e", "body": "", "url": "",
+                                "state": "OPEN", "assignees": [],
+                                "labels": [{"name": "Epic"},
+                                           {"name": "Status: In Progress"}]},
+                               children=["2"])
+        self.assertFalse(t.closed)
+        self.assertTrue(self.rollup(a, t)["ready_to_close"])
+
+    def test_jira_epic_in_unmapped_done_category_is_not_ready(self):
+        a = StubRestJira(search_issues=[])
+        t = a._to_ticket({"key": "PROJ-1", "fields": {
+            "issuetype": {"name": "Epic"},
+            "status": {"name": "Won't Do", "statusCategory": {"key": "done"}}}},
+            children=["PROJ-2"])
+        self.assertEqual((t.type_class, t.status_role, t.closed),
+                         ("container", "Won't Do", True))
+        self.assertFalse(self.rollup(a, t)["ready_to_close"])
+
+    def test_ticket_built_outside_an_adapter_falls_back_to_roles(self):
+        a = StubRestJira(search_issues=[])
+        t = Ticket(key="PROJ-1", type_class="container", status_role="todo",
+                   children=["PROJ-2"])
+        self.assertIsNone(t.closed)
+        self.assertTrue(self.rollup(a, t)["ready_to_close"])
 
 
 class OpenKanbanOverride(unittest.TestCase):

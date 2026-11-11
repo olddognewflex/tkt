@@ -233,7 +233,9 @@ are in `AGENTS.md`.
 ### Ticket schema notes
 
 Beyond the obvious fields, `Ticket` carries `status` (provider lane, verbatim) alongside
-`status_role` (canonical role), `type_class` (`full_sdlc` | `deliverable` | `container` |
+`status_role` (canonical role) and `closed` (finished: a closed role, or the
+backend's own terminal state, filled at normalization through
+`Adapter._closed` so parents and children share one rule), `type_class` (`full_sdlc` | `deliverable` | `container` |
 `unknown`),
 the date fields `due` / `scheduled` / `completed`, and `agent_status` (board agent state:
 `idle` | `processing` | `waiting` | `done` | `blocked`, or empty) alongside

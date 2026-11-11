@@ -28,7 +28,7 @@ import re
 import subprocess
 from urllib.parse import urlsplit
 
-from core.errors import ConfigError, NotFoundError, ProviderError
+from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
 from core.schema import Check, Ticket, Worklog
 
 from .base import Adapter
@@ -94,11 +94,7 @@ class GithubAdapter(Adapter):
                 if lab.startswith(self.type_label_prefix):
                     return lab[len(self.type_label_prefix):].strip()
             return ""
-        known = self.config.known_types()
-        for lab in labels:
-            if lab in known:
-                return lab
-        return ""
+        return self.config.pick_type(labels)
 
     def _priority_from_labels(self, labels: list[str]) -> str:
         for lab in labels:
@@ -146,6 +142,9 @@ class GithubAdapter(Adapter):
             description=body,
             status=status,
             status_role=self.config.lane_to_role(status) if status else "",
+            # `gh issue --json state` says CLOSED, the REST API says closed.
+            closed=self._closed(self.config.lane_to_role(status) if status else "",
+                                str(issue.get("state") or "").lower() == "closed"),
             type_class=self.config.type_class(issue_type),
             assignee=self._assignee_login(issue.get("assignees")),
             priority=self._priority_from_labels(labels),
@@ -231,6 +230,7 @@ class GithubAdapter(Adapter):
             "url": content.get("url", ""),
             "labels": item.get("labels") or content.get("labels"),
             "assignees": item.get("assignees") or content.get("assignees"),
+            "state": content.get("state"),
         }
         status = self._item_status(item, self.status_field)
         return self._issue_to_ticket(issue, status=status, check_resolved=check_resolved,
@@ -307,8 +307,11 @@ class GithubAdapter(Adapter):
         keys = [_related_key(sub, nwo) for sub in self._sub_issues(number, host, nwo)]
         return [k for k in dict.fromkeys(keys) if k and k != number]
 
-    def _sub_issues(self, number: str, host: str, nwo: str) -> list[dict]:
-        """The raw sub-issue objects of issue `number`; [] on a 404."""
+    def _sub_issues(self, number: str, host: str, nwo: str,
+                    strict: bool = False) -> list[dict]:
+        """The raw sub-issue objects of issue `number`; [] on a 404. With
+        `strict`, a 404 for an issue that does not exist raises NotFound
+        (GitHub also answers 404 where the sub-issues API is missing)."""
         args = ["api", f"repos/{nwo}/issues/{number}/sub_issues?per_page=100",
                 "--paginate"]
         if host:
@@ -316,10 +319,19 @@ class GithubAdapter(Adapter):
         try:
             out = self._gh(*args)
         except ProviderError as e:
-            if "HTTP 404" in str(e):
-                return []
-            raise
+            if "HTTP 404" not in str(e):
+                raise
+            if strict and not self._issue_exists(number):
+                raise NotFoundError(f"no issue #{number} in {self.repo}") from e
+            return []
         return [s for s in _json_pages(out, " ".join(args)) if isinstance(s, dict)]
+
+    def _issue_exists(self, number: str) -> bool:
+        try:
+            self._gh_json("issue", "view", number, "--repo", self.repo, "--json", "number")
+        except ProviderError:
+            return False
+        return True
 
     def child_states(self, key, children=None):
         """One sub-issues call carrying each child's state, not a view per
@@ -328,8 +340,11 @@ class GithubAdapter(Adapter):
         labels, or in projectv2 mode from one item-list call (in-repo
         children only; GitHub numbers repeat across repos)."""
         host, nwo = _repo_host(self.repo), self._repo_name
-        number = str(key).lstrip("#")
-        subs = self._sub_issues(number, host, nwo)
+        number = str(key)
+        number = number[1:] if number.startswith("#") else number
+        if not number.isdigit():
+            raise UsageError(f"children takes an issue number in {self.repo}, got {key!r}")
+        subs = self._sub_issues(number, host, nwo, strict=True)
         item_status: dict[str, str] = {}
         if self.board == "projectv2" and subs:
             for item in self._repo_items():

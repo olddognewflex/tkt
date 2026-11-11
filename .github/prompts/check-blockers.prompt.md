@@ -17,7 +17,7 @@ Scans blocked tickets, summarizes why each is stuck, recommends next steps. All 
 4. Build a report grouped by recommended action.
 5. List auto-unblock candidates but do **not** transition without confirmation.
 6. Optionally nudge stale blockers with `tkt comment`.
-7. Optional, when `[queries].containers` is defined (`tkt cfg queries.containers` exits 4 when not): list it, and for each `container` run `tkt children KEY --json`; report those whose children are all `closed` as ready to close. A human closes them; never transition.
+7. Optional, when `[queries].containers` is defined (`tkt cfg queries.containers` exits 4 when not): list it, and for each `container` that is not already `closed` run `tkt children KEY --json` (warn, don't skip silently, when a call fails); report those whose children are all `closed` as ready to close. A human closes them; never transition.
 
 ## Output
 
