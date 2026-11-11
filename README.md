@@ -172,6 +172,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | `tkt transition KEY ROLE` | move to lane mapped from ROLE | `KEY -> Lane` |
 | `tkt comment KEY BODY` | post activity comment | confirmation |
 | `tkt blockers KEY` | unresolved blockers only | list / `--json` |
+| `tkt children KEY` | each direct child's status and whether it is closed | list / `--json` |
 | `tkt worklog KEY --from-role ROLE [--note T] [--billable\|--no-billable]` | log time since entry into ROLE's lane → now; unflagged, billable follows `[timetracking].billable` (default false) | worklog / `--json`; no-op if `[timetracking].provider="none"` |
 | `tkt lane-time KEY --role ROLE` | log time for an already-exited lane (entry→exit) | worklog / `--json` |
 | `tkt lane-time --keys K1:ROLE[,K2:ROLE,...] [--read-only]` | batch lane-time (one call, N keys) | JSON array of worklogs |
@@ -223,9 +224,15 @@ name, and `tkt transition KEY review` to move.
   "created": "2026-09-27T06:28:36.123Z", "updated": "2026-09-28T09:00:00.000Z",
   "labels": ["..."], "components": ["..."],
   "blocked_by": [{"key": "TKT-2", "resolved": false}],
-  "blocks": [], "children": [], "parent": "", "transitions": ["..."], "url": "..."
+  "blocks": [], "children": [], "parent": "", "transitions": ["..."], "url": "...",
+  "rollup": null
 }
 ```
+
+`rollup` is filled by `tkt view` for a container only:
+`{"total": 5, "closed": 3, "open": ["TKT-4", "TKT-5"], "ready_to_close": false}`.
+`ready_to_close` is true when every child is closed and the container is not;
+a human closes it. A failed child lookup warns and leaves `rollup` `null`.
 
 `project`, `project_name`, `assignee_id`, `reporter`, `reporter_id`, `created`
 and `updated` are filled by jira only; other backends leave them `""` / `null`.
@@ -253,8 +260,29 @@ and `updated` are filled by jira only; other backends leave them `""` / `null`.
 `tickets` lists every key scanned, so "no events" is distinguishable from "no
 tickets". Timestamps are UTC with millisecond precision, fixed width.
 
-`type_class` is resolved from `[issue_types]` (`full_sdlc` vs `deliverable`) — this is
-what `automated-sdlc` Phase 1.5 branches on, now provider-independent.
+`type_class` is resolved from `[issue_types]` (`full_sdlc`, `deliverable` or
+`container`) — this is what `automated-sdlc` Phase 1.5 branches on, now
+provider-independent.
+
+### Issue-type routing (`[issue_types]`)
+
+```toml
+[issue_types]
+full_sdlc   = ["Story", "Bug"]                     # full PR/review/deploy pipeline
+deliverable = ["Task", "Sub-task", "Chore", "Spike"] # short-circuit to done
+container   = ["Epic"]                              # never worked; a human closes it
+```
+
+- `container` defaults to `["Epic"]` when the key is absent; `container = []`
+  turns it off. A non-array value is a config error.
+- A type in several lists resolves container > full_sdlc > deliverable, so an
+  older config listing Epic under `deliverable` now gets `container`. `tkt
+  doctor`'s `issue types` row says when that happens.
+- `select-ticket` never selects a container, and never selects a ticket with
+  open children (`tkt children`), whatever its type: a Story with open
+  sub-tasks waits. A child is closed when its role is `done`, `cancelled` or a
+  `[board].close_on` role, or the backend marks it closed (Jira `done` status
+  category, a closed GitHub issue, openkanban `done`/`archived`).
 
 ## Providers
 
@@ -511,7 +539,7 @@ drives, and each can also be run on its own:
 | `self-review` | adversarial pre-PR review loop |
 | `respond-to-review` | address review comments, `revise ↔ review` loop |
 | `deploy-preview` | confirm preview env, post URL to ticket + PR |
-| `complete-deliverable` | short-circuit `→ done` for deliverable types |
+| `complete-deliverable` | short-circuit `→ done` for deliverable types (stops on a container or open children) |
 | `deploy-ready` | merge, watch staging, gate prod, QA lane-times |
 | `resume-from-revise` | re-enter the loop after a human revise fix |
 | `check-blockers` | classify blocked tickets, recommend unblocks |

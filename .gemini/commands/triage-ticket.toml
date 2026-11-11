@@ -4,14 +4,14 @@ prompt = """
 Read ticket {{args}}, extract requirements, transition to `in_progress`, and start tracking. All access via `tkt`.
 
 Steps:
-1. `tkt view "{{args}}" --json` — extract key, type + type_class, summary, description, acceptance, labels, components, blocked_by
+1. `tkt view "{{args}}" --json` — extract key, type + type_class (a `container`, Epic by default, stops triage: no transition, no branch, no comment; a human closes it), summary, description, acceptance, labels, components, blocked_by
 2. Identify affected packages from ticket content
 3. `tkt transition "{{args}}" in_progress`
 4. `tkt comment "{{args}}" "Starting work. Affected packages: <pkg1>, <pkg2>"`
 
 Output to next skill:
 - Ticket key
-- type + type_class (full_sdlc vs deliverable)
+- type + type_class (full_sdlc, deliverable or container)
 - Summary
 - Acceptance criteria
 - Affected packages

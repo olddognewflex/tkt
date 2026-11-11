@@ -73,9 +73,13 @@ Determines `type_class` routing:
 
 ```toml
 [issue_types]
-full_sdlc   = ["Story", "Bug"]                              # full PR/review/deploy pipeline
-deliverable = ["Task", "Sub-task", "Chore", "Epic", "Spike"] # short-circuit to done
+full_sdlc   = ["Story", "Bug"]                     # full PR/review/deploy pipeline
+deliverable = ["Task", "Sub-task", "Chore", "Spike"] # short-circuit to done
+container   = ["Epic"]                              # never worked; a human closes it
 ```
+
+`container` defaults to `["Epic"]` when absent; `container = []` turns it off.
+A type in several lists resolves container > full_sdlc > deliverable.
 
 ## `[queries]`
 

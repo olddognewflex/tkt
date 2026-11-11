@@ -110,7 +110,8 @@ the backend has no billable concept).
 ### Phase 0: Select ticket
 
 **Invoke `select-ticket`.** Auto-selects Tier 1/2 (assigned); recommends Tier 3–5.
-Drops candidates with unresolved blockers. Tickets carrying the after-hours label
+Drops candidates with unresolved blockers, containers (Epics by default) and any
+ticket with open children. Tickets carrying the after-hours label
 (optional `[schedule]` table, evaluated by `tkt schedule`) are deferred
 during business hours when other workable candidates exist. If nothing across all
 tiers → stop with a "nothing to work on" report.
@@ -118,15 +119,23 @@ tiers → stop with a "nothing to work on" report.
 ### Phase 1: Triage
 
 **Invoke `triage-ticket`** with the key. Transitions `todo → in_progress`. Returns
-the ticket `type` and `type_class`.
+the ticket `type` and `type_class`. A container is returned untouched (no
+transition, no branch) and stops at Phase 1.5.
 
 ### Phase 1.5: Route by type
 
 ```shell
-CLASS=$(tkt view "$KEY" --json | jq -r .type_class)
+T=$(tkt view "$KEY" --json)
+CLASS=$(printf '%s\n' "$T" | jq -r .type_class)
 case "$CLASS" in
   full_sdlc)   : ;;                               # continue to Phase 2
   deliverable) echo "→ complete-deliverable"; ;;  # invoke complete-deliverable, then stop
+  container)   # never worked or closed by the agent: stop, no transition, no comment
+    MSG=$(printf '%s\n' "$T" | jq -r '"\(.rollup.closed // 0)/\(.rollup.total // 0) children closed"')
+    READY=$(printf '%s\n' "$T" | jq -r '.rollup.ready_to_close // false')
+    echo "STOP: $KEY is a container: $MSG. Containers are never worked or closed by the agent; a human closes it."
+    [ "$READY" = "true" ] && echo "All children are closed: propose closing $KEY to a human."
+    ;;
   *)           # unknown: fall back to lane availability
     HAS_REVIEW=$(tkt view "$KEY" --json | jq -r '[.transitions[]? == (env.REVIEW_LANE)] | any')
     ;;
@@ -134,10 +143,13 @@ esac
 ```
 
 `full_sdlc` → full pipeline. `deliverable` → **invoke `complete-deliverable`,
-then stop**. `[issue_types]` decides which types fall in each set, so route on
-`type_class`, never on the type name. The example configs put Story and Bug in
-`full_sdlc` and Task, Sub-task, Chore, Epic and Spike in `deliverable`. A
-project whose sub-tasks ship code moves Sub-task to `full_sdlc`.
+then stop**. `container` → **stop** and report child progress; under `tkt run`
+the outcome is `gate` (reason: container). `[issue_types]` decides which types
+fall in each set, so route on `type_class`, never on the type name. The example
+configs put Story and Bug in `full_sdlc`, Task, Sub-task, Chore and Spike in
+`deliverable`, and Epic in `container` (also the default when `container` is
+absent; `container = []` turns it off). A project whose sub-tasks ship code
+moves Sub-task to `full_sdlc`.
 
 ### Phase 2: Plan (→ `sdlc-planner`)
 

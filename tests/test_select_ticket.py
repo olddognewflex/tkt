@@ -63,6 +63,8 @@ elif verb == "schedule":
     r = {{"out": json.dumps({{"enabled": False, "in_window": False, "label": None}})}}
 elif verb == "blockers":
     r = spec.get("blockers", {{}}).get(arg, {{"out": "[]"}})
+elif verb == "children":
+    r = spec.get("children", {{}}).get(arg, {{"out": "[]"}})
 else:
     sys.exit(64)
 sys.stdout.write(r.get("out", ""))
@@ -87,11 +89,14 @@ def step3_block() -> str:
     return m.group(1)
 
 
-def tickets(*keys):
+def tickets(*keys, types=None):
     # Multi-line bodies and backslashes are normal ticket content; zsh's and
-    # dash's echo would expand the escapes and break the JSON.
+    # dash's echo would expand the escapes and break the JSON. `types` maps
+    # a key to its type_class (default full_sdlc).
+    types = types or {}
     return json.dumps([{"key": k, "summary": f"{k} C:\\temp\\new",
-                        "description": "line one\nline two\ttabbed \\c"}
+                        "description": "line one\nline two\ttabbed \\c",
+                        "type_class": types.get(k, "full_sdlc")}
                        for k in keys])
 
 
@@ -239,6 +244,108 @@ class Step2(unittest.TestCase):
                 self.assertNotIn("parse error", err)
 
 
+@unittest.skipUnless(SHELLS and shutil.which("jq"), "needs a POSIX shell and jq")
+class ContainersAndChildren(Step2):
+    """TKT-103: containers and tickets with open children are never selected."""
+
+    def calls(self, spec, prefix=""):
+        """Like run_step2, but also returns each shell's stub call log."""
+        logs = {}
+        real_run = subprocess.run
+
+        def run(cmd, env=None, **kw):
+            p = real_run(cmd, env=env, **kw)
+            logs[cmd[0]] = Path(env["STUB_LOG"]).read_text() \
+                if Path(env["STUB_LOG"]).exists() else ""
+            return p
+
+        from unittest import mock
+        with mock.patch.object(subprocess, "run", run):
+            res = self.run_step2(spec, prefix=prefix)
+        return res, logs
+
+    def test_container_is_skipped_without_any_call(self):
+        spec = {"cfg": {"1": 0},
+                "list": {"1": {"out": tickets("C-1", "T-2", types={"C-1": "container"})}}}
+        for prefix in ("", "set -e\n"):
+            res, logs = self.calls(spec, prefix=prefix)
+            for shell, (rc, out, err, tier, keys) in res.items():
+                with self.subTest(shell=shell, errexit=bool(prefix)):
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(keys, ["T-2"])
+                    self.assertNotIn("blockers C-1", logs[shell])
+                    self.assertNotIn("children C-1", logs[shell])
+
+    def test_tier_of_only_containers_falls_through(self):
+        spec = {"cfg": {"1": 0, "2": 0},
+                "list": {"1": {"out": tickets("C-1", types={"C-1": "container"})},
+                         "2": {"out": tickets("T-2")}}}
+        for shell, (rc, out, err, tier, keys) in self.run_step2(spec).items():
+            with self.subTest(shell=shell):
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(tier, "2")
+                self.assertEqual(keys, ["T-2"])
+
+    def test_open_child_excludes_quietly(self):
+        spec = {"cfg": {"1": 0},
+                "list": {"1": {"out": tickets("T-1", "T-2")}},
+                "children": {"T-1": {"out": json.dumps(
+                    [{"key": "T-9", "closed": False}, {"key": "T-8", "closed": True}])}}}
+        for prefix in ("", "set -e\n"):
+            for shell, (rc, out, err, tier, keys) in self.run_step2(
+                    spec, prefix=prefix).items():
+                with self.subTest(shell=shell, errexit=bool(prefix)):
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(keys, ["T-2"])
+                    self.assertNotIn("WARNING", err)
+
+    def test_all_children_closed_is_selectable(self):
+        spec = {"cfg": {"1": 0},
+                "list": {"1": {"out": tickets("T-1")}},
+                "children": {"T-1": {"out": json.dumps(
+                    [{"key": "T-9", "closed": True}])}}}
+        for shell, (rc, out, err, tier, keys) in self.run_step2(
+                spec, then_step3=True).items():
+            with self.subTest(shell=shell):
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(keys, ["T-1"])
+                self.assertIn("SELECTED: T-1", out)
+
+    def test_children_check_failure_excludes_with_warning(self):
+        spec = {"cfg": {"1": 0},
+                "list": {"1": {"out": tickets("T-1", "T-2", "T-3")}},
+                "children": {"T-1": {"rc": 3, "err": "tkt: rate limited\n"},
+                             "T-2": {"out": "not json"}}}
+        for shell, (rc, out, err, tier, keys) in self.run_step2(spec).items():
+            with self.subTest(shell=shell):
+                self.assertEqual(rc, 0, err)
+                self.assertEqual(keys, ["T-3"])
+                self.assertIn("could not check children for T-1", err)
+                self.assertIn("could not check children for T-2", err)
+
+    def test_unknown_children_stop_instead_of_falling_through(self):
+        spec = {"cfg": {"1": 0, "2": 0},
+                "list": {"1": {"out": tickets("T-1")}, "2": {"out": tickets("T-9")}},
+                "children": {"T-1": {"rc": 3}}}
+        for shell, (rc, out, err, tier, keys) in self.run_step2(spec).items():
+            with self.subTest(shell=shell):
+                self.assertNotEqual(rc, 0)
+                self.assertIsNone(tier)
+                self.assertIn("STOP:", err)
+                self.assertNotIn("TIER=2", out)
+
+    def test_blocked_candidate_never_checks_children(self):
+        spec = {"cfg": {"1": 0},
+                "list": {"1": {"out": tickets("T-1", "T-2")}},
+                "blockers": {"T-1": {"out": json.dumps([{"key": "X-1"}])}}}
+        res, logs = self.calls(spec)
+        for shell, (rc, out, err, tier, keys) in res.items():
+            with self.subTest(shell=shell):
+                self.assertEqual(keys, ["T-2"])
+                self.assertNotIn("children T-1", logs[shell])
+                self.assertIn("children T-2", logs[shell])
+
+
 class Mirrors(unittest.TestCase):
     def test_condensed_mirrors_state_both_rules(self):
         for rel in CONDENSED_MIRRORS:
@@ -247,6 +354,8 @@ class Mirrors(unittest.TestCase):
                 self.assertIn("`tkt cfg queries.tierN` exits 4", text)
                 self.assertIn("stops selection", text)
                 self.assertIn("never treated as unblocked", text)
+                self.assertIn("never selects a container", text)
+                self.assertIn("open children", text)
 
     def test_gemini_mirror_is_still_valid_toml(self):
         tomllib.loads((ROOT / ".gemini/commands/select-ticket.toml").read_text())

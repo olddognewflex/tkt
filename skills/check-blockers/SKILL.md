@@ -25,6 +25,7 @@ Default to the current user's blocked tickets. Define the queries in config:
 [queries]
 blocked      = '... status = blocked AND assignee = currentUser() ...'   # --mine
 blocked_team = '... status = blocked ...'                                 # --team
+containers   = 'type = "Epic" AND status != "Done"'                       # optional, step 7
 ```
 
 ## Steps
@@ -88,10 +89,31 @@ Auto-unblock candidates (confirm first):
 tkt comment "$K" "Blocker check: blocked <N> days. Blocker <B> status: <status>. Next: <action>."
 ```
 
+### 7. Containers ready to close (optional; a human closes them)
+
+Runs only when `[queries].containers` is defined (`tkt cfg` exits 4 when it is
+not: skip quietly). Reports open containers whose children are all closed.
+Never transitions anything.
+
+```shell
+if tkt cfg queries.containers >/dev/null 2>&1; then
+  L=$(tkt list --query containers --json)
+  for K in $(printf '%s\n' "$L" | jq -r '.[] | select(.type_class == "container") | .key'); do
+    C=$(tkt children "$K" --json) || continue
+    if [ "$(printf '%s\n' "$C" | jq 'length > 0 and all(.[]; .closed == true)')" = "true" ]; then
+      echo "  $K — every child is closed. Suggest a human close it."
+    fi
+  done
+fi
+```
+
+Report them under "Containers ready to close (human closes)". Skip one whose
+own status is already closed.
+
 ## Output
 
 A markdown report grouped by action type (ready to unblock / needs ping / external
-/ stale).
+/ stale / containers ready to close).
 
 ## Scheduling
 

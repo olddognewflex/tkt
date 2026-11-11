@@ -108,7 +108,7 @@ The fields that carry design intent:
 - `status` is the provider's lane string **verbatim**; `status_role` is the canonical
   role resolved from config. Both are present because skills need the role and humans
   need the lane.
-- `type_class` is `full_sdlc` | `deliverable` | `unknown`, resolved from
+- `type_class` is `full_sdlc` | `deliverable` | `container` | `unknown`, resolved from
   `[issue_types]`. It is what routes a ticket into the full pipeline versus the
   short-circuit `complete-deliverable` flow.
 - `agent_status` is board agent state: `""` | `idle` | `processing` | `waiting` |
