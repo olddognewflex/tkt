@@ -170,6 +170,37 @@ class Guards(unittest.TestCase):
                 self.assertIn("complete-deliverable", out)
                 self.assertNotIn("STOP", out)
 
+    def test_phase_15_stops_when_the_ticket_cannot_be_read(self):
+        # Copilot on PR #105: a failed view used to fall into the unknown
+        # branch, whose second read could route a container onward.
+        spec = {"view": {"rc": 3, "err": "tkt: network error\n"}}
+        for shell, (rc, out, err, log) in self.run_block(PHASE_15, spec).items():
+            with self.subTest(shell=shell):
+                self.assertIn("STOP: could not read T-1", out)
+                self.assertNotIn("complete-deliverable", out)
+                self.assertEqual(len(log.splitlines()), 1, log)
+
+    def test_phase_15_stops_when_the_type_cannot_be_read(self):
+        for body in ("not json", json.dumps({"key": "T-1", "transitions": []})):
+            spec = {"view": {"out": body}}
+            for shell, (rc, out, err, log) in self.run_block(PHASE_15, spec).items():
+                with self.subTest(shell=shell, body=body):
+                    self.assertIn("STOP: could not read the type of T-1", out)
+                    self.assertEqual(len(log.splitlines()), 1, log)
+
+    def test_phase_15_unknown_type_uses_the_first_read(self):
+        body = json.dumps({"key": "T-1", "type_class": "unknown",
+                           "transitions": ["In Review"]})
+        code = PHASE_15 + '\necho "HAS_REVIEW=$HAS_REVIEW"'
+        spec = {"view": {"out": body}}
+        for shell, (rc, out, err, log) in self.run_block(
+                f'REVIEW_LANE="In Review"; export REVIEW_LANE\n{code}', spec).items():
+            with self.subTest(shell=shell):
+                self.assertEqual(rc, 0, err)
+                self.assertIn("HAS_REVIEW=true", out)
+                self.assertNotIn("STOP", out)
+                self.assertEqual(len(log.splitlines()), 1, log)
+
     # ---- check-blockers step 7 ----------------------------------------------
 
     def test_step_7_skips_an_already_closed_container(self):

@@ -125,9 +125,13 @@ transition, no branch) and stops at Phase 1.5.
 ### Phase 1.5: Route by type
 
 ```shell
-T=$(tkt view "$KEY" --json)
-CLASS=$(printf '%s\n' "$T" | jq -r .type_class)
+if ! T=$(tkt view "$KEY" --json); then
+  echo "STOP: could not read $KEY (see the error above)."; CLASS=unread
+elif ! CLASS=$(printf '%s\n' "$T" | jq -er .type_class); then
+  echo "STOP: could not read the type of $KEY."; CLASS=unread
+fi
 case "$CLASS" in
+  unread)      : ;;                               # stopped above: never route an unread ticket
   full_sdlc)   : ;;                               # continue to Phase 2
   deliverable) echo "→ complete-deliverable"; ;;  # invoke complete-deliverable, then stop
   container)   # never worked or closed by the agent: stop, no transition,
@@ -140,14 +144,16 @@ case "$CLASS" in
     fi
     ;;
   *)           # unknown: fall back to lane availability
-    HAS_REVIEW=$(tkt view "$KEY" --json | jq -r '[.transitions[]? == (env.REVIEW_LANE)] | any')
+    HAS_REVIEW=$(printf '%s\n' "$T" | jq -r '[.transitions[]? == (env.REVIEW_LANE)] | any')
     ;;
 esac
 ```
 
 `full_sdlc` → full pipeline. `deliverable` → **invoke `complete-deliverable`,
 then stop**. `container` → **stop** and report child progress; under `tkt run`
-the outcome is `gate` (reason: container). `[issue_types]` decides which types
+the outcome is `gate` (reason: container). A ticket that can't be read, or
+whose `type_class` can't be read, **stops** too: an unread type is never
+treated as `unknown`, so it can't route a container onward. `[issue_types]` decides which types
 fall in each set, so route on `type_class`, never on the type name. The example
 configs put Story and Bug in `full_sdlc`, Task, Sub-task, Chore and Spike in
 `deliverable`, and Epic in `container` (also the default when `container` is
