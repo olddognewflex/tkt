@@ -94,7 +94,7 @@ class GithubAdapter(Adapter):
                 if lab.startswith(self.type_label_prefix):
                     return lab[len(self.type_label_prefix):].strip()
             return ""
-        known = self.config.full_sdlc | self.config.deliverable
+        known = self.config.known_types()
         for lab in labels:
             if lab in known:
                 return lab
@@ -304,6 +304,11 @@ class GithubAdapter(Adapter):
         URL, which is canonical whatever `--repo` spelling the config uses.
         `host` is passed whenever known, so a GHES issue is never looked up
         on gh's default host (and vice versa)."""
+        keys = [_related_key(sub, nwo) for sub in self._sub_issues(number, host, nwo)]
+        return [k for k in dict.fromkeys(keys) if k and k != number]
+
+    def _sub_issues(self, number: str, host: str, nwo: str) -> list[dict]:
+        """The raw sub-issue objects of issue `number`; [] on a 404."""
         args = ["api", f"repos/{nwo}/issues/{number}/sub_issues?per_page=100",
                 "--paginate"]
         if host:
@@ -314,8 +319,38 @@ class GithubAdapter(Adapter):
             if "HTTP 404" in str(e):
                 return []
             raise
-        keys = [_related_key(sub, nwo) for sub in _json_pages(out, " ".join(args))]
-        return [k for k in dict.fromkeys(keys) if k and k != number]
+        return [s for s in _json_pages(out, " ".join(args)) if isinstance(s, dict)]
+
+    def child_states(self, key, children=None):
+        """One sub-issues call carrying each child's state, not a view per
+        child (which would fail on a cross-repo `owner/repo#N` key). Closed =
+        the issue is closed, or its lane is a closed role. Lane comes from
+        labels, or in projectv2 mode from one item-list call (in-repo
+        children only; GitHub numbers repeat across repos)."""
+        host, nwo = _repo_host(self.repo), self._repo_name
+        number = str(key).lstrip("#")
+        subs = self._sub_issues(number, host, nwo)
+        item_status: dict[str, str] = {}
+        if self.board == "projectv2" and subs:
+            for item in self._repo_items():
+                n = (item.get("content", {}) or {}).get("number")
+                if n is not None:
+                    item_status[str(n)] = self._item_status(item, self.status_field)
+        closed_roles = self.config.closed_roles()
+        out, seen = [], set()
+        for sub in subs:
+            k = _related_key(sub, nwo)
+            if not k or k == number or k in seen:
+                continue
+            seen.add(k)
+            if self.board == "labels":
+                status = self._status_from_labels(self._label_names(sub.get("labels")))
+            else:
+                status = item_status.get(k, "") if "#" not in k else ""
+            role = self.config.lane_to_role(status) if status else ""
+            out.append({"key": k, "status": status, "status_role": role,
+                        "closed": sub.get("state") == "closed" or role in closed_roles})
+        return out
 
     def _parent(self, number: str, host: str, nwo: str) -> str:
         """Key of the issue's parent (the issue it is a sub-issue of), keyed

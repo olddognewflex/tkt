@@ -137,7 +137,7 @@ class LinearAdapter(Adapter):
                 if lab.startswith(self.type_label_prefix):
                     return lab[len(self.type_label_prefix):].strip()
             return ""
-        known = self.config.full_sdlc | self.config.deliverable
+        known = self.config.known_types()
         for lab in labels:
             if lab in known:
                 return lab

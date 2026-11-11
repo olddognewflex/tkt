@@ -37,10 +37,58 @@ def _print_ticket_human(t: Ticket) -> None:
         print(f"  parent:   {t.parent}")
     if t.children:
         print(f"  children: {', '.join(t.children)}")
+    if t.rollup is not None:
+        print(f"  progress: {_rollup_line(t.rollup)}")
     if t.transitions:
         print(f"  next:     {', '.join(t.transitions)}")
     if t.url:
         print(f"  url:      {t.url}")
+
+
+def _rollup_line(r: dict) -> str:
+    if not r.get("total"):
+        return "no children"
+    line = f"{r['closed']}/{r['total']} children closed"
+    if r.get("open"):
+        line += f" (open: {', '.join(r['open'])})"
+    if r.get("ready_to_close"):
+        line += " - ready to close (a human closes containers)"
+    return line
+
+
+def _issue_types_check(config: Config) -> Check:
+    """Config-only, always ok: says which types are containers and where a
+    type sits in more than one list, since precedence then decides."""
+    names = ", ".join(sorted(config.container)) or "none"
+    detail = f"container: {names}" + (" (default)" if config.container_defaulted else "")
+    notes = []
+    for t in sorted(config.container):
+        for label, group in (("full_sdlc", config.full_sdlc),
+                             ("deliverable", config.deliverable)):
+            if t in group:
+                notes.append(f"{t} also in {label} - container wins")
+    for t in sorted(config.full_sdlc & config.deliverable - config.container):
+        notes.append(f"{t} in full_sdlc and deliverable - full_sdlc wins")
+    if notes:
+        detail += "; " + "; ".join(notes)
+    return Check("issue types", True, detail)
+
+
+def _container_rollup(adapter, t: Ticket) -> dict | None:
+    """Child progress for a container; None when it can't be computed. A
+    failed child lookup warns and never fails the view."""
+    if not t.children:
+        return {"total": 0, "closed": 0, "open": [], "ready_to_close": False}
+    try:
+        states = adapter.child_states(t.key, t.children)
+    except TktError as e:
+        print(f"tkt: warn: rollup unavailable: {e}", file=sys.stderr)
+        return None
+    open_keys = [s["key"] for s in states if not s.get("closed")]
+    closed = len(states) - len(open_keys)
+    return {"total": len(states), "closed": closed, "open": open_keys,
+            "ready_to_close": bool(states) and not open_keys
+            and t.status_role not in adapter.config.closed_roles()}
 
 
 def _print_ticket_list(tickets: list[Ticket], as_json: bool) -> None:
@@ -122,6 +170,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "a shared board (markdown, jira; no-op elsewhere)")
 
     sp = add("view")
+    sp.add_argument("key")
+
+    sp = add("children")
     sp.add_argument("key")
 
     sp = add("activity")
@@ -475,6 +526,8 @@ def main(argv: list[str]) -> int:
 
         elif args.verb == "view":
             t = adapter.view(args.key)
+            if t.type_class == "container":
+                t.rollup = _container_rollup(adapter, t)
             if args.json:
                 print(json.dumps(t.to_dict(), indent=2))
             else:
@@ -504,6 +557,17 @@ def main(argv: list[str]) -> int:
             gates.gate_comment(config, args.key, args.body)
             adapter.comment(args.key, args.body)
             print(f"commented on {args.key}")
+
+        elif args.verb == "children":
+            states = adapter.child_states(args.key)
+            if args.json:
+                print(json.dumps(states, indent=2))
+            elif not states:
+                print("(no children)")
+            else:
+                for c in states:
+                    state = "closed" if c.get("closed") else "open"
+                    print(f"{c['key']}  {c.get('status') or '-'}  ({state})")
 
         elif args.verb == "blockers":
             blk = adapter.blockers(args.key)
@@ -617,6 +681,7 @@ def main(argv: list[str]) -> int:
                     checks = checks + [Check("query scopes", True, f"{n} set")]
                 except ConfigError as e:
                     checks = checks + [Check("query scopes", False, str(e))]
+            checks = checks + [_issue_types_check(config)]
             checks = checks + [gates.doctor_check(config)]
             from .pack import doctor_check
             pack_c = doctor_check(config)

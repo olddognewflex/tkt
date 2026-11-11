@@ -176,7 +176,7 @@ class OpenKanbanAdapter(Adapter):
         )
 
     def _type_from_labels(self, labels: list[str]) -> str:
-        known = self.config.full_sdlc | self.config.deliverable
+        known = self.config.known_types()
         for lab in labels:
             if lab in known:
                 return lab
@@ -186,6 +186,15 @@ class OpenKanbanAdapter(Adapter):
         store = self._load_store()
         raw = store["tickets"].get(ticket_id)
         return bool(raw and raw.get("status") in _DONE_STATUSES)
+
+    def child_states(self, key, children=None):
+        """The base rule, plus openkanban's native done/archived statuses,
+        which count as closed whatever the role map says."""
+        out = super().child_states(key, children)
+        for row in out:
+            if not row["closed"] and self._is_done(row["key"]):
+                row["closed"] = True
+        return out
 
     def _get_raw(self, key: str) -> tuple[dict, dict]:
         store = self._load_store()

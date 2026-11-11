@@ -732,6 +732,37 @@ class JiraAdapter(Adapter):
                 if isinstance(r, dict) and r.get("key")]
         return [k for k in dict.fromkeys(keys) if k != key]
 
+    def child_states(self, key, children=None):
+        """One `parent = KEY` search carrying each child's status, instead of
+        a view per child. Closed = a closed role, or Jira's own `done` status
+        category (the rule `blocked_by` uses). `children` is not needed:
+        the search finds them."""
+        jql = f"parent = {json.dumps(key)}"
+        if self.have_rest:
+            rows = self._search_issues(jql, "status")
+        else:
+            # acli's default field set carries status; `--fields` is avoided
+            # as in `_children`.
+            rows = self._acli_json("jira", "workitem", "search", "--jql", jql,
+                                   "--limit", "100")
+            if isinstance(rows, dict):
+                rows = rows.get("issues") or []
+        closed_roles = self.config.closed_roles()
+        out, seen = [], set()
+        for r in rows or []:
+            if not isinstance(r, dict) or not r.get("key") or r["key"] in seen \
+                    or r["key"] == key:
+                continue
+            seen.add(r["key"])
+            st = ((r.get("fields") or {}).get("status") or {})
+            st = st if isinstance(st, dict) else {}
+            name = st.get("name") or ""
+            role = self.config.lane_to_role(name)
+            cat = (st.get("statusCategory") or {}) if isinstance(st.get("statusCategory"), dict) else {}
+            out.append({"key": r["key"], "status": name, "status_role": role,
+                        "closed": role in closed_roles or cat.get("key") == "done"})
+        return out
+
     def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
         proj = project or self.project
         if not proj:

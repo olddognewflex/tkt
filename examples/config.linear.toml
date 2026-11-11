@@ -36,6 +36,7 @@ cancelled    = "Canceled"
 [issue_types]            # Linear has no native type — derived from labels
 full_sdlc   = ["Story", "Bug"]
 deliverable = ["Task", "Chore", "Spike"]
+container   = ["Epic"]   # never worked; a human closes it ([] turns it off)
 
 # Queries use the tiny JQL subset (evaluated client-side over the fetched working
 # set), same as the markdown backend. Priority values match Linear's priorityLabel:

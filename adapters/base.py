@@ -8,7 +8,9 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 from core.config import Config
-from core.errors import ProviderError
+import sys
+
+from core.errors import NotFoundError, ProviderError
 from core.schema import ActivityReport, Check, Ticket, Worklog
 
 
@@ -118,6 +120,29 @@ class Adapter(ABC):
                                      lane=self.config.role_to_lane(role)))
                 else:
                     raise
+        return out
+
+    def child_states(self, key: str,
+                     children: list[str] | None = None) -> list[dict]:
+        """`[{"key", "status", "status_role", "closed"}]` for each direct
+        child of `key`. `children` saves a view when the caller already has
+        the keys. A child counts as closed when its role is in
+        `config.closed_roles()`; adapters that know a native terminal state
+        override this. A child that cannot be found warns and counts as open,
+        so a broken link never makes a parent look finished."""
+        if children is None:
+            children = self.view(key).children
+        closed_roles = self.config.closed_roles()
+        out = []
+        for c in children:
+            try:
+                t = self.view(c, hierarchy=False)
+            except NotFoundError:
+                print(f"tkt: warn: child {c} of {key} not found", file=sys.stderr)
+                out.append({"key": c, "status": "", "status_role": "", "closed": False})
+                continue
+            out.append({"key": c, "status": t.status, "status_role": t.status_role,
+                        "closed": t.status_role in closed_roles})
         return out
 
     @abstractmethod

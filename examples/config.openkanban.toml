@@ -30,6 +30,7 @@ cancelled   = "archived"
 [issue_types]            # openkanban has no native type — derived from labels
 full_sdlc   = ["Story", "Bug"]
 deliverable = ["Task", "Chore", "Spike"]
+container   = ["Epic"]   # never worked; a human closes it ([] turns it off)
 
 # Queries use the shared tiny JQL subset (client-side over the JSON store). Note:
 # openkanban has no assignee, so don't filter by assignee. Priority labels:
