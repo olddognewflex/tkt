@@ -542,7 +542,12 @@ class RunDriver:
             # Every normal return means the run is no longer live, so any STOP
             # aimed at it has been honoured — including one that arrived while
             # an invocation was in flight that then ended the run with a gate
-            # or blocked outcome. Not in `finally`: if _loop raised (a
+            # or blocked outcome. Deliberately unconditional: a STOP that lands
+            # after the last check (while a gate marker is written, or right
+            # here) was aimed at this run, which is ending anyway. Keeping
+            # only the STOP this run "observed" would leave that one behind
+            # to halt the next run at once, which is the bug this fixes
+            # (TKT-53). Not in `finally`: if _loop raised (a
             # halted marker that failed to write), the STOP must survive so
             # the next run still honours it. A dry run is a preview, not the
             # run the STOP was aimed at, so it leaves the file alone.
