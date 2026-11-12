@@ -7,9 +7,13 @@ pack (what `tkt init --link-skills` writes) are invisible to them. sync-pack
 copies the pack's files into the consumer tree so they can be committed.
 
 Guarantees:
-  * Only ever writes paths it records in .sdlc/pack-manifest.json. It deletes
-    nothing unless asked: `--prune` removes files a previous sync wrote that
-    the current selection no longer ships (see `_prune_candidates`).
+  * Only ever writes paths it records in .sdlc/pack-manifest.json, plus one
+    kind of file it deliberately leaves untracked: before overwriting a
+    consumer file the pack has never written, it copies it to
+    `<name>.pre-sdlc.bak` beside it (`_backup`) and prints the path. Backups
+    are never in the manifest, so they are never pruned. It deletes nothing
+    unless asked: `--prune` removes files a previous sync wrote that the
+    current selection no longer ships (see `_prune_candidates`).
   * Idempotent: a second run with an unchanged pack makes zero changes on disk
     (including the manifest), so `git status` stays clean.
   * Never touches content outside the AGENTS.md marker region it manages.
@@ -41,6 +45,7 @@ pruned; a base-layer file the pack stops shipping is tracked under
 Runs BEFORE config exists (a consumer may sync before `tkt init`), so it never
 calls Config.load(). Stdlib only.
 """
+import contextlib
 import fnmatch
 import hashlib
 import json
@@ -50,7 +55,7 @@ import stat
 import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .errors import UsageError
 from .schema import Check
@@ -132,6 +137,9 @@ _EXCLUDE_GLOBS: dict[str, tuple[str, ...]] = {
     "enforcement": ("*.test.mjs", ".DS_Store"),  # self-tests, OS junk
 }
 
+# Backups `_backup` writes; never shipped from a pack tree (see `_add_tree`).
+_BACKUP_GLOB = "*.pre-sdlc*.bak"
+
 # Installed unless the caller narrows the set.
 _DEFAULT_HARNESSES = ("claude", "copilot", "kiro")
 
@@ -191,6 +199,48 @@ def _try_grant_exec(dst: Path, rel: str, failed: list) -> int:
         return 0
 
 
+def _backup(dst: Path, content: bytes) -> Path:
+    """Copy a pre-existing consumer file aside before the pack overwrites it.
+
+    Writes `<name>.pre-sdlc.bak` beside `dst` (the suffix goes last so a
+    backed-up `SKILL.md` or `*.prompt.md` is not picked up by a harness). An
+    existing backup is never overwritten: one holding these same bytes is
+    reused, otherwise the next free `<name>.pre-sdlc.<n>.bak` is taken. The
+    file is created exclusively, so a planted symlink at the backup path is
+    never followed. Raises OSError when no copy could be made; the caller
+    must then leave `dst` alone."""
+    stem = dst.name + ".pre-sdlc"
+    try:
+        mode = stat.S_IMODE(dst.stat().st_mode)
+    except OSError:
+        mode = 0o644
+    for n in range(1000):
+        bak = dst.with_name(f"{stem}.bak" if n == 0 else f"{stem}.{n}.bak")
+        if os.path.lexists(bak):
+            try:
+                same = (not bak.is_symlink() and bak.is_file()
+                        and bak.read_bytes() == content)
+            except OSError:
+                same = False
+            if same:
+                return bak
+            continue
+        try:
+            fd = os.open(bak, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_BINARY", 0), mode)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+        except OSError:
+            with contextlib.suppress(OSError):
+                bak.unlink()
+            raise
+        return bak
+    raise OSError(f"no free backup name for {dst.name}")
+
+
 def _walk(base: Path) -> list[Path]:
     if not base.exists():
         return []
@@ -232,6 +282,9 @@ def _add_tree(plan: list, base: Path, dest_prefix: str,
         if rel_in.parts and rel_in.parts[0] in _EXCLUDE_SKILLS:
             continue
         if any(fnmatch.fnmatch(f.name, pat) for pat in exclude):
+            continue
+        # A sync backup that ended up inside a pack tree is never shipped on.
+        if fnmatch.fnmatch(f.name, _BACKUP_GLOB):
             continue
         plan.append((f, f"{dest_prefix}/{rel_in.as_posix()}"))
 
@@ -738,6 +791,13 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     # (relpath, reason) where reason is "modified" (drifted from last sync) or
     # "preexisting" (already on disk but never synced by us).
     warnings: list[tuple[str, str]] = []
+    # relpath -> backup relpath, for pre-existing files copied aside before
+    # the overwrite. Backups are never recorded in the manifest, so they are
+    # never pruned.
+    backups: dict[str, str] = {}
+    # (relpath, error) for pre-existing files that could not be backed up,
+    # and so were left untouched.
+    backup_failed: list[tuple[str, str]] = []
     writes = 0
 
     for src, rel in plan:
@@ -770,13 +830,40 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             continue
 
         if dst.exists():
-            cur_sha = _sha_bytes(dst.read_bytes())
             man_sha = last_sha(rel)
+            try:
+                cur = dst.read_bytes()
+            except OSError as e:
+                if man_sha is not None:
+                    raise
+                # Never written by us and unreadable: it cannot be backed
+                # up, so it is not overwritten either.
+                backup_failed.append((rel, f"unreadable: {e}"))
+                del new_files[rel]
+                continue
+            cur_sha = _sha_bytes(cur)
             if man_sha is None:
                 # Present on disk but never synced by us (e.g. a consumer that
                 # already had .github/prompts/select-ticket.prompt.md with its
-                # own content). Don't clobber it silently.
+                # own content). Don't clobber it silently: keep a copy first.
                 if cur_sha != new_sha:
+                    try:
+                        # Through a symlinked dir (`tkt init --link-skills`)
+                        # the file belongs to another tree, perhaps another
+                        # pack checkout that would ship the backup on. It is
+                        # not ours to back up or to overwrite.
+                        if not _within(dst.parent, target):
+                            raise OSError("its directory resolves outside "
+                                          "the consumer tree")
+                        bak = _backup(dst, cur)
+                    except OSError as e:
+                        # No copy, no overwrite. Left out of the manifest so
+                        # the next sync still treats it as pre-existing and
+                        # retries the backup instead of overwriting blind.
+                        backup_failed.append((rel, str(e)))
+                        del new_files[rel]
+                        continue
+                    backups[rel] = PurePosixPath(rel).with_name(bak.name).as_posix()
                     warnings.append((rel, "preexisting"))
             elif cur_sha != man_sha:
                 warnings.append((rel, "modified"))
@@ -906,9 +993,13 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
     for rel, reason in warnings:
         if reason == "preexisting":
-            print(f"warning: pre-existing file overwritten: {rel}")
+            print(f"warning: pre-existing file overwritten: {rel} "
+                  f"(backup: {backups[rel]})")
         else:
             print(f"warning: {rel} was locally modified since last sync — overwriting")
+    for rel, err in backup_failed:
+        print(f"error: could not back up pre-existing {rel} ({err}) — left "
+              f"untouched; fix it and re-run sync-pack", file=sys.stderr)
     for rel, err in chmod_failed:
         print(f"warning: could not make {rel} executable ({err}) — git will not "
               f"run it; fix its ownership and re-run sync-pack", file=sys.stderr)
@@ -948,7 +1039,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         print(f"note: {len(retired['prune'])} retired file(s) left in place; "
               f"re-run with --prune to remove them")
     if (writes == 0 and modes == 0 and not warnings and not wrote_manifest
-            and not chmod_failed and not pruned and not prune_failed):
+            and not chmod_failed and not pruned and not prune_failed
+            and not backup_failed):
         print(f"sync-pack: up to date ({len(new_files)} entries) at {target}")
     else:
         summary = f"sync-pack: {writes} file(s) written to {target}"
@@ -962,10 +1054,16 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             summary += f", {len(chmod_failed)} exec bit(s) could NOT be set"
         if warnings:
             summary += f", {len(warnings)} pre-existing/locally-modified overwritten"
+        if backups:
+            summary += f", {len(backups)} backed up"
+        if backup_failed:
+            summary += f", {len(backup_failed)} NOT written (backup failed)"
         print(summary)
         if wrote_manifest:
             print(f"  manifest: {manifest_path}")
-    return 0
+    # A file left uninstalled because it could not be backed up is a failed
+    # sync, unlike a chmod failure (the content is there, only the bit is not).
+    return 1 if backup_failed else 0
 
 
 # ---- doctor integration ----------------------------------------------------

@@ -248,6 +248,14 @@ not symlinks: cloud harnesses and CI only see tracked files, so the symlinks
 `tkt init --link-skills` writes are invisible to them. It only writes paths it
 records in `.sdlc/pack-manifest.json`, deletes only on `--prune`, and is
 idempotent (a second run with an unchanged pack leaves `git status` clean).
+The one untracked write: before overwriting a file the pack has never written
+whose content differs (say, a consumer's own
+`.github/prompts/select-ticket.prompt.md`), it copies it to
+`<name>.pre-sdlc.bak` beside it and prints the backup path. An existing backup
+is never overwritten (the next is `<name>.pre-sdlc.1.bak`); backups are never in
+the manifest, never pruned, and never shipped from a pack tree. If the copy
+fails, or the file is unreadable or sits under a directory that resolves
+outside the consumer tree, it is left untouched and the sync exits 1.
 
 In a consumer repo it also maintains a generated block inside that repo's
 `AGENTS.md`, delimited by markers — content outside the markers is preserved

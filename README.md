@@ -147,7 +147,9 @@ the full guide.
 - Updating: `git pull` the pack clone, re-run `tkt sync-pack` per consumer repo;
   `tkt sync-pack --check` reports drift. Re-runs are idempotent, and locally
   modified pack files are overwritten with a warning — customize upstream in the
-  pack, not in consumers. Executable bits are carried and a lost one is repaired
+  pack, not in consumers. A differing file at a pack path that the pack never
+  wrote is copied to `<name>.pre-sdlc.bak` first (path printed; never
+  tracked or pruned). Executable bits are carried and a lost one is repaired
   (only ever added, never stripped); see `docs/install.md`.
 - Removing: files the selection no longer ships (a dropped harness, a retired
   skill) are kept and recorded until you run `tkt sync-pack --prune`, which
