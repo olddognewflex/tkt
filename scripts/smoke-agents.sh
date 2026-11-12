@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for `tkt agents` and the run heartbeat. Exercises the empty board,
 # a live run reporting `running`, a SIGKILLed driver flipping to `dead`, a clean
-# halt removing the beat file, the STOP flag, --enrich, and the state-resolution
-# table. Prints PASS/FAIL per case.
+# halt removing the beat file and consuming the STOP flag, resuming a stopped
+# run, --enrich, and the state-resolution table. Prints PASS/FAIL per case.
 set -uo pipefail
 
 PACK="$(cd "$(dirname "$0")/.." && pwd)"
@@ -115,26 +115,60 @@ if [ ! -f "$C/.sdlc/state/run/TKT-1/heartbeat.json" ]; then
 else
   fail "case6 clean halt left a stale heartbeat.json"
 fi
+# The halt consumed the STOP, so the row no longer claims a pending request.
+sr=$(row | python3 -c 'import json,sys; print(json.load(sys.stdin).get("stop_requested"))')
+if [ ! -f "$C/.sdlc/state/run/TKT-1/STOP" ] && [ "$sr" = "False" ]; then
+  pass "case6 honoured STOP is removed and stop_requested clears"
+else
+  fail "case6 STOP left behind after halt (stop_requested=$sr)"
+fi
 
-# ---- case 7: markers carry the clock ----------------------------------------
+# ---- case 7: a stopped run can be resumed -----------------------------------
+# The halt above consumed the STOP, so a fresh `tkt run` must get past its
+# first loop check and into an invocation instead of halting at once.
+(cd "$C" && nohup "$TKT" run TKT-1 >"$C/driver3.out" 2>&1 &)
+sleep 3
+DPID=$(beat_pid)
+r=$(row)
+st=$(echo "$r" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state",""))')
+it=$(echo "$r" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("iteration",""))')
+if [ "$st" = "running" ] && [ "$it" = "1" ]; then
+  pass "case7 stopped run resumes past the first loop check"
+else
+  fail "case7 resume after stop (state=$st iteration=$it)"
+fi
+"$TKT" run --stop TKT-1 >/dev/null
+pkill -f "sleep 481" 2>/dev/null
+sleep 3
+# The resumed run halts the same clean way: no beat, no STOP, halted.
+st=$(row | python3 -c 'import json,sys; print(json.load(sys.stdin).get("state",""))')
+if [ ! -f "$C/.sdlc/state/run/TKT-1/heartbeat.json" ] \
+   && [ ! -f "$C/.sdlc/state/run/TKT-1/STOP" ] && [ "$st" = "halted" ]; then
+  pass "case7 resumed run halts cleanly and consumes its STOP"
+  DPID=""
+else
+  fail "case7 resumed run did not halt cleanly (state=$st)"   # cleanup kills DPID
+fi
+
+# ---- case 8: markers carry the clock ----------------------------------------
 m="$C/.sdlc/state/run/TKT-1/marker.json"
 if python3 -c "
 import json,sys
 d = json.load(open('$m'))
 sys.exit(0 if d.get('run_started') and d.get('phase_started') else 1)"; then
-  pass "case7 marker carries run_started + phase_started"
+  pass "case8 marker carries run_started + phase_started"
 else
-  fail "case7 marker missing timestamps"
+  fail "case8 marker missing timestamps"
 fi
 
-# ---- case 8: --enrich adds board fields -------------------------------------
+# ---- case 9: --enrich adds board fields -------------------------------------
 s=$("$TKT" agents --enrich --json | python3 -c '
 import json,sys
 a = json.load(sys.stdin)["agents"]
 print(a[0].get("summary","") if a else "")')
-[ -n "$s" ] && pass "case8 --enrich adds board fields" || fail "case8 --enrich added nothing"
+[ -n "$s" ] && pass "case9 --enrich adds board fields" || fail "case9 --enrich added nothing"
 
-# ---- case 9: run --status needs no harness_cmd ------------------------------
+# ---- case 10: run --status needs no harness_cmd ------------------------------
 # The read-only path must not construct a RunConfig; a project with no harness
 # configured can still be asked what its runs are doing.
 python3 - "$CFG" <<'PY'
@@ -145,12 +179,12 @@ keep = [ln for ln in open(p).read().splitlines()
 open(p, "w").write("\n".join(keep) + "\n")
 PY
 if "$TKT" run --status TKT-1 >/dev/null 2>&1; then
-  pass "case9 run --status works without [run].harness_cmd"
+  pass "case10 run --status works without [run].harness_cmd"
 else
-  fail "case9 run --status required a harness_cmd"
+  fail "case10 run --status required a harness_cmd"
 fi
 
-# ---- case 10: state resolution table ----------------------------------------
+# ---- case 11: state resolution table ----------------------------------------
 if python3 - "$PACK" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -185,9 +219,9 @@ for b in bad:
 sys.exit(1 if bad else 0)
 PY
 then
-  pass "case10 resolve_state table"
+  pass "case11 resolve_state table"
 else
-  fail "case10 resolve_state table"
+  fail "case11 resolve_state table"
 fi
 
 echo

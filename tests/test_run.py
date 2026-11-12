@@ -546,6 +546,117 @@ class TestDriverLoop(unittest.TestCase):
         # Should not have run any iterations.
         self.assertEqual(driver.iteration, 0)
 
+    def test_stop_file_removed_after_halt(self):
+        """An honoured STOP is consumed: the halted run leaves no STOP
+        behind, so `tkt agents` stops reporting stop_requested (TKT-53)."""
+        config = self._setup_env([])
+        create_stop_file(config, "TKT-1")
+        # run(), not _loop(): only run() stops the heartbeat, and a live
+        # beat would make the row read as running.
+        driver = RunDriver(config, RunConfig(config), key="TKT-1")
+
+        self.assertEqual(driver.run(), 0)
+        self.assertEqual(driver.iteration, 0)
+        self.assertFalse(check_stop_file(driver.state_dir))
+        # The halted marker is still what records the stop.
+        marker = read_ticket_marker(get_adapter(config), "TKT-1",
+                                    driver.state_dir)
+        self.assertEqual(marker["outcome"], "halted")
+        self.assertEqual(marker["reason"], "stopped by operator")
+        row = status_for_key(config, "TKT-1")
+        self.assertFalse(row["stop_requested"])
+        self.assertEqual(row["state"], "halted")
+
+    def test_stop_then_resume_proceeds(self):
+        """Stop a run, start it again: the second run must get past the
+        first loop check instead of halting on the old STOP (TKT-53)."""
+        results = [
+            {"phase": "P1", "outcome": "advance", "next": "P1.5",
+             "reason": "triaged"},
+            {"phase": "P1.5", "outcome": "gate", "next": "P2",
+             "reason": "stop for test"},
+        ]
+        config = self._setup_env(results)
+        create_stop_file(config, "TKT-1")
+        first = RunDriver(config, RunConfig(config), key="TKT-1")
+        self.assertEqual(first.run(), 0)
+        self.assertEqual(first.iteration, 0)
+
+        second = RunDriver(config, RunConfig(config), key="TKT-1")
+        self.assertEqual(second.run(), 0)
+        self.assertGreater(second.iteration, 0)
+        self.assertEqual(second.phase, "P1.5")
+
+    def test_stop_during_invocation_consumed_by_gate_exit(self):
+        """A STOP that lands mid-invocation, when that invocation then ends
+        the run some other way (here a gate), is consumed too."""
+        from unittest import mock
+        import core.run as run_mod
+        results = [
+            {"phase": "P1", "outcome": "gate", "next": "P1.5",
+             "reason": "gate wins the race"},
+        ]
+        config = self._setup_env(results)
+        real_invoke = run_mod.invoke_harness
+
+        def invoke_then_stop(*a, **kw):
+            out = real_invoke(*a, **kw)
+            create_stop_file(config, "TKT-1")   # operator, mid-invocation
+            return out
+
+        driver = RunDriver(config, RunConfig(config), key="TKT-1")
+        with mock.patch.object(run_mod, "invoke_harness",
+                               side_effect=invoke_then_stop):
+            self.assertEqual(driver.run(), 0)
+        self.assertEqual(driver.iteration, 1)
+        # The gate ended the run, not the loop-top STOP check.
+        marker = read_ticket_marker(get_adapter(config), "TKT-1",
+                                    driver.state_dir)
+        self.assertEqual(marker["reason"], "gate: gate wins the race")
+        self.assertFalse(check_stop_file(driver.state_dir))
+        self.assertFalse(status_for_key(config, "TKT-1")["stop_requested"])
+
+    def test_stop_survives_failed_halted_marker(self):
+        """If the halted marker cannot be written, the STOP is not consumed:
+        the next run must still honour it."""
+        from unittest import mock
+        import core.run as run_mod
+        from core.errors import ProviderError
+        config = self._setup_env([])
+        create_stop_file(config, "TKT-1")
+        driver = RunDriver(config, RunConfig(config), key="TKT-1")
+        with mock.patch.object(run_mod, "write_ticket_marker",
+                               side_effect=ProviderError("backend down")):
+            with self.assertRaises(ProviderError):
+                driver.run()
+        self.assertTrue(check_stop_file(driver.state_dir))
+
+    def test_stop_file_unremovable_still_halts_cleanly(self):
+        """An OSError deleting STOP is a warning, not a traceback."""
+        from unittest import mock
+        config = self._setup_env([])
+        create_stop_file(config, "TKT-1")
+        driver = RunDriver(config, RunConfig(config), key="TKT-1")
+        import io
+        from contextlib import redirect_stderr
+        err = io.StringIO()
+        with mock.patch.object(Path, "unlink",
+                               side_effect=PermissionError("read-only")), \
+                redirect_stderr(err):
+            self.assertEqual(driver.run(), 0)
+        self.assertTrue(check_stop_file(driver.state_dir))
+        self.assertIn("could not remove", err.getvalue())
+
+    def test_dry_run_leaves_stop_file(self):
+        """A dry run previews; it does not consume a STOP aimed at a real
+        run of the same key."""
+        config = self._setup_env([])
+        create_stop_file(config, "TKT-1")
+        driver = RunDriver(config, RunConfig(config), key="TKT-1",
+                           dry_run=True)
+        self.assertEqual(driver.run(), 0)
+        self.assertTrue(check_stop_file(driver.state_dir))
+
     def test_qa_ready_gate_halt(self):
         """Driver halts when it reaches P9 (qa_ready) regardless of agent."""
         config = self._setup_env([])
