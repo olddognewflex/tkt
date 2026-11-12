@@ -205,7 +205,7 @@ def _backup(dst: Path, content: bytes) -> Path:
     Writes `<name>.pre-sdlc.bak` beside `dst` (the suffix goes last so a
     backed-up `SKILL.md` or `*.prompt.md` is not picked up by a harness). An
     existing backup is never overwritten: one holding these same bytes is
-    reused, otherwise the next free `<name>.pre-sdlc.<n>.bak` is taken. The
+    reused (unless it is a hard link to `dst` itself), otherwise the next free `<name>.pre-sdlc.<n>.bak` is taken. The
     file is created exclusively, so a planted symlink at the backup path is
     never followed. Raises OSError when no copy could be made; the caller
     must then leave `dst` alone."""
@@ -218,7 +218,10 @@ def _backup(dst: Path, content: bytes) -> Path:
         bak = dst.with_name(f"{stem}.bak" if n == 0 else f"{stem}.{n}.bak")
         if os.path.lexists(bak):
             try:
+                # A hard link to `dst` matches too, but the overwrite would
+                # change it along with `dst`: that is no backup.
                 same = (not bak.is_symlink() and bak.is_file()
+                        and not os.path.samefile(bak, dst)
                         and bak.read_bytes() == content)
             except OSError:
                 same = False
@@ -848,13 +851,15 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                 # own content). Don't clobber it silently: keep a copy first.
                 if cur_sha != new_sha:
                     try:
-                        # Through a symlinked dir (`tkt init --link-skills`)
-                        # the file belongs to another tree, perhaps another
-                        # pack checkout that would ship the backup on. It is
-                        # not ours to back up or to overwrite.
-                        if not _within(dst.parent, target):
-                            raise OSError("its directory resolves outside "
-                                          "the consumer tree")
+                        # A symlinked file, or one reached through a
+                        # symlinked dir (`tkt init --link-skills`), belongs
+                        # to another tree, perhaps another pack checkout that
+                        # would ship the backup on. Resolving `dst` itself
+                        # catches both: it is not ours to back up or to
+                        # overwrite.
+                        if not _within(dst, target):
+                            raise OSError("it resolves outside the "
+                                          "consumer tree")
                         bak = _backup(dst, cur)
                     except OSError as e:
                         # No copy, no overwrite. Left out of the manifest so

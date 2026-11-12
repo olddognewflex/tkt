@@ -174,8 +174,8 @@ A file at a pack path that sync-pack **never wrote** (no manifest entry) and
 whose content differs is backed up before it is replaced:
 `warning: pre-existing file overwritten: <path> (backup: <path>.pre-sdlc.bak)`.
 This holds in every pack dir, harness dirs included. A file it cannot back
-up (unreadable, a failed copy, or under a directory that resolves outside the
-consumer tree, such as a `--link-skills` symlink) is left alone, reported on
+up (unreadable, a failed copy, or resolving outside the consumer tree through
+a symlink, such as a `--link-skills` dir) is left alone, reported on
 stderr, and the sync exits 1.
 
 `sync-pack` only ever writes the paths recorded in `.sdlc/pack-manifest.json`,

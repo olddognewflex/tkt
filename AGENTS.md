@@ -254,8 +254,8 @@ whose content differs (say, a consumer's own
 `<name>.pre-sdlc.bak` beside it and prints the backup path. An existing backup
 is never overwritten (the next is `<name>.pre-sdlc.1.bak`); backups are never in
 the manifest, never pruned, and never shipped from a pack tree. If the copy
-fails, or the file is unreadable or sits under a directory that resolves
-outside the consumer tree, it is left untouched and the sync exits 1.
+fails, or the file is unreadable or resolves outside the consumer tree (a
+symlink, or a symlinked directory above it), it is left untouched and the sync exits 1.
 
 In a consumer repo it also maintains a generated block inside that repo's
 `AGENTS.md`, delimited by markers — content outside the markers is preserved
