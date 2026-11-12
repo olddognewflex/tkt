@@ -132,7 +132,7 @@ project root:
 - [ ] No stale `STOP` or `result.json` in `.sdlc/state/run/<KEY>/`.
 - [ ] `./tkt run KEY --dry-run` prints a well-formed harness command.
 - [ ] `run.log`'s last entry has the outcome you intended.
-- [ ] `python3 -m unittest tests.test_run` passes — 34 offline tests cover the state
+- [ ] `python3 -m unittest tests.test_run` passes — 41 offline tests cover the state
       machine, the gates, resume, timeouts, and the stop file.
 - [ ] If you changed `core/run.py`, a test covers the new behaviour; this subsystem is
       the one place in the repo where that is possible.
