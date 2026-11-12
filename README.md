@@ -824,7 +824,11 @@ is markdown-only** — elsewhere, a run resumed from a fresh worktree starts ove
 ### Safety controls
 
 - **STOP file:** drop `.sdlc/state/run/<key>/STOP` (or run `tkt run --stop KEY`)
-  to halt at the next iteration boundary.
+  to halt at the next iteration boundary. The request is one-shot: when the
+  driver exits normally (not a crash), whether halted by the STOP or by a gate
+  or blocked outcome from the invocation in flight, it deletes the file, so
+  `tkt agents` stops flagging it and a later `tkt run KEY` resumes normally.
+  A `--dry-run` leaves it in place.
 - **Iteration cap:** `max_iterations` (default 30) bounds runaway loops.
 - **Per-phase attempt cap:** 3 failed attempts on one phase transitions the ticket
   to `blocked` with log context.

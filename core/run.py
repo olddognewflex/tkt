@@ -220,6 +220,23 @@ def check_stop_file(state_dir: Path) -> bool:
     return (state_dir / "STOP").is_file()
 
 
+def clear_stop_file(state_dir: Path) -> bool:
+    """Consume an honoured STOP request.
+
+    A STOP is a one-shot request to halt the live run, not a standing ban:
+    left behind, it keeps `tkt agents` reporting a stop request for a run
+    that already halted, and halts the next `tkt run KEY` at its first check.
+    Returns False if the file is still there.
+    """
+    try:
+        (state_dir / "STOP").unlink(missing_ok=True)
+    except OSError:
+        # The run has already halted cleanly; a STOP we cannot delete must not
+        # turn that into a traceback. The caller warns instead.
+        return False
+    return True
+
+
 def create_stop_file(config: Config, key: str) -> Path:
     """Create the STOP file for a given ticket key."""
     d = ensure_state_dir(config, key)
@@ -520,7 +537,24 @@ class RunDriver:
             self.attempt = 1
 
         try:
-            return self._loop()
+            rc = self._loop()
+            # Every normal return means the run is no longer live, so any STOP
+            # aimed at it has been honoured — including one that arrived while
+            # an invocation was in flight that then ended the run with a gate
+            # or blocked outcome. Deliberately unconditional: a STOP that lands
+            # after the last check (while a gate marker is written, or right
+            # here) was aimed at this run, which is ending anyway. Keeping
+            # only the STOP this run "observed" would leave that one behind
+            # to halt the next run at once, which is the bug this fixes
+            # (TKT-53). Not in `finally`: if _loop raised (a
+            # halted marker that failed to write), the STOP must survive so
+            # the next run still honours it. A dry run is a preview, not the
+            # run the STOP was aimed at, so it leaves the file alone.
+            if (self.state_dir is not None and not self.dry_run
+                    and not clear_stop_file(self.state_dir)):
+                self._log(f"could not remove {self.state_dir / 'STOP'}; "
+                          f"delete it by hand or the next run halts at once.")
+            return rc
         finally:
             # _loop returns from a dozen places; a stale beat file would leave
             # the run looking alive forever, so clean up in one guarded spot.
@@ -602,7 +636,7 @@ class RunDriver:
                 self._log("STOP file found — halting.")
                 if self.key:
                     self._write_marker("stopped by operator")
-                return 0
+                return 0    # run() consumes the STOP once _loop returns
 
             # Check iteration cap.
             if self.iteration >= self.max_iterations:

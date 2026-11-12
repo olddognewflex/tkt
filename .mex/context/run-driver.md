@@ -108,7 +108,10 @@ cap, then the three gates.
   the run before the phase executes.
 
 Exceeding `max_phase_attempts` transitions the ticket to `blocked` and exits 1.
-Exceeding `max_iterations` exits 1 without transitioning. A STOP file exits 0.
+Exceeding `max_iterations` exits 1 without transitioning. A STOP file exits 0,
+and `run()` deletes it after any clean `_loop` return (never on an exception, so a
+failed halted-marker write keeps it; never on `--dry-run`): a STOP is a one-shot
+request, so the next `tkt run KEY` resumes instead of halting on it (TKT-53).
 
 ## State and resume
 
