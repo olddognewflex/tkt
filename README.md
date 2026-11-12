@@ -175,6 +175,12 @@ the full guide.
   takes the whole long tail (Gemini, Cursor, Windsurf, Cline, Continue, Augment,
   OpenCode, AGENTS.md-native); `--list-harnesses` shows the names, their target
   dirs, and which ones the project already installs.
+- Your own skills: write them once under `.claude/skills/<name>/SKILL.md`.
+  Each sync copies them verbatim into `.agents/skills` and every other
+  verbatim skill surface the repo installs (`.kiro/skills`, `.cursor/skills`),
+  never into translated ones like `.github/prompts`. Names the pack ships
+  are skipped, gitignored files stay put, a copy you wrote by hand is never
+  overwritten, and `--prune` removes the copies of a skill you delete.
 - `tkt init --link-skills` symlinks the pack into `.claude/` — fine for solo local
   work, invisible to git/CI. Use committed copies for anything shared.
 - Updating: `git pull` the pack clone, re-run `tkt sync-pack` per consumer repo;

@@ -33,6 +33,18 @@ manifest records their dest prefixes as `base_layer` so `--prune` never
 removes them. The `.agents/skills` and `.kiro/skills` mirrors are derived
 from the canonical `skills/` at sync time; they are not stored in the pack.
 
+Local skills: a consumer's own `.claude/skills/<name>` dir (one holding a
+`SKILL.md`, under a name the pack does not own) is copied into every verbatim
+skill surface the selection installs (`_skill_surfaces`: `.agents/skills`
+always, `.kiro/skills`, `.cursor/skills`, ...), never into translated ones
+like `.github/prompts`. The copies are tracked like pack files and the
+names recorded as `local_skills`. `.git`, `__pycache__`, gitignored files
+and anything resolving outside the tree are left out. A copy dir holding a
+file sync-pack never wrote (the consumer's own variant) is left whole. When
+the skill is removed, all its copies retire and `--prune` can delete them,
+the `.agents/skills` ones included: base-layer protection is for files the
+pack still needs, not copies of a source that is gone.
+
 Pruning: a file the last sync wrote that the current plan no longer ships is
 "retired". A plain sync leaves it in place and records it under the
 manifest's `retired` key, so a later `--prune` can still reach it. `--prune`
@@ -316,6 +328,243 @@ def _sub_plan(src_rel: str, dest_rel: str) -> list:
     return plan
 
 
+# ---- the consumer's own skills ----------------------------------------------
+
+# Where a consumer writes its own skills. It is the source for a local skill,
+# so never one of its destinations.
+_LOCAL_SKILLS_SRC = ".claude/skills"
+
+# Never mirrored out of a local skill dir: OS junk by file name, and VCS
+# metadata and bytecode caches by any path segment. A nested clone's `.git`
+# would make every copy an embedded repo, and `__pycache__` differs from one
+# machine to the next, so the committed manifest would flip between them.
+_LOCAL_EXCLUDE = (".DS_Store", _BACKUP_GLOB)   # junk, sync-pack's own backups
+_LOCAL_SKIP_PARTS = (".git", "__pycache__")
+
+
+def _skill_surfaces(harnesses: list[str]) -> list[str]:
+    """Consumer dirs that take an Agent Skills dir (`<name>/SKILL.md` plus
+    whatever sits beside it) verbatim, for the base layer plus `harnesses`.
+
+    Derived from the same tables `_plan_for` reads: the Agent Skills layout
+    is `<root>/skills/<name>/SKILL.md` in every harness that speaks it, so a
+    registered dest whose last segment is `skills` is such a surface, and a
+    harness that later gains one picks up local skills with no change here.
+    Translated surfaces (Copilot's `.github/prompts`, the command dirs) do
+    not match: a rewrite is not a copy."""
+    pairs = list(_BASE_LAYER)
+    for name in harnesses:
+        pairs += _HARNESSES[name][1]
+    out: list[str] = []
+    for _, dest in pairs:
+        if (dest.rsplit("/", 1)[-1] == "skills" and dest != _LOCAL_SKILLS_SRC
+                and dest not in out):
+            out.append(dest)
+    return out
+
+
+def _skill_dirs() -> list[str]:
+    """Every dir any harness reads skills from, `.claude/skills` included:
+    where a skill name can be recorded in a manifest."""
+    return _skill_surfaces(list(_HARNESSES)) + [_LOCAL_SKILLS_SRC]
+
+
+def _skill_name(rel: str, prefixes: list[str]) -> str | None:
+    """The `<name>` of `<prefix>/<name>/...` for the first matching prefix,
+    or None when `rel` is not inside a skill dir under one of them."""
+    for p in prefixes:
+        if rel.startswith(p + "/"):
+            parts = rel[len(p) + 1:].split("/")
+            return parts[0] if len(parts) > 1 else None
+    return None
+
+
+def _recorded_local(old: dict) -> set[str]:
+    """Local skill names a previous sync recorded (`local_skills`). Only
+    plain single-segment names count, so a tampered list cannot reach
+    outside a skill dir."""
+    v = old.get("local_skills")
+    if not isinstance(v, list):
+        return set()
+    return {n for n in v if isinstance(n, str) and n not in ("", ".", "..")
+            and "/" not in n and "\\" not in n and "\0" not in n}
+
+
+def _skill_ownership(pack_plan: list, old: dict) -> tuple[set, set, set]:
+    """(owned, shipped, claude) skill-name sets.
+
+    shipped: names the current pack plan writes under any skill dir, plus
+    the pack-internal skills. owned: shipped, plus every name a previous
+    sync wrote under any skill dir that it did not record as local (a
+    retired pack skill is still the pack's, wherever its copies survive).
+    claude: names the pack writes or wrote under `.claude/skills` itself,
+    i.e. the pack's own copies, not a consumer skill."""
+    dirs = _skill_dirs()
+    shipped = set(_EXCLUDE_SKILLS)
+    claude: set[str] = set()
+    for _, rel in pack_plan:
+        n = _skill_name(rel, dirs)
+        if n:
+            shipped.add(n)
+        n = _skill_name(rel, [_LOCAL_SKILLS_SRC])
+        if n:
+            claude.add(n)
+    previous: set[str] = set()
+    for key in ("files", "retired", "base_retired"):
+        for rel in _str_dict(old.get(key)):
+            n = _skill_name(rel, dirs)
+            if n:
+                previous.add(n)
+            n = _skill_name(rel, [_LOCAL_SKILLS_SRC])
+            if n:
+                claude.add(n)
+    return shipped | (previous - _recorded_local(old)), shipped, claude
+
+
+def _local_skills(target: Path, owned: set[str], shipped: set[str],
+                  claude: set[str], notes: list[str]) -> list[Path]:
+    """Skill dirs to mirror: each `.claude/skills/<name>` dir holding a
+    `SKILL.md` whose name the pack does not own. Hidden dirs are ignored. A
+    dir that resolves outside the tree (a symlink into a home-dir clone, as
+    `tkt init --link-skills` writes) is not the consumer's committed work,
+    and copying it would publish files from outside the repo. Skips worth
+    telling the consumer about are appended to `notes`."""
+    base = target / _LOCAL_SKILLS_SRC
+    if not base.is_dir():
+        return []
+    if not _within(base, target):
+        notes.append(f"skipped {_LOCAL_SKILLS_SRC}: resolves outside the repo")
+        return []
+    dirs: list[Path] = []
+    for d in sorted(base.iterdir()):
+        if d.name.startswith(".") or not d.is_dir() \
+                or not (d / "SKILL.md").is_file():
+            continue
+        if d.name in owned:
+            # The pack's own copy (written, or linked by --link-skills) is
+            # expected; a consumer dir under a name the pack ships now is
+            # shadowed: say so. A retired pack name stays quiet, since what
+            # sits there is most likely the pack's own leftover.
+            if d.name in shipped and d.name not in claude and _within(d, target):
+                notes.append(f"skipped local skill {d.name}: the pack owns a "
+                             f"skill of that name; rename yours to mirror it")
+            continue
+        if not _within(d, target):
+            notes.append(f"skipped local skill {d.name}: "
+                         f"{_LOCAL_SKILLS_SRC}/{d.name} resolves outside the repo")
+            continue
+        dirs.append(d)
+    return dirs
+
+
+def _git(target: Path, *args: str) -> subprocess.CompletedProcess | None:
+    try:
+        return subprocess.run(["git", *args], cwd=str(target),
+                              capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _git_ignored(target: Path, dirs: list[Path]) -> set[str] | None:
+    """Consumer-relative real paths (symlinks resolved) under `dirs` that
+    git ignores, so a skill's gitignored files (a local `.env`, a personal
+    skill) are never republished into tracked mirror dirs. Each dir is
+    passed by its resolved path: git neither accepts a pathspec through a
+    symlink nor descends into one. Empty when `target` is not a git work
+    tree; None when it is one but git could not answer, so the caller can
+    fail closed rather than publish everything."""
+    if not dirs:
+        return set()
+    probe = _git(target, "rev-parse", "--is-inside-work-tree")
+    if probe is None or probe.returncode != 0 or probe.stdout.strip() != b"true":
+        return set()
+    specs = [d.resolve().relative_to(target).as_posix() for d in dirs]
+    out = _git(target, "ls-files", "-z", "--others", "--ignored",
+               "--exclude-standard", "--", *specs)
+    if out is None or out.returncode != 0:
+        return None
+    return {p for p in out.stdout.decode("utf-8", "surrogateescape").split("\0") if p}
+
+
+def _ignored(target: Path, f: Path, ignored: set[str]) -> bool:
+    return f.resolve().relative_to(target).as_posix() in ignored
+
+
+def _local_files(target: Path, d: Path, ignored: set[str]) -> list[Path]:
+    """The files of local skill dir `d` worth mirroring: not junk, not VCS
+    metadata or caches, not gitignored, and not resolving outside the tree."""
+    files = []
+    for f in _walk(d):
+        rel_in = f.relative_to(d)
+        if any(p in _LOCAL_SKIP_PARTS for p in rel_in.parts):
+            continue
+        if any(fnmatch.fnmatch(f.name, pat) for pat in _LOCAL_EXCLUDE):
+            continue
+        if not _within(f, target) or _ignored(target, f, ignored):
+            continue
+        files.append(f)
+    return files
+
+
+def _local_plan(target: Path, dirs: list[Path], surfaces: list[str],
+                taken: set[str], last_sha, notes: list[str],
+                ignored: set[str]) -> list:
+    """Source→dest plan copying each local skill dir into every surface,
+    leaving out any dest already in `taken` (the pack plan wins).
+
+    Decided per (surface, skill), not per file: a copy dir that resolves
+    to the source itself (a symlinked surface) needs nothing; one that
+    resolves outside the tree is never written through; and one holding a
+    file sync-pack never wrote that is not byte-identical to the source is
+    the consumer's own harness-specific variant, left whole rather than
+    having the source's other files dropped into it. Skips go to `notes`."""
+    plan: list = []
+    for d in dirs:
+        files = _local_files(target, d, ignored)
+        for surface in surfaces:
+            copy = target / surface / d.name
+            if copy.resolve() == d.resolve():
+                continue
+            if not _within(copy, target):
+                notes.append(f"skipped {surface}/{d.name}: resolves outside the repo")
+                continue
+            group = {f"{surface}/{d.name}/{f.relative_to(d).as_posix()}": f
+                     for f in files}
+            if _foreign_copy(target, copy, group, last_sha):
+                notes.append(f"kept {surface}/{d.name}: holds files sync-pack "
+                             f"did not write")
+                continue
+            for rel, f in group.items():
+                if rel not in taken:
+                    taken.add(rel)
+                    plan.append((f, rel))
+    return plan
+
+
+def _foreign_copy(target: Path, copy: Path, group: dict, last_sha) -> bool:
+    """True when copy dir `copy` is the consumer's own: sync-pack has never
+    written into it, and it holds a file that is not an identical copy of
+    the source file at that path. Once sync-pack owns the dir, an extra file
+    someone adds beside its copies is left alone and mirroring goes on;
+    otherwise one stray file would retire every copy while the source still
+    exists."""
+    files = _walk(copy)
+    if any(last_sha(f.relative_to(target).as_posix()) is not None for f in files):
+        return False
+    for f in files:
+        rel = f.relative_to(target).as_posix()
+        if any(p in _LOCAL_SKIP_PARTS for p in f.relative_to(copy).parts) \
+                or any(fnmatch.fnmatch(f.name, pat) for pat in _LOCAL_EXCLUDE):
+            continue
+        src = group.get(rel)
+        try:
+            if src is None or f.read_bytes() != src.read_bytes():
+                return True
+        except OSError:
+            return True
+    return False
+
+
 def _is_base(rel: str, prefixes: list[str] = _BASE_DESTS) -> bool:
     """True when consumer path `rel` sits in a base-layer dir. Matches whole
     path segments, so `.agents/skillsX/a` is not under `.agents/skills`."""
@@ -411,13 +660,16 @@ def _str_dict(v) -> dict:
 
 
 def _base_retired(target: Path, old: dict, old_files: dict, planned: set[str],
-                  base_prefixes: list[str]) -> dict:
+                  base_prefixes: list[str], unprotect: set[str] = frozenset()) -> dict:
     """{rel: sha} of base-layer files a previous sync wrote that the pack no
     longer ships and that are still on disk. Never pruned; kept so a later
-    re-ship knows the pack wrote them and does not warn they pre-existed."""
+    re-ship knows the pack wrote them and does not warn they pre-existed.
+    Paths in `unprotect` (copies of a removed local skill) are retired
+    like any other file instead."""
     out: dict = {}
     for rel, sha in {**_str_dict(old.get("base_retired")), **_str_dict(old_files)}.items():
-        if rel in planned or not _canonical(rel) or not _is_base(rel, base_prefixes):
+        if rel in planned or rel in unprotect or not _canonical(rel) \
+                or not _is_base(rel, base_prefixes):
             continue
         try:
             os.lstat(target.joinpath(*rel.split("/")))
@@ -429,17 +681,21 @@ def _base_retired(target: Path, old: dict, old_files: dict, planned: set[str],
     return out
 
 
-def _prune_candidates(old: dict, old_files: dict, planned: set[str]) -> dict:
+def _prune_candidates(old: dict, old_files: dict, planned: set[str],
+                      unprotect: set[str] = frozenset()) -> dict:
     """{rel: sha last written} for files a previous sync wrote (old `files`,
     plus anything already `retired`) that the current plan no longer ships,
-    minus protected paths. A non-canonical `rel` stays in, so `_safe_rel`
-    reports it as unsafe and it drops out of `retired`."""
+    minus protected paths. `unprotect` names base-layer paths that are not
+    protected after all: the copies of a local skill the consumer removed.
+    A non-canonical `rel` stays in, so `_safe_rel` reports it as unsafe and
+    it drops out of `retired`."""
     base_prefixes = _base_prefixes(old)
     old_retired = old.get("retired") if isinstance(old.get("retired"), dict) else {}
     out: dict = {}
     # `files` wins over `retired`: it holds the most recent write.
     for rel, sha in list(old_retired.items()) + list(old_files.items()):
-        if rel in planned or _protected(rel, base_prefixes):
+        if rel in planned or (rel not in unprotect
+                              and _protected(rel, base_prefixes)):
             continue
         out[rel] = sha if isinstance(sha, str) else None
     return out
@@ -453,13 +709,16 @@ def _file_id(path: Path) -> tuple[int, int] | None:
     return (st.st_dev, st.st_ino)
 
 
-def _walk_ids(root: Path, target: Path, ids: set) -> bool:
+def _walk_ids(root: Path, target: Path, ids: set,
+              skip: set[str] = frozenset()) -> bool:
     """Add the (st_dev, st_ino) of every file under `root` to `ids`. Dir
     symlinks are followed when they stay inside `target` (a link a consumer
     adds under a base-layer dir can point at a pack file); one leading
     outside cannot reach a prune candidate, so it is skipped. Each real dir
-    is entered once, so a link loop ends. False when some dir or entry
-    could not be read: the set may then be incomplete."""
+    is entered once, so a link loop ends. A file reached by a path string
+    in `skip` is left out; reached any other way (through a dir link, a
+    hard link) it still counts. False when some dir or entry could not be
+    read: the set may then be incomplete."""
     ok = True
     seen: set = set()
     stack = [root]
@@ -480,6 +739,8 @@ def _walk_ids(root: Path, target: Path, ids: set) -> bool:
             ok = False
             continue
         for e in entries:
+            if e.path in skip:
+                continue
             try:
                 if e.is_dir(follow_symlinks=True):
                     stack.append(Path(e.path))
@@ -493,7 +754,8 @@ def _walk_ids(root: Path, target: Path, ids: set) -> bool:
 
 
 def _live_ids(target: Path, planned: set[str], base_prefixes: list[str],
-              recorded: list[str] = (), problems: list | None = None) -> set:
+              recorded: list[str] = (), problems: list | None = None,
+              unprotect: set[str] = frozenset()) -> set:
     """(st_dev, st_ino) of every file prune must never remove: each planned
     dest, AGENTS.md, the manifest, every recorded base-layer path, and every
     file under a base-layer dir. Comparing identities, not strings, catches
@@ -501,16 +763,19 @@ def _live_ids(target: Path, planned: set[str], base_prefixes: list[str],
     case-insensitive disk, a hard link, or a symlinked dir. `os.stat`
     follows links, and the walk follows dir links that stay in the tree, so
     a base path behind a symlink is covered whether recorded or not. A base
-    dir that could not be fully read is appended to `problems`."""
+    dir that could not be fully read is appended to `problems`. Paths in
+    `unprotect` are prune candidates, so they are not live through their
+    own path (an alias of one still is)."""
     ids = set()
-    base_recorded = [r for r in recorded
-                     if _canonical(r) and _is_base(r, base_prefixes)]
+    base_recorded = [r for r in recorded if r not in unprotect
+                     and _canonical(r) and _is_base(r, base_prefixes)]
+    skip = {str(target.joinpath(*r.split("/"))) for r in unprotect if _canonical(r)}
     for rel in list(planned) + [AGENTS_REL, MANIFEST_REL] + base_recorded:
         fid = _file_id(target / rel)
         if fid:
             ids.add(fid)
     for prefix in base_prefixes:
-        if not _walk_ids(target / prefix, target, ids) and problems is not None:
+        if not _walk_ids(target / prefix, target, ids, skip) and problems is not None:
             problems.append(prefix)
     return ids
 
@@ -782,6 +1047,42 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     added = [n for n in selected if n not in _manifest_harnesses(old)]
     plan = _plan_for(selected)
 
+    # The consumer's own `.claude/skills/<name>` dirs, mirrored into every
+    # verbatim skill surface the selection installs. Tracked like pack files
+    # (so `--check` sees drift and `--prune` can retire a removed one); the
+    # names are recorded as `local_skills` so ownership never has to be
+    # guessed from what is on disk.
+    surfaces = _skill_surfaces(selected)
+    owned, shipped, claude_names = _skill_ownership(plan, old)
+    local_notes: list[str] = []
+    old_local = _recorded_local(old)
+    for name in sorted(old_local & shipped - set(_EXCLUDE_SKILLS)):
+        local_notes.append(f"warning: the pack now ships a skill named {name}; "
+                           f"it replaces your local skill of that name in every "
+                           f"skill dir — rename yours to keep it")
+    local_dirs = _local_skills(target, owned, shipped, claude_names, local_notes)
+    ignored = _git_ignored(target, local_dirs)
+    if ignored is None:
+        local_notes.append("warning: git could not list ignored files under "
+                           f"{_LOCAL_SKILLS_SRC}; local skills not mirrored this run")
+        local_dirs, ignored = [], set()
+    # A skill whose SKILL.md git ignores is private: not a local skill, so
+    # copies an earlier sync made retire like any removed skill's.
+    local_dirs = [d for d in local_dirs
+                  if not _ignored(target, d / "SKILL.md", ignored)]
+    local_names = [d.name for d in local_dirs]
+    local_plan = _local_plan(target, local_dirs, surfaces, {r for _, r in plan},
+                             last_sha, local_notes, ignored)
+    local_rels = {r for _, r in local_plan}
+    plan += local_plan
+    local_writes = 0
+    # Base-layer copies of a local skill the consumer removed: retired and
+    # prunable, unlike the rest of the base layer, which the pack still needs.
+    gone_local = old_local - set(local_names) - shipped
+    base_skill_dirs = [d for d in _skill_dirs() if _is_base(d)]
+    unprotect = {r for r in list(old_files) + list(old_retired)
+                 if _canonical(r) and _skill_name(r, base_skill_dirs) in gone_local}
+
     new_files: dict[str, str] = {}
     missing: list[str] = []
     locally_mod: list[str] = []
@@ -806,8 +1107,10 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     for src, rel in plan:
         content = src.read_bytes()
         new_sha = _sha_bytes(content)
-        new_files[rel] = new_sha
         dst = target / rel
+        new_files[rel] = new_sha
+        if rel in local_rels and dst.exists() and dst.resolve() == src.resolve():
+            continue                   # a link to the source: nothing to copy
         # Only change modes on files that really live in the consumer tree.
         # Checking `dst.is_symlink()` is not enough: `tkt init --link-skills`
         # symlinks whole skill *directories*, so a leaf that is a plain file
@@ -885,19 +1188,22 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         if want_exec:
             _try_grant_exec(dst, rel, chmod_failed)
         writes += 1
+        local_writes += rel in local_rels
 
     # Files a previous sync wrote that this plan no longer ships. Live ids
     # are taken after the writes, so a file this run just wrote is covered.
     planned = {r for _, r in plan}
     base_prefixes = _base_prefixes(old)
-    candidates = _prune_candidates(old, old_files, planned)
+    candidates = _prune_candidates(old, old_files, planned, unprotect)
     live_problems: list[str] = []
     live = (_live_ids(target, planned, base_prefixes,
-                      list(old_files) + list(old_base_retired), live_problems)
+                      list(old_files) + list(old_base_retired), live_problems,
+                      unprotect)
             if candidates else set())
     retired = _classify_retired(target, candidates, live,
                                 verified=not live_problems)
-    new_base_retired = _base_retired(target, old, old_files, planned, base_prefixes)
+    new_base_retired = _base_retired(target, old, old_files, planned, base_prefixes,
+                                     unprotect)
 
     # AGENTS.md managed block.
     block = _agents_block()
@@ -922,6 +1228,10 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                     outdated.append(f"{AGENTS_REL} (tkt-pack block)")
         print(f"harnesses: {', '.join(selected)}")
         print(f"base layer: {', '.join(_BASE_DESTS)}")
+        if local_names:
+            print(f"local skills: {', '.join(local_names)} -> {', '.join(surfaces)}")
+        for note in local_notes:
+            print(note)
         _report_check(missing, locally_mod, outdated, not_exec)
         if prune:
             for title, key in (("would prune", "prune"),
@@ -995,6 +1305,12 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     for rel in retired["alias"]:
         print(f"skipped (same file as a live path): {rel}")
     new_retired = {rel: candidates[rel] for rel in sorted(keep)}
+    # Recorded: every current local skill, plus a removed one while any of
+    # its copies is still retired, so a later --prune can still reach them.
+    dirs_all = _skill_dirs()
+    new_local = sorted(set(local_names) | {
+        n for n in (_skill_name(r, dirs_all) for r in new_retired)
+        if n in old_local and n not in shipped})
 
     for rel, reason in warnings:
         if reason == "preexisting":
@@ -1008,6 +1324,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     for rel, err in chmod_failed:
         print(f"warning: could not make {rel} executable ({err}) — git will not "
               f"run it; fix its ownership and re-run sync-pack", file=sys.stderr)
+    for note in local_notes:
+        print(note)
 
     # Rewrite the manifest only when the material (non-timestamp) content
     # changed; otherwise leave it byte-for-byte identical so re-runs stay clean.
@@ -1022,11 +1340,14 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         "retired": new_retired or None,
         # Never pruned; lets a re-shipped base file skip the pre-existing warning.
         "base_retired": new_base_retired or None,
+        # Omitted when empty, like `retired`.
+        "local_skills": new_local or None,
     }
     old_material = {k: old.get(k) for k in
                     ("pack_commit", "pack_root", "harnesses", "base_layer", "files")}
     old_material["retired"] = old.get("retired") or None
     old_material["base_retired"] = old.get("base_retired") or None
+    old_material["local_skills"] = old.get("local_skills") or None
     wrote_manifest = False
     if material != old_material or not manifest_path.exists():
         manifest = {k: v for k, v in material.items() if v is not None}
@@ -1038,6 +1359,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
     if added:
         print(f"harnesses added: {', '.join(added)}")
+    if local_writes:
+        print(f"local skills mirrored: {', '.join(local_names)}")
     # A failed repair is not "up to date": `--check` would report the file
     # as not-executable straight after.
     if retired["prune"] and not prune:

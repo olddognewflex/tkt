@@ -3,8 +3,9 @@
 # modification restore + warning, --check exit status, --all-harnesses,
 # AGENTS.md custom-content preservation, named/sticky harness selection, the
 # exec bit, the always-on base layer (incl. under a narrow selection), the
-# .pre-sdlc.bak backup of a pre-existing file, and --prune of a dropped
-# harness.
+# .pre-sdlc.bak backup of a pre-existing file, --prune of a dropped harness,
+# and mirroring a consumer's own .claude/skills into the verbatim skill
+# surfaces.
 # Prints PASS/FAIL per case.
 set -euo pipefail
 
@@ -26,7 +27,7 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}" "${C9:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}" "${C9:-}" "${C10:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 # Expected counts are derived from the pack, not hardcoded, so adding a skill
@@ -279,6 +280,27 @@ check_base "$C9" || ok=0
 [ -f "$C9/AGENTS.md" ] || { ok=0; echo "  AGENTS.md removed"; }
 [ "$ok" = "1" ] && pass "case12 --prune removes a dropped harness, keeps base layer" \
                 || fail "case12 prune"
+
+# ---- case 13: a consumer's own skill reaches every verbatim surface ---------
+# A local .claude/skills/<name> lands in .agents/skills, .kiro/skills and
+# .cursor/skills, and never in Copilot's translated .github/prompts.
+C10="$(mktemp -d)"
+mkdir -p "$C10/.claude/skills/local-demo"
+printf -- '---\nname: local-demo\ndescription: A consumer skill.\n---\n\n# Local\n' \
+  > "$C10/.claude/skills/local-demo/SKILL.md"
+"$TKT" sync-pack --dir "$C10" >/dev/null          # defaults: claude, copilot, kiro
+"$TKT" sync-pack cursor --dir "$C10" >/dev/null   # sticky: adds cursor
+ok=1
+for d in .agents/skills .kiro/skills .cursor/skills; do
+  cmp -s "$C10/.claude/skills/local-demo/SKILL.md" "$C10/$d/local-demo/SKILL.md" \
+    || { ok=0; echo "  $d/local-demo/SKILL.md missing or differs"; }
+done
+[ -z "$(find "$C10/.github/prompts" -name '*local-demo*')" ] \
+  || { ok=0; echo "  local skill leaked into .github/prompts"; }
+out13="$("$TKT" sync-pack --check --dir "$C10" 2>&1)" \
+  || { ok=0; echo "  --check not clean after sync: $out13"; }
+[ "$ok" = "1" ] && pass "case13 local skill mirrored to verbatim surfaces only" \
+                || fail "case13 local skill mirror"
 
 echo
 if [ "$fails" = "0" ]; then

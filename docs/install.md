@@ -121,6 +121,32 @@ and no manifest, so `tkt sync-pack cursor` there installs the base layer,
 `.cursor/` and the `AGENTS.md` block — it will not lay committed copies over
 the `.claude/` symlinks.
 
+### Your own skills
+
+Skills you write yourself under `.claude/skills/<name>/SKILL.md` are mirrored
+on every sync, whole dir and byte for byte, into each verbatim skill surface
+the repo installs: `.agents/skills/` always, `.kiro/skills/` and
+`.cursor/skills/` when those harnesses are selected. Copilot's
+`.github/prompts/` and the other command dirs get no copy, because they take
+a rewrite, not a copy. Write the skill once, in `.claude/skills/`, and re-run
+`tkt sync-pack`; `--check` reports a copy that is older than its source.
+
+- A skill named like one the pack ships is not mirrored: the pack's copy wins,
+  and sync tells you. Rename yours to mirror it.
+- A dir with no `SKILL.md` and a hidden dir are ignored, and so is a skill
+  whose `SKILL.md` git ignores (a personal skill). Inside a skill, `.git`,
+  `__pycache__`, gitignored files and anything that resolves outside the
+  repo (a symlink into a home-dir clone) are left out.
+- A copy dir sync-pack has never written into that already holds other files
+  (your own Kiro or Cursor variant) is kept whole, never overwritten, and
+  reported. A copy dir
+  that is a symlink back to `.claude/skills/<name>` is left alone.
+- Remove the skill and every copy is retired, `.agents/skills/` included;
+  `tkt sync-pack --prune` deletes the unchanged ones.
+- Upgrading tkt in a repo that already has its own skills: the first
+  `tkt sync-pack --check` after the upgrade reports their copies as missing
+  until you run `tkt sync-pack` once.
+
 Notes:
 - The `sync-skills` meta-skill is pack-internal and never shipped to a consumer.
 - The `AGENTS.md` block is spliced in between markers; content outside the markers

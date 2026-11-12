@@ -307,6 +307,40 @@ a repo that was set up with `tkt init --link-skills` (symlinked `.claude/`, no
 manifest), `tkt sync-pack cursor` installs the base layer, `.cursor/` and the
 `AGENTS.md` block — it will not drop committed copies on top of the symlinks.
 
+### Your own skills
+
+A skill the consumer writes under `.claude/skills/<name>/SKILL.md` is copied,
+whole dir and byte for byte, into every verbatim skill surface the selection
+installs: `.agents/skills/` always, plus `.kiro/skills/` and `.cursor/skills/`
+when those harnesses are selected. The surface list is derived from the
+harness registry (any dest named `<dir>/skills`), so a harness that later
+gains one picks local skills up unchanged. Translated surfaces
+(`.github/prompts/`, the command dirs) never get a copy: a rewrite is not a
+copy. Rules:
+
+- A name the pack owns (one it ships, `sync-skills`, or one a previous sync
+  wrote and did not record as local) is never mirrored; the pack's copy
+  wins, and a consumer dir it shadows is reported. If the pack starts
+  shipping a name you already use, sync warns.
+- A dir without a `SKILL.md` and a hidden dir are ignored. Within a skill,
+  `.git`, `__pycache__`, `.DS_Store`, `.pre-sdlc.bak` backups, gitignored
+  files and anything that resolves outside the repo (a `tkt init
+  --link-skills` symlink, say) are left out, and a copy dir that resolves
+  outside the repo is never written.
+- The copies are recorded in the manifest like pack files, and the names
+  under `local_skills`, so `--check` flags a copy older than its source. A
+  copy dir sync-pack has never written into that holds a file not identical
+  to the source's is your own harness-specific variant: it is kept whole
+  (`kept <dir>: holds files sync-pack did not write`). Once sync-pack owns a
+  copy dir, an extra file you add there is left alone and mirroring goes on.
+  A copy dir that is a symlink to the source needs nothing.
+- A skill whose `SKILL.md` git ignores is private and never mirrored. If git
+  cannot list ignored files in a work tree, no local skill is mirrored that
+  run (a warning says so) rather than risk publishing one.
+- Remove the skill and all its copies are retired, the `.agents/skills/` one
+  included: `--prune` deletes them if unchanged. Base-layer protection
+  covers files the pack still needs, not copies of a source that is gone.
+
 ### Pruning
 
 A file a previous sync wrote that the current selection no longer ships (a
