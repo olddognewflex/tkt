@@ -421,6 +421,18 @@ def _skill_ownership(pack_plan: list, old: dict) -> tuple[set, set, set]:
     return shipped | (previous - _recorded_local(old)), shipped, claude
 
 
+def _is_skill_dir(d: Path) -> bool:
+    """`d` is a dir holding a regular `SKILL.md`. Missing is False; any other
+    stat failure (EACCES) raises, on every Python: `Path.is_file()` raises
+    it on 3.11 but swallows it on newer versions."""
+    try:
+        if not stat.S_ISDIR(os.stat(d).st_mode):
+            return False
+        return stat.S_ISREG(os.stat(d / "SKILL.md").st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
 def _local_skills(target: Path, owned: set[str], shipped: set[str],
                   claude: set[str], notes: list[str]) -> list[Path]:
     """Skill dirs to mirror: each `.claude/skills/<name>` dir holding a
@@ -429,16 +441,35 @@ def _local_skills(target: Path, owned: set[str], shipped: set[str],
     `tkt init --link-skills` writes) is not the consumer's committed work,
     and copying it would publish files from outside the repo. Skips worth
     telling the consumer about are appended to `notes`."""
+    # Every stat is guarded: on Python 3.11 `is_dir()`/`is_file()` raise on
+    # EACCES rather than returning False, and an unreadable entry must
+    # never abort a sync (prune's own robustness depends on it).
     base = target / _LOCAL_SKILLS_SRC
-    if not base.is_dir():
-        return []
-    if not _within(base, target):
-        notes.append(f"skipped {_LOCAL_SKILLS_SRC}: resolves outside the repo")
+    try:
+        if not base.is_dir():
+            return []
+        if not _within(base, target):
+            notes.append(f"skipped {_LOCAL_SKILLS_SRC}: resolves outside the repo")
+            return []
+        entries = sorted(base.iterdir())
+    except OSError as e:
+        notes.append(f"skipped {_LOCAL_SKILLS_SRC}: unreadable "
+                     f"({e.strerror or e})")
         return []
     dirs: list[Path] = []
-    for d in sorted(base.iterdir()):
-        if d.name.startswith(".") or not d.is_dir() \
-                or not (d / "SKILL.md").is_file():
+    for d in entries:
+        if d.name.startswith("."):
+            continue
+        try:
+            is_skill = _is_skill_dir(d)
+        except OSError as e:
+            # A pack-owned name is the pack's business (prune reports it);
+            # only an unreadable consumer skill is worth a note.
+            if d.name not in owned:
+                notes.append(f"skipped local skill {d.name}: unreadable "
+                             f"({e.strerror or e})")
+            continue
+        if not is_skill:
             continue
         if d.name in owned:
             # The pack's own copy (written, or linked by --link-skills) is
@@ -490,9 +521,11 @@ def _ignored(target: Path, f: Path, ignored: set[str]) -> bool:
     return f.resolve().relative_to(target).as_posix() in ignored
 
 
-def _local_files(target: Path, d: Path, ignored: set[str]) -> list[Path]:
+def _local_files(target: Path, d: Path, ignored: set[str],
+                 notes: list[str]) -> list[Path]:
     """The files of local skill dir `d` worth mirroring: not junk, not VCS
-    metadata or caches, not gitignored, and not resolving outside the tree."""
+    metadata or caches, not gitignored, and not resolving outside the tree.
+    A file that cannot be read is left out with a note, not a crash."""
     files = []
     for f in _walk(d):
         rel_in = f.relative_to(d)
@@ -501,6 +534,9 @@ def _local_files(target: Path, d: Path, ignored: set[str]) -> list[Path]:
         if any(fnmatch.fnmatch(f.name, pat) for pat in _LOCAL_EXCLUDE):
             continue
         if not _within(f, target) or _ignored(target, f, ignored):
+            continue
+        if not os.access(f, os.R_OK):
+            notes.append(f"skipped {f.relative_to(target).as_posix()}: unreadable")
             continue
         files.append(f)
     return files
@@ -520,7 +556,7 @@ def _local_plan(target: Path, dirs: list[Path], surfaces: list[str],
     having the source's other files dropped into it. Skips go to `notes`."""
     plan: list = []
     for d in dirs:
-        files = _local_files(target, d, ignored)
+        files = _local_files(target, d, ignored, notes)
         for surface in surfaces:
             copy = target / surface / d.name
             if copy.resolve() == d.resolve():

@@ -409,6 +409,47 @@ class Layouts(LocalSkillCase):
         self.assertFalse((self.consumer / ".agents/skills/mine").exists())
 
 
+class Unreadable(LocalSkillCase):
+    """On Python 3.11 `Path.is_dir()`/`is_file()` raise on EACCES; an
+    unreadable entry must be skipped, never abort the sync."""
+
+    def lock(self, p: Path, mode: int = 0o000) -> None:
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            self.skipTest("permission bits are not enforced here")
+        p.chmod(mode)
+        self.addCleanup(p.chmod, 0o755)
+
+    def test_unreadable_skill_dir_is_skipped_with_a_note(self):
+        other = self.consumer / ".claude/skills/locked"
+        other.mkdir()
+        (other / "SKILL.md").write_text("x\n")
+        self.lock(other)
+        rc, out = self.sync()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("skipped local skill locked: unreadable", out)
+        self.assertTrue((self.consumer / ".agents/skills/mine/SKILL.md").is_file())
+
+    def test_unreadable_skills_root_is_skipped(self):
+        self.lock(self.consumer / ".claude/skills", 0o300)   # no read: iterdir fails
+        rc, out = self.sync(harnesses=["cursor"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("skipped .claude/skills: unreadable", out)
+
+    def test_unreadable_file_in_a_skill_is_left_out(self):
+        self.lock(self.local / "ref" / "notes.md", 0o000)
+        rc, out = self.sync()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("skipped .claude/skills/mine/ref/notes.md: unreadable", out)
+        self.assertFalse((self.consumer / ".agents/skills/mine/ref/notes.md").exists())
+        self.assertTrue((self.consumer / ".agents/skills/mine/SKILL.md").is_file())
+
+    def test_unreadable_subdir_in_a_skill_does_not_crash(self):
+        self.lock(self.local / "ref", 0o000)
+        rc, out = self.sync()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue((self.consumer / ".agents/skills/mine/SKILL.md").is_file())
+
+
 class Removal(LocalSkillCase):
     def test_removed_skill_retires_and_prunes_everywhere(self):
         self.sync()
