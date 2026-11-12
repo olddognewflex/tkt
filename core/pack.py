@@ -434,13 +434,16 @@ def _is_skill_dir(d: Path) -> bool:
 
 
 def _local_skills(target: Path, owned: set[str], shipped: set[str],
-                  claude: set[str], notes: list[str]) -> list[Path]:
+                  claude: set[str], notes: list[str],
+                  deferred: set[str], old_local: set[str]) -> list[Path]:
     """Skill dirs to mirror: each `.claude/skills/<name>` dir holding a
     `SKILL.md` whose name the pack does not own. Hidden dirs are ignored. A
     dir that resolves outside the tree (a symlink into a home-dir clone, as
     `tkt init --link-skills` writes) is not the consumer's committed work,
     and copying it would publish files from outside the repo. Skips worth
-    telling the consumer about are appended to `notes`."""
+    telling the consumer about are appended to `notes`. A skill that could
+    not be read is added to `deferred` (every recorded one when the skills
+    dir itself could not be): it was not seen, so it is not gone either."""
     # Every stat is guarded: on Python 3.11 `is_dir()`/`is_file()` raise on
     # EACCES rather than returning False, and an unreadable entry must
     # never abort a sync (prune's own robustness depends on it).
@@ -455,6 +458,7 @@ def _local_skills(target: Path, owned: set[str], shipped: set[str],
     except OSError as e:
         notes.append(f"skipped {_LOCAL_SKILLS_SRC}: unreadable "
                      f"({e.strerror or e})")
+        deferred.update(old_local)
         return []
     dirs: list[Path] = []
     for d in entries:
@@ -463,6 +467,7 @@ def _local_skills(target: Path, owned: set[str], shipped: set[str],
         try:
             is_skill = _is_skill_dir(d)
         except OSError as e:
+            deferred.add(d.name)
             # A pack-owned name is the pack's business (prune reports it);
             # only an unreadable consumer skill is worth a note.
             if d.name not in owned:
@@ -522,10 +527,12 @@ def _ignored(target: Path, f: Path, ignored: set[str]) -> bool:
 
 
 def _local_files(target: Path, d: Path, ignored: set[str],
-                 notes: list[str]) -> list[Path]:
+                 notes: list[str], deferred_files: list) -> list[Path]:
     """The files of local skill dir `d` worth mirroring: not junk, not VCS
     metadata or caches, not gitignored, and not resolving outside the tree.
-    A file that cannot be read is left out with a note, not a crash."""
+    A file that cannot be read is left out with a note, not a crash, and
+    recorded in `deferred_files` as (skill, path in skill) so its existing
+    copies are kept rather than retired."""
     files = []
     for f in _walk(d):
         rel_in = f.relative_to(d)
@@ -537,6 +544,7 @@ def _local_files(target: Path, d: Path, ignored: set[str],
             continue
         if not os.access(f, os.R_OK):
             notes.append(f"skipped {f.relative_to(target).as_posix()}: unreadable")
+            deferred_files.append((d.name, f.relative_to(d).as_posix()))
             continue
         files.append(f)
     return files
@@ -544,7 +552,7 @@ def _local_files(target: Path, d: Path, ignored: set[str],
 
 def _local_plan(target: Path, dirs: list[Path], surfaces: list[str],
                 taken: set[str], last_sha, notes: list[str],
-                ignored: set[str]) -> list:
+                ignored: set[str], deferred_files: list) -> list:
     """Source→dest plan copying each local skill dir into every surface,
     leaving out any dest already in `taken` (the pack plan wins).
 
@@ -556,7 +564,7 @@ def _local_plan(target: Path, dirs: list[Path], surfaces: list[str],
     having the source's other files dropped into it. Skips go to `notes`."""
     plan: list = []
     for d in dirs:
-        files = _local_files(target, d, ignored, notes)
+        files = _local_files(target, d, ignored, notes, deferred_files)
         for surface in surfaces:
             copy = target / surface / d.name
             if copy.resolve() == d.resolve():
@@ -1096,11 +1104,19 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         local_notes.append(f"warning: the pack now ships a skill named {name}; "
                            f"it replaces your local skill of that name in every "
                            f"skill dir — rename yours to keep it")
-    local_dirs = _local_skills(target, owned, shipped, claude_names, local_notes)
+    # Skills (and files) that could not be judged this run. Not seen is not
+    # gone: their existing copies are carried forward unchanged instead of
+    # retired, so a transient failure followed by --prune deletes nothing.
+    deferred: set[str] = set()
+    deferred_files: list[tuple[str, str]] = []
+    local_dirs = _local_skills(target, owned, shipped, claude_names, local_notes,
+                               deferred, old_local)
     ignored = _git_ignored(target, local_dirs)
     if ignored is None:
         local_notes.append("warning: git could not list ignored files under "
-                           f"{_LOCAL_SKILLS_SRC}; local skills not mirrored this run")
+                           f"{_LOCAL_SKILLS_SRC}; local skills not mirrored this "
+                           f"run, existing copies kept")
+        deferred.update(old_local, (d.name for d in local_dirs))
         local_dirs, ignored = [], set()
     # A skill whose SKILL.md git ignores is private: not a local skill, so
     # copies an earlier sync made retire like any removed skill's.
@@ -1108,13 +1124,26 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                   if not _ignored(target, d / "SKILL.md", ignored)]
     local_names = [d.name for d in local_dirs]
     local_plan = _local_plan(target, local_dirs, surfaces, {r for _, r in plan},
-                             last_sha, local_notes, ignored)
+                             last_sha, local_notes, ignored, deferred_files)
     local_rels = {r for _, r in local_plan}
     plan += local_plan
     local_writes = 0
+    deferred = (deferred & old_local) - shipped
+    # {rel: sha} of recorded copies to keep as they are (see `deferred`).
+    mirror_dirs = _skill_surfaces(list(_HARNESSES))
+    carry: dict[str, str] = {}
+    for rel, sha in old_files.items():
+        if isinstance(sha, str) and _canonical(rel) \
+                and _skill_name(rel, mirror_dirs) in deferred:
+            carry[rel] = sha
+    for name, rel_in in deferred_files:
+        for surface in surfaces:
+            rel = f"{surface}/{name}/{rel_in}"
+            if isinstance(old_files.get(rel), str):
+                carry[rel] = old_files[rel]
     # Base-layer copies of a local skill the consumer removed: retired and
     # prunable, unlike the rest of the base layer, which the pack still needs.
-    gone_local = old_local - set(local_names) - shipped
+    gone_local = old_local - set(local_names) - shipped - deferred
     base_skill_dirs = [d for d in _skill_dirs() if _is_base(d)]
     unprotect = {r for r in list(old_files) + list(old_retired)
                  if _canonical(r) and _skill_name(r, base_skill_dirs) in gone_local}
@@ -1145,6 +1174,16 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         new_sha = _sha_bytes(content)
         dst = target / rel
         new_files[rel] = new_sha
+        if rel in local_rels and not _within(dst, target):
+            # A dangling or outside symlink at the leaf or a parent inside
+            # the copy dir: `exists()` is False and a write would follow it
+            # out of the tree. Leave it; keep any record so it is not retired.
+            local_notes.append(f"skipped {rel}: resolves outside the repo")
+            if isinstance(old_files.get(rel), str):
+                new_files[rel] = old_files[rel]
+            else:
+                del new_files[rel]
+            continue
         if rel in local_rels and dst.exists() and dst.resolve() == src.resolve():
             continue                   # a link to the source: nothing to copy
         # Only change modes on files that really live in the consumer tree.
@@ -1228,7 +1267,9 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
 
     # Files a previous sync wrote that this plan no longer ships. Live ids
     # are taken after the writes, so a file this run just wrote is covered.
-    planned = {r for _, r in plan}
+    for rel, sha in carry.items():
+        new_files.setdefault(rel, sha)
+    planned = {r for _, r in plan} | set(carry)
     base_prefixes = _base_prefixes(old)
     candidates = _prune_candidates(old, old_files, planned, unprotect)
     live_problems: list[str] = []
@@ -1344,7 +1385,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     # Recorded: every current local skill, plus a removed one while any of
     # its copies is still retired, so a later --prune can still reach them.
     dirs_all = _skill_dirs()
-    new_local = sorted(set(local_names) | {
+    new_local = sorted(set(local_names) | deferred | {
         n for n in (_skill_name(r, dirs_all) for r in new_retired)
         if n in old_local and n not in shipped})
 

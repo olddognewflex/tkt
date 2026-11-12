@@ -336,7 +336,11 @@ copy. Rules:
   A copy dir that is a symlink to the source needs nothing.
 - A skill whose `SKILL.md` git ignores is private and never mirrored. If git
   cannot list ignored files in a work tree, no local skill is mirrored that
-  run (a warning says so) rather than risk publishing one.
+  run (a warning says so) rather than risk publishing one. A skill, skills
+  dir or file that could not be read or judged is not treated as removed:
+  its existing copies are kept as they are, so `--prune` never deletes them
+  on a transient failure. A copy path that resolves outside the repo (a
+  dangling symlink, say) is never written through.
 - Remove the skill and all its copies are retired, the `.agents/skills/` one
   included: `--prune` deletes them if unchanged. Base-layer protection
   covers files the pack still needs, not copies of a source that is gone.

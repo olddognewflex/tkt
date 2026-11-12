@@ -450,6 +450,107 @@ class Unreadable(LocalSkillCase):
         self.assertTrue((self.consumer / ".agents/skills/mine/SKILL.md").is_file())
 
 
+class Deferred(LocalSkillCase):
+    """A skill that could not be judged this run is not gone: its existing
+    copies are carried forward, never retired or pruned."""
+
+    def failing_git(self):
+        def fake(target, *args):
+            if args[0] == "rev-parse":
+                return mock.Mock(returncode=0, stdout=b"true\n")
+            return mock.Mock(returncode=128, stdout=b"")
+        return mock.patch.object(pack, "_git", fake)
+
+    def lock(self, p: Path, mode: int = 0o000) -> None:
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            self.skipTest("permission bits are not enforced here")
+        p.chmod(mode)
+        self.addCleanup(p.chmod, 0o755)
+
+    def assert_copies_intact(self):
+        c = self.consumer
+        for surface in (".agents/skills", ".kiro/skills"):
+            self.assertTrue((c / surface / "mine/SKILL.md").is_file(), surface)
+        m = self.manifest()
+        self.assertEqual(m["local_skills"], ["mine"])
+        self.assertIn(".kiro/skills/mine/SKILL.md", m["files"])
+        self.assertIn(".agents/skills/mine/SKILL.md", m["files"])
+        self.assertNotIn("retired", m)
+
+    def test_git_failure_then_prune_deletes_nothing(self):
+        self.sync()
+        before = (self.consumer / pack.MANIFEST_REL).read_bytes()
+        with self.failing_git():
+            rc, out = self.sync(prune=True)
+            self.assertEqual(rc, 0, out)
+            self.assertIn("existing copies kept", out)
+            self.assertEqual(self.sync(check=True, prune=True)[0], 0)
+        self.assert_copies_intact()
+        self.assertEqual((self.consumer / pack.MANIFEST_REL).read_bytes(), before)
+
+    def test_unreadable_skill_then_prune_deletes_nothing(self):
+        self.sync()
+        self.lock(self.local)
+        rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0, out)
+        self.assert_copies_intact()
+
+    def test_unreadable_skills_root_then_prune_deletes_nothing(self):
+        self.sync()
+        self.lock(self.consumer / ".claude/skills", 0o300)
+        rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0, out)
+        self.assert_copies_intact()
+
+    def test_unreadable_file_keeps_its_copies(self):
+        self.sync()
+        self.lock(self.local / "ref" / "notes.md")
+        rc, out = self.sync(prune=True)
+        self.assertEqual(rc, 0, out)
+        for surface in (".agents/skills", ".kiro/skills"):
+            self.assertTrue((self.consumer / surface / "mine/ref/notes.md").is_file())
+        self.assertNotIn("retired", self.manifest())
+
+
+class OutsideDest(LocalSkillCase):
+    def test_dangling_leaf_symlink_is_not_written_through(self):
+        outside = self.tmp / "outside-target.md"
+        kiro = self.consumer / ".kiro/skills/mine"
+        self.sync()
+        (kiro / "SKILL.md").unlink()
+        (kiro / "SKILL.md").symlink_to(outside)      # dangling, points out
+        rc, out = self.sync()
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(outside.exists())
+        self.assertIn("skipped .kiro/skills/mine/SKILL.md: resolves outside the repo", out)
+        # Still recorded, so it is not retired.
+        self.assertIn(".kiro/skills/mine/SKILL.md", self.manifest()["files"])
+
+    def test_dangling_leaf_on_first_sync_is_not_recorded(self):
+        outside = self.tmp / "outside-target.md"
+        kiro = self.consumer / ".kiro/skills/mine"
+        kiro.mkdir(parents=True)
+        (kiro / "SKILL.md").symlink_to(outside)
+        rc, out = self.sync()
+        self.assertFalse(outside.exists())
+        self.assertNotIn(".kiro/skills/mine/SKILL.md", self.manifest()["files"])
+        rc, out = self.sync(check=True)
+        self.assertNotIn("missing", out)
+
+    def test_nested_parent_symlink_is_not_written_through(self):
+        ext = self.tmp / "ext-ref"
+        ext.mkdir()
+        self.sync()
+        ref = self.consumer / ".kiro/skills/mine/ref"
+        shutil.rmtree(ref)
+        ref.symlink_to(ext)
+        (self.local / "ref" / "new.md").write_text("new\n")
+        rc, out = self.sync()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(list(ext.iterdir()), [])
+        self.assertIn("skipped .kiro/skills/mine/ref/new.md: resolves outside the repo", out)
+
+
 class Removal(LocalSkillCase):
     def test_removed_skill_retires_and_prunes_everywhere(self):
         self.sync()
