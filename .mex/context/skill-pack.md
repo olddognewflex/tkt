@@ -102,6 +102,11 @@ Its guarantees, all of which are load-bearing:
 - Never touches content outside the `AGENTS.md` marker region it manages.
 - Runs before config exists — it never calls `Config.load()`.
 - Refuses to install into the pack checkout itself (`UsageError`).
+- Mirrors the consumer's own `.claude/skills/<name>` dirs (names the pack does
+  not own) into every verbatim skill surface the selection installs
+  (`_skill_surfaces`: registered dests named `<dir>/skills`, minus the
+  `.claude/skills` source). Never into translated surfaces, never over a file
+  sync-pack did not write.
 
 **Harness selection is additive and sticky.**
 [`_resolve_harnesses()`](mex://function:2ea0c4e9c857a9b390334dd63ce28d66) unions the

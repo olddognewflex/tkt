@@ -93,7 +93,8 @@ markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
 `.pre-sdlc.bak` backup of a pre-existing consumer file
 (`test_pack_backup.py`), its always-on base
 layer and derived skill mirrors (`test_pack_base.py`), `--prune` and its
-safety guards (`test_pack_prune.py`), `respond-to-review`
+safety guards (`test_pack_prune.py`), mirroring a consumer's own
+`.claude/skills` into the verbatim skill surfaces (`test_pack_local.py`), `respond-to-review`
 replying in-thread across the skill and every mirror
 (`test_respond_to_review.py`), `Ticket.children` normalization in every
 adapter and its `view` rendering (`test_children_jira.py`,
@@ -179,7 +180,12 @@ Two layers, connected only by the verb contract and the normalized schema:
     inside `_PACK_DESTS` and never under `.git`. Stale base-layer files are
     tracked under `base_retired`, never pruned. The `.agents/skills`
     and `.kiro/skills` mirrors are derived from `skills/` at sync time, not
-    stored in this repo.
+    stored in this repo. A consumer's own `.claude/skills/<name>` dirs
+    (names the pack doesn't own) are mirrored into `_skill_surfaces` —
+    every registered dest named `<dir>/skills` except `.claude/skills` —
+    tracked like pack files, names recorded as `local_skills`. A copy dir
+    holding files sync-pack never wrote is kept whole; a removed skill's
+    copies retire and prune, `.agents/skills` included (`unprotect`).
   - `__init__.py` / `version.py` — `__version__` is the single place the release
     number is written; bump it when releasing. `version.py` builds what
     `tkt --version` prints (number + own-checkout `git describe`), lazily.
