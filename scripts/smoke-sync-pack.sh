@@ -2,8 +2,9 @@
 # Smoke test for `tkt sync-pack`. Exercises fresh install, idempotency, local
 # modification restore + warning, --check exit status, --all-harnesses,
 # AGENTS.md custom-content preservation, named/sticky harness selection, the
-# exec bit, the always-on base layer (incl. under a narrow selection), and
-# --prune of a dropped harness.
+# exec bit, the always-on base layer (incl. under a narrow selection), the
+# .pre-sdlc.bak backup of a pre-existing file, and --prune of a dropped
+# harness.
 # Prints PASS/FAIL per case.
 set -euo pipefail
 
@@ -158,6 +159,20 @@ if echo "$out7" | grep -q "pre-existing file overwritten" && [ "$replaced" = "1"
   pass "case7 pre-existing differing file warned and replaced on first sync"
 else
   fail "case7 pre-existing file (warned? / replaced=$replaced)"
+  echo "$out7" | sed 's/^/    /'
+fi
+
+# ---- case 7b: the replaced file was backed up first -------------------------
+# Its original content survives at <name>.pre-sdlc.bak, the report names that
+# path, and the backup is never tracked in the manifest.
+bak="$pre.pre-sdlc.bak"
+bak_rel=".github/prompts/select-ticket.prompt.md.pre-sdlc.bak"
+if [ "$(cat "$bak" 2>/dev/null)" = "CONSUMER-OWNED CONTENT" ] \
+    && echo "$out7" | grep -qF "(backup: $bak_rel)" \
+    && ! grep -q "pre-sdlc" "$C4/.sdlc/pack-manifest.json"; then
+  pass "case7b pre-existing file backed up to .pre-sdlc.bak and reported"
+else
+  fail "case7b pre-existing file backup"
   echo "$out7" | sed 's/^/    /'
 fi
 

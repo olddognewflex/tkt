@@ -74,8 +74,12 @@ Codex reads the base layer plus `AGENTS.md`, so it needs no harness of its own.
 Harness selection only adds surfaces on top: no selection, however narrow, drops
 the base layer. The manifest records these dirs under `base_layer`, and
 `--prune` never removes them. A file of your own at one of these paths is
-overwritten, with a warning, on the first sync that ships it; keep your own
-files outside these dirs.
+overwritten, with a warning, on the first sync that ships it, after being
+copied to `<name>.pre-sdlc.bak` beside it (the warning names the backup; an
+existing backup is never overwritten, the next is `<name>.pre-sdlc.1.bak`).
+Backups are never tracked in the manifest and never pruned. If the copy
+fails, the file is left alone and the sync exits 1. Keep your own files
+outside these dirs.
 
 ### Harnesses
 
@@ -165,6 +169,14 @@ overwritten and a warning is printed
 intentional: **customizations belong upstream in the pack, not in a consumer
 repo.** If you need a skill to behave differently, change it in the pack and let
 `sync-pack` propagate it everywhere.
+
+A file at a pack path that sync-pack **never wrote** (no manifest entry) and
+whose content differs is backed up before it is replaced:
+`warning: pre-existing file overwritten: <path> (backup: <path>.pre-sdlc.bak)`.
+This holds in every pack dir, harness dirs included. A file it cannot back
+up (unreadable, a failed copy, or resolving outside the consumer tree through
+a symlink, such as a `--link-skills` dir) is left alone, reported on
+stderr, and the sync exits 1.
 
 `sync-pack` only ever writes the paths recorded in `.sdlc/pack-manifest.json`,
 and deletes nothing unless you pass `--prune`. A re-run against an unchanged pack

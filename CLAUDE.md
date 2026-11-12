@@ -89,7 +89,9 @@ markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`
 `tkt list --all-projects` dropping project scoping on markdown and Jira
 and being accepted by every adapter (`test_list_all_projects.py`),
 markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
-`sync-pack`'s exec-bit handling (`test_pack_exec.py`), its always-on base
+`sync-pack`'s exec-bit handling (`test_pack_exec.py`), its
+`.pre-sdlc.bak` backup of a pre-existing consumer file
+(`test_pack_backup.py`), its always-on base
 layer and derived skill mirrors (`test_pack_base.py`), `--prune` and its
 safety guards (`test_pack_prune.py`), `respond-to-review`
 replying in-thread across the skill and every mirror
@@ -163,7 +165,9 @@ Two layers, connected only by the verb contract and the normalized schema:
   - `pack.py` — implements `tkt sync-pack` and its `doctor` check. Copies pack files
     into a consumer tree, tracks them in `.sdlc/pack-manifest.json`, and maintains a
     marker-delimited managed block in the consumer's `AGENTS.md`. Deletes only on
-    `--prune`, never writes outside recorded paths, and is idempotent. `_HARNESSES` is the registry of
+    `--prune`, never writes outside recorded paths except the untracked
+    `<name>.pre-sdlc.bak` copy `_backup` makes before overwriting a file the pack
+    never wrote, and is idempotent. `_HARNESSES` is the registry of
     named harnesses → (pack source, consumer dest) dirs; the installed set is
     additive and persisted in the manifest's `harnesses` list, so a bare re-run
     refreshes every harness the project ever added. `_BASE_LAYER` ships on
