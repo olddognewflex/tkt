@@ -118,6 +118,10 @@ run by `node --test enforcement/*.test.mjs`, not by `unittest`) drives
 flagged, the parser's edge cases (fences, HTML comments, frontmatter vs a
 leading thematic break), both shipped presets, the stderr/`--json` output and
 exit codes 0/1/2, and rules-file validation.
+`tkt init` is covered by `test_scaffold_init.py` (shared-board inheritance,
+key derivation, `--project`/`--board-dir`/`--no-inherit`, the collision
+warning, `--sample`, prompts, the placeholder doctor row) and
+`test_toolchain.py` (Makefile merge, `apply_to_config`, `tomledit`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
 "validation" of an adapter still means running `tkt doctor` / the read
@@ -180,8 +184,16 @@ Two layers, connected only by the verb contract and the normalized schema:
   - `toolchain.py` — best-effort detection of a project's build/test/typecheck/lint
     commands (package.json scripts, Cargo.toml, go.mod, pyproject.toml, Makefile)
     plus the `[build]`-table rewrite `init` applies to the copied example config.
-    Advisory only: a key the project doesn't declare keeps the example's value.
-  - `scaffold.py` — implements `tkt init`.
+    The first language probe that matches is the base; Makefile targets fill
+    the keys it lacks. Advisory only: a key the project doesn't declare keeps
+    the example's value.
+  - `tomledit.py` — line-level TOML edits (`set_keys`, `replace_table`) that
+    keep comments and alignment; callers re-parse the result with `tomllib`.
+  - `scaffold.py` — implements `tkt init`: derives the project key from the
+    dir name, and for markdown joins the nearest parent `.sdlc/config.toml`
+    that is a markdown board (parent text kept, repo's own `project`,
+    `[vcs]`, `[build]`; relative paths rebased via `config.project_root`).
+    Also holds the `config placeholders` doctor row.
   - `gates.py` — the format gates `cli.py` runs before `transition` (into
     `review` and later lanes, a literal lane name resolved to its role first)
     and `comment`. Shells out to `enforcement/check-artifact-format.mjs` in

@@ -35,6 +35,13 @@ DEFAULT_CONTAINER_TYPES = ["Epic"]
 CLOSED_ROLES = ("done", "cancelled")
 
 
+def project_root(cfg_path: Path) -> Path:
+    """The dir relative config paths resolve against: the one CONTAINING
+    .sdlc, or the config's own dir when it isn't named .sdlc."""
+    d = cfg_path.parent
+    return d.parent if d.name == ".sdlc" else d
+
+
 class Config:
     def __init__(self, data: dict[str, Any], path: Path):
         self.path = path
@@ -84,6 +91,10 @@ class Config:
         self.docs = data.get("docs", {})
         # provider-specific blocks (e.g. [markdown], [github])
         self.provider_cfg = data.get(self.provider, {})
+
+    @property
+    def root(self) -> Path:
+        return project_root(self.path)
 
     # ---- lane / role resolution -------------------------------------------
 

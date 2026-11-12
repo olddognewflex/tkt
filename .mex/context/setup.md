@@ -54,8 +54,10 @@ Working on `tkt` itself:
 Pointing another project at `tkt`:
 
 1. `cd my-project && tkt init --provider <jira|markdown|github|linear|openkanban>`
-   — writes `.sdlc/config.toml` from `examples/config.<provider>.toml`, and rewrites its
-   `[build]` table from whatever the project already declares
+   — writes `.sdlc/config.toml` from `examples/config.<provider>.toml` (for markdown,
+   from the nearest parent dir's markdown config instead, joining its shared board;
+   `--no-inherit` opts out; markdown: key derived from the dir name), and
+   rewrites its `[build]` table from whatever the project already declares
    ([`_seed_build()`](mex://function:0d3291c64a6f1ef200a8dcc084cd5fa1); pass
    `--no-detect-build` to keep the example's values).
 2. Edit `.sdlc/config.toml` — at minimum `[board.roles]`, `[queries]`, and `[vcs]`.

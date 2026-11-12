@@ -154,11 +154,9 @@ class MarkdownAdapter(Adapter):
     def __init__(self, config):
         super().__init__(config)
         mc = config.provider_cfg
-        # Relative paths resolve from the project root (the dir that CONTAINS
-        # .sdlc), so ".sdlc/board" doesn't double up when config lives at
-        # .sdlc/config.toml.
-        cfg_dir = config.path.parent
-        base = cfg_dir.parent if cfg_dir.name == ".sdlc" else cfg_dir
+        # Relative paths resolve from the project root, so ".sdlc/board"
+        # doesn't double up when config lives at .sdlc/config.toml.
+        base = config.root
         self.board_dir = self._resolve(base, mc.get("board_dir", ".sdlc/board"))
         self.state_dir = self._resolve(base, mc.get("state_dir", ".sdlc/state"))
         self.me = mc.get("me", "")

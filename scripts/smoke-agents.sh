@@ -22,7 +22,7 @@ trap cleanup EXIT
 
 # A markdown project with a harness that just blocks, so the driver sits inside
 # one invocation for as long as the test needs.
-"$TKT" init --provider markdown --dir "$C" --sample >/dev/null 2>&1
+"$TKT" init --provider markdown --project TKT --dir "$C" --sample >/dev/null 2>&1
 CFG="$C/.sdlc/config.toml"
 python3 - "$CFG" <<'PY'
 import sys
