@@ -575,6 +575,13 @@ Description...
 ```
 
 Frontmatter is a tiny YAML subset: `key: value`, `[a, b]` list literals, no nesting.
+**description** is the text between the summary and the first `## ` heading;
+a body with none (it opens with `## Problem`, say) gets every section's text
+except Acceptance and Comments, headings kept. **acceptance** is one entry per
+list item under `## Acceptance…`; an indented line right after an item
+continues it, joined with a space. A `## ` line in a fenced or indented code
+block is never a section heading, and everything from `## Comments` on is the
+log: a section placed after it is not read.
 **children** come from a `children: [KEY, ...]` frontmatter list and **parent**
 from a `parent: KEY` scalar. `tkt link P --to C --type child` (or
 `C --to P --type parent`) writes both edges and drops C from any other
