@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from core import ticketdoc
 from core.gates import cut_managed_tail
@@ -83,6 +83,31 @@ _PARENT_LINKS = ("parent", "child of", "is child of")
 # by KEY` are the same edge, so both route to `_set_blocks`.
 _BLOCKS_LINKS = ("blocks",)
 _BLOCKED_BY_LINKS = ("is blocked by", "depends on")
+
+
+def _key_ok(key) -> bool:
+    """Whether `key` names a file directly inside the board dir.
+
+    A key becomes the file name `<key>.md` (and `<key>.history.jsonl` in
+    state_dir), so a separator (`/`, or `\\` on Windows), `..`, a NUL
+    byte, a Windows drive (`C:x`) or an empty key could name a file
+    elsewhere or none at all. `..` is refused anywhere in the key, not only
+    as a whole path part: no real key carries it, and the rule stays one
+    line that cannot miss a spelling."""
+    k = str(key)
+    return bool(k) and not ("/" in k or "\\" in k or ".." in k or "\0" in k
+                            or PureWindowsPath(k).drive)
+
+
+def _check_key(key) -> str:
+    """`key`, or UsageError (exit 64) when it could name a file outside the
+    board (see `_key_ok`). Every path built from a key goes through this,
+    so every verb refuses such a key before any read or write."""
+    if not _key_ok(key):
+        raise UsageError(f"invalid ticket key {str(key)!r}: a key cannot be "
+                         f"empty or contain '/', '\\', '..', a NUL byte or "
+                         f"a drive")
+    return str(key)
 
 
 def _coerce_parent(value, key: str = "") -> str:
@@ -179,6 +204,9 @@ class _TicketIdentity:
 
     def of(self, key: str):
         if key not in self._ids:
+            if not _key_ok(key):  # a hand-edited edge naming no board file
+                self._ids[key] = None
+                return None
             try:
                 st = (self.board_dir / f"{key}.md").stat()
                 self._ids[key] = (st.st_dev, st.st_ino)
@@ -226,7 +254,7 @@ class MarkdownAdapter(Adapter):
     # ---- file helpers ------------------------------------------------------
 
     def _ticket_path(self, key: str) -> Path:
-        return self.board_dir / f"{key}.md"
+        return self.board_dir / f"{_check_key(key)}.md"
 
     def _read_raw(self, key: str) -> tuple[dict, str]:
         path = self._ticket_path(key)
@@ -258,7 +286,7 @@ class MarkdownAdapter(Adapter):
         self._ticket_path(key).write_text("\n".join(lines) + "\n\n" + body.lstrip("\n"))
 
     def _history_path(self, key: str) -> Path:
-        return self.state_dir / f"{key}.history.jsonl"
+        return self.state_dir / f"{_check_key(key)}.history.jsonl"
 
     def _append_history(self, key: str, frm: str, to: str) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -355,9 +383,12 @@ class MarkdownAdapter(Adapter):
         )
 
     def _is_resolved(self, key: str) -> bool:
+        # A `blocked_by:` entry is file data: one naming no board file (a
+        # hand edit like `../x`) is an unresolved blocker, not an error
+        # that would stop the ticket being viewed at all.
         try:
             fm, _ = self._read_raw(key)
-        except NotFoundError:
+        except (NotFoundError, UsageError):
             return False
         done_lane = self.config.roles.get("done")
         return str(fm.get("status", "")) == done_lane
@@ -393,6 +424,8 @@ class MarkdownAdapter(Adapter):
             # (a `*.md` directory, editor dotfiles). Skipped only on the
             # all-projects path, so the scoped path is unchanged.
             if all_projects and (not path.is_file() or key.startswith(".")):
+                continue
+            if not _key_ok(key):  # e.g. `notes...md`: no verb could open it
                 continue
             # `TKT-` rather than `TKT`, so TKTX-1 is not read as a TKT ticket.
             if prefix and not key.startswith(f"{prefix}-"):
@@ -594,6 +627,10 @@ class MarkdownAdapter(Adapter):
         return self.view(key)
 
     def link(self, key, to, link_type):
+        # Both up front, so a generic link (which stores `to` as text and
+        # opens no file for it) refuses an escaping key like the rest.
+        _check_key(key)
+        _check_key(to)
         lt = link_type.strip().lower()
         if lt in _CHILD_LINKS:
             return self._set_parent(parent=key, child=to)
@@ -719,6 +756,8 @@ class MarkdownAdapter(Adapter):
         for path in sorted(self.board_dir.glob("*.md")):
             if not path.is_file() or path.name.startswith("."):
                 continue
+            if not _key_ok(path.stem):
+                continue
             if ids.of(path.stem) in skip:
                 continue
             fm, body = self._read_raw(path.stem)
@@ -810,6 +849,7 @@ class MarkdownAdapter(Adapter):
         return self.view(key)
 
     def worklog(self, key, from_role, note="", billable=False):
+        _check_key(key)  # also when time tracking is off and no file is read
         lane = self.config.role_to_lane(from_role)
         if self.config.timetracking.get("provider", "none") == "none":
             return Worklog(key=key, role=from_role, lane=lane, note=note)
@@ -826,6 +866,7 @@ class MarkdownAdapter(Adapter):
                        human=human_duration(secs), worklog_id=wl_id, note=note)
 
     def lane_time(self, key, role, read_only=False):
+        _check_key(key)  # also when time tracking is off and no file is read
         lane = self.config.role_to_lane(role)
         # read_only computes for display regardless of time tracking; the
         # recording path stays a no-op when no provider is configured.
@@ -853,6 +894,11 @@ class MarkdownAdapter(Adapter):
                        human=human_duration(secs), worklog_id=wl_id, note="retroactive")
 
     def lane_time_batch(self, keys_roles, read_only=False):
+        keys_roles = list(keys_roles)
+        # Every key before any worklog row, so a bad key late in the batch
+        # cannot leave the earlier ones logged.
+        for key, _ in keys_roles:
+            _check_key(key)
         out = []
         for key, role in keys_roles:
             lane = self.config.role_to_lane(role)
