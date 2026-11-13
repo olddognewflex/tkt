@@ -254,8 +254,14 @@ whose content differs (say, a consumer's own
 `<name>.pre-sdlc.bak` beside it and prints the backup path. An existing backup
 is never overwritten (the next is `<name>.pre-sdlc.1.bak`); backups are never in
 the manifest, never pruned, and never shipped from a pack tree. If the copy
-fails, or the file is unreadable or resolves outside the consumer tree (a
-symlink, or a symlinked directory above it), it is left untouched and the sync exits 1.
+fails, or the file is unreadable, it is left untouched and the sync exits 1.
+No pack file is ever written through a symlink out of the repo: a path that
+resolves outside the consumer tree (a dangling or outside symlink, or a
+symlinked directory above it) is skipped with a
+`skipped <path>: resolves outside the repo` note, its manifest record kept,
+and the sync still exits 0. A link to the very pack file it would copy (the
+`--link-skills` case, run from that checkout) is already current and left
+alone silently. Symlinks that stay inside the repo are followed.
 
 In a consumer repo it also maintains a generated block inside that repo's
 `AGENTS.md`, delimited by markers — content outside the markers is preserved

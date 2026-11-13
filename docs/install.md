@@ -200,9 +200,21 @@ A file at a pack path that sync-pack **never wrote** (no manifest entry) and
 whose content differs is backed up before it is replaced:
 `warning: pre-existing file overwritten: <path> (backup: <path>.pre-sdlc.bak)`.
 This holds in every pack dir, harness dirs included. A file it cannot back
-up (unreadable, a failed copy, or resolving outside the consumer tree through
-a symlink, such as a `--link-skills` dir) is left alone, reported on
-stderr, and the sync exits 1.
+up (unreadable, or a failed copy) is left alone, reported on stderr, and the
+sync exits 1.
+
+**Symlinks out of the repo are never written through.** A pack path that
+resolves outside the consumer tree, at the file itself or at any dir above
+it, is skipped: a dangling symlink (its target is not created), a pack dir
+such as `.kiro/steering` linked to a dir elsewhere, or a skill dir
+`tkt init --link-skills` pointed at another checkout. Each prints
+`skipped <path>: resolves outside the repo`, the sync still exits 0, and
+`--check` does not report the path as missing. If the manifest already
+records the path, the record is kept, so the file is not retired or pruned.
+Symlinks that stay inside the repo keep working: linking `.kiro/steering`
+to `docs/steering` in the same repo installs the files there. A path that
+is a link to the very pack file it would copy is already current and is
+left alone without a note.
 
 `sync-pack` only ever writes the paths recorded in `.sdlc/pack-manifest.json`,
 and deletes nothing unless you pass `--prune`. A re-run against an unchanged pack
