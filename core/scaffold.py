@@ -158,7 +158,7 @@ def init(provider: str | None, target_dir: str, force: bool,
          link_skills: bool, sample: bool, interactive: bool,
          detect_build: bool = True, project: str | None = None,
          board_dir: str | None = None, inherit: bool = True,
-         stop: Path | None = None) -> int:
+         stop: Path | None = None, detect_repo: bool = True) -> int:
     providers = available_providers()
     tty = interactive and sys.stdin.isatty()
 
@@ -233,7 +233,9 @@ def init(provider: str | None, target_dir: str, force: bool,
     build_notes = []
     if detect_build:
         text, build_notes = _seed_build(text, target)
-    text, repo_notes, repo = _seed_repo(text, target)
+    repo_notes, repo = [], None
+    if detect_repo:
+        text, repo_notes, repo = _seed_repo(text, target)
 
     # Re-parse what we built; a mismatch means the text surgery went wrong.
     retry = "; re-run with --no-inherit" if parent else ""
@@ -362,20 +364,25 @@ def _seed_build(text: str, target: Path) -> tuple[str, list[str]]:
     return toolchain.apply_to_config(text, found), notes
 
 
-_SEG_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_OWNER_RE = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_.-]*$")
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 # scp-like `[user@]host:path`; git reads it as a URL only when no `/`
 # comes before the first `:`
 _SCP_RE = re.compile(r"^(?:(?P<user>[^@/\s]+)@)?(?P<host>[^@:/\s]+):(?P<path>\S*)$")
 _URL_SCHEMES = {"https", "http", "ssh", "git", "git+ssh", "ssh+git"}
+# well-known hosts that are not GitHub (subdomains included); an unknown
+# host is taken as GitHub, since it may be a ~/.ssh/config alias
+_NON_GITHUB_HOSTS = ("gitlab.com", "bitbucket.org", "codeberg.org",
+                     "dev.azure.com", "ssh.dev.azure.com", "visualstudio.com")
 # variables a git hook exports that would point `git -C <target>` elsewhere
 _GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
 
 
-def parse_remote(url: str) -> str | None:
-    """`owner/repo` from a GitHub-style remote URL: scp-like SSH (any host,
-    so `~/.ssh/config` aliases such as `git@github-work:o/r.git` work),
-    `ssh://`, `git://` or HTTP(S). None for anything else, including local
-    paths and paths that are not exactly two segments."""
+def _split_remote(url: str) -> tuple[str, str] | None:
+    """(host, owner/repo) from an scp-like SSH, `ssh://`, `git://` or
+    HTTP(S) remote URL; None for anything else, including local paths and
+    paths that are not exactly two segments. The host never carries
+    credentials."""
     url = url.strip()
     if "://" in url:
         try:
@@ -391,28 +398,59 @@ def parse_remote(url: str) -> str | None:
         # a one-letter host with no user is a Windows drive (`C:/src/x`)
         if not m or (len(m.group("host")) == 1 and not m.group("user")):
             return None
-        path = m.group("path")
+        host, path = m.group("host"), m.group("path")
     path = path.strip("/")
-    if path.endswith(".git"):
+    if path.lower().endswith(".git"):
         path = path[:-len(".git")]
     segs = path.split("/")
-    if len(segs) != 2 or not all(_SEG_RE.match(s) and s not in (".", "..")
-                                 for s in segs):
+    if len(segs) != 2 or not (_OWNER_RE.match(segs[0]) and _REPO_RE.match(segs[1])) \
+            or any(s in (".", "..") for s in segs):
         return None
-    return path
+    return host.lower(), path
 
 
-def _origin_url(target: Path) -> str | None:
-    """`git remote get-url origin` for the repo holding `target`; None when
-    git is missing, `target` is not in a repo, or there is no origin."""
+def _github_host(host: str) -> bool:
+    return not any(host == h or host.endswith("." + h) for h in _NON_GITHUB_HOSTS)
+
+
+def parse_remote(url: str) -> str | None:
+    """`owner/repo` from a GitHub remote URL: scp-like SSH (any host, so
+    `~/.ssh/config` aliases such as `git@github-work:o/r.git` work),
+    `ssh://`, `git://` or HTTP(S). None for anything else, including a
+    well-known non-GitHub host."""
+    split = _split_remote(url)
+    return split[1] if split and _github_host(split[0]) else None
+
+
+def _git(target: Path, *args: str) -> str | None:
+    """stdout of `git -C target ARGS`, stripped; None when git is missing,
+    fails or prints nothing."""
     env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_ENV}
     try:
-        r = subprocess.run(["git", "-C", str(target), "remote", "get-url", "origin"],
+        r = subprocess.run(["git", "-C", str(target), *args],
                            capture_output=True, encoding="utf-8",
                            errors="replace", timeout=10, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
     return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def _origin_url(target: Path) -> tuple[str | None, str]:
+    """(origin URL, why not) for the repo rooted at `target`. The URL is
+    None when git is missing, `target` is not the top of its own repo (an
+    enclosing repo's origin is not this project's), or there is no origin;
+    the reason then says which."""
+    top = _git(target, "rev-parse", "--show-toplevel")
+    if top is None:
+        return None, "not a git repo"
+    try:
+        own = os.path.samefile(top, target)
+    except OSError:
+        own = False
+    if not own:
+        return None, "not the top of its own git repo"
+    url = _git(target, "remote", "get-url", "origin")
+    return url, "" if url else "no git origin remote"
 
 
 def _seed_repo(text: str, target: Path) -> tuple[str, list[str], str | None]:
@@ -428,13 +466,16 @@ def _seed_repo(text: str, target: Path) -> tuple[str, list[str], str | None]:
     if vcs.get("provider") != "github" or not isinstance(cur, str) \
             or cur not in _REPO_PLACEHOLDERS:
         return text, [], None
-    url = _origin_url(target)
-    repo = parse_remote(url) if url else None
-    if repo is None:
+    url, why = _origin_url(target)
+    split = _split_remote(url) if url else None
+    if url and split is None:
         # never echo the URL: an HTTPS remote can carry a token
-        why = ("no git origin remote" if not url
-               else "git origin remote is not an owner/repo URL")
+        why = "git origin remote is not an owner/repo URL"
+    elif split and not _github_host(split[0]):
+        why = f"git origin remote is on {split[0]}, not GitHub"
+    if why:
         return text, [f'  {why}; [vcs].repo left as "{cur}" (edit by hand)'], None
+    repo = split[1]
     return (tomledit.set_keys(text, "vcs", {"repo": repo}),
             [f"  detected [vcs].repo = {repo} (from the git origin remote)"], repo)
 

@@ -92,7 +92,8 @@ tkt doctor                        # validate auth + board model
 `--dir` (target, default cwd), `--force` (overwrite existing config; a symlinked
 config is replaced by a regular file), `--link-skills` (symlink the pack into
 `.claude/`), `--sample` (markdown starter ticket), `--no-detect-build` (skip
-toolchain detection), `--project KEY` (markdown/jira: `[ticketing].project`;
+toolchain detection), `--no-detect-repo` (skip origin-remote detection),
+`--project KEY` (markdown/jira: `[ticketing].project`;
 linear: `[linear].team_key`; openkanban: `[openkanban].project`, a name or id;
 rejected for github, which is identified by `[github].repo`), `--board-dir PATH`
 (markdown board dir, written as given; the state dir becomes its sibling
@@ -139,10 +140,13 @@ keep the example's value.
 (`git@github.com:owner/repo.git`, including `~/.ssh/config` host aliases such
 as `git@github-work:owner/repo.git`, and `ssh://`) and HTTPS remotes
 (`https://github.com/owner/repo.git`, credentials and port ignored). This is
-advisory: with no git, no `origin`, or a remote that isn't a two-segment
-`owner/repo` path, the placeholder stays and `init` prints a note (never the
-URL, which may carry a token). `[github].repo`, the issue repo for
-`--provider github`, is not touched.
+advisory: the placeholder stays and `init` prints a note when there is no git,
+the target dir is not the top of its own repo (an enclosing repo's origin is
+not used), there is no `origin`, the remote isn't a two-segment `owner/repo`
+path, or it is on a well-known non-GitHub host (GitLab, Bitbucket, Codeberg,
+Azure DevOps; the note names the host). The note never shows the URL, which
+may carry a token. `--no-detect-repo` skips the check. `[github].repo`, the
+issue repo for `--provider github`, is not touched.
 
 Manual equivalent, if you prefer:
 
@@ -238,7 +242,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L] [--due D] [--scheduled D] [--completed D] [--agent-status S]` | edit content/fields in place (only flags passed change; status excluded — use `transition`). `--body` replaces the whole description, as `create --body` sets it (on markdown: everything under the `# summary`, keeping the backend-managed `## Comments` log); `--summary` alone leaves the body untouched. Dates are ISO `YYYY-MM-DD`; pass `""` to clear. `--agent-status` is the agent execution state (`idle`/`processing`/`waiting`/`done`/`blocked`, `""` to clear) a board can surface; markdown backend only. | normalized ticket / `--json` |
 | `tkt apply --new --file F` / `tkt apply KEY --file F` | create / update a ticket from a full markdown doc (frontmatter + body; `-` = stdin). Owns the doc except `status` (use `transition`) and backend-managed sections (Comments), preserved verbatim. | new/updated key / `--json` ticket |
 | `tkt apply --template` | print the create-document template the editor opens with | markdown doc |
-| `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample] [--no-detect-build] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/config.toml` (+ optionally link the pack); markdown joins a parent dir's shared board | next-steps summary |
+| `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample] [--no-detect-build] [--no-detect-repo] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/config.toml` (+ optionally link the pack); seeds `[build]` from the project's package manager and `[vcs].repo` from the git origin remote; markdown joins a parent dir's shared board | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
 | `tkt cfg route PHASE` | resolve a pipeline phase (skill name) to `harness`, `model`, `tier`, `cmd`, `source` via `[routes]`/`[harnesses]`/`[models]`/`[run]` (see [Phase routing](#phase-routing-harnesses--routes)). Config-only; exit 4 when nothing is configured, 2 when a table is invalid. | text / `--json` |
