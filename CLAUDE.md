@@ -91,6 +91,8 @@ markdown board scoping (`test_markdown_scope.py`, `test_markdown_scope_edges.py`
 `tkt list --all-projects` dropping project scoping on markdown and Jira
 and being accepted by every adapter (`test_list_all_projects.py`),
 markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
+markdown refusing a ticket key that would escape the board folder
+(`test_markdown_key_escape.py`),
 markdown description and wrapped acceptance items, with fenced or
 indented headings ignored (`test_markdown_description.py`,
 `test_markdown_acceptance.py`), wrapped and nested (ordered, `+`)
