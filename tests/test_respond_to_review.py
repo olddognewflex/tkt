@@ -22,6 +22,17 @@ rule at random. The rule now splits by reviewer: a won't-fix on an automated
 reviewer's repeated nit is justified on the thread and resolved (a bot cannot
 reply, and its open thread would block step 9's exit forever); a won't-fix on
 a human reviewer's comment is justified on the thread and left open for them.
+
+TKT-67: step 6 ran the path-in-diff check on `question` threads too, so an
+answer, which changes no file, was never resolved; the never-resolve list
+still blocks any thread whose path is missing from the diff, and step 5
+fails outright on a round that only answered questions (nothing to commit).
+The condensed mirrors never said to resolve an answered thread at all, while
+their loop exit allows no open human thread except one left open on purpose,
+so an answered question held the loop until the cycle cap.
+
+TKT-69: the condensed mirrors use `$PR` without saying where it comes from;
+each now declares the PR number and ticket key as inputs.
 """
 import os
 import re
@@ -273,7 +284,7 @@ class MissingFix(unittest.TestCase):
             CANONICAL.read_text(encoding="utf-8"),
             "6. Resolve addressed threads + post fix summaries").split())
         rule = step[step.index("Not in the diff"):]
-        rule = rule[:rule.index("2. **Post")]
+        rule = rule[:rule.index("2. **")]
         self.assertNotIn("re-categorize as `partial`", rule)
         self.assertIn("redo it next cycle", rule)
 
@@ -286,6 +297,126 @@ class MissingFix(unittest.TestCase):
         check = step[step.index("1. **"):step.index("Not in the diff")]
         self.assertRegex(check, r"For an `addressed` thread")
         self.assertRegex(check, r"[Qq]uestions skip this check")
+
+
+STEP_6 = "6. Resolve addressed threads + post fix summaries"
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+class AnsweredQuestions(unittest.TestCase):
+    """TKT-67: an answered question is resolved without a diff check."""
+
+    def setUp(self):
+        self.text = CANONICAL.read_text(encoding="utf-8")
+        self.step6 = _flat(_section(self.text, STEP_6))
+
+    def test_step_6_routes_questions_past_the_diff_check(self):
+        # The intro scopes items 1 (diff check) and 2 (fix summary) to
+        # `addressed` threads and sends a `question` straight to resolve.
+        intro = self.step6[:self.step6.index("1. **")]
+        self.assertRegex(intro, r"[Ii]tems 1 and 2 apply to `addressed` "
+                                r"threads only")
+        self.assertRegex(intro, r"`question` thread.*?straight to item 3")
+
+    def test_fix_summary_is_for_addressed_threads_only(self):
+        item = self.step6[self.step6.index("2. **"):self.step6.index("3. **")]
+        self.assertIn("**For an `addressed` thread, post a fix-summary reply", item)
+
+    def test_never_resolve_rule_scopes_the_path_check(self):
+        # An unqualified "the path isn't in the commit diff" still matches
+        # every answered question and keeps it open.
+        rule = self.step6[self.step6.index("**Never resolve when:**"):]
+        self.assertNotRegex(rule, r"or the path isn't in the commit diff")
+        self.assertIn("an `addressed` thread's path isn't in the commit diff",
+                      rule)
+
+    def test_resolution_log_includes_answered_questions(self):
+        item = self.step6[self.step6.index("4. **"):
+                          self.step6.index("**Never resolve when:**")]
+        self.assertRegex(item, r"`question`")
+        self.assertIn("the summary is the answer", item)
+
+    def test_diff_check_covers_only_this_round(self):
+        # `HEAD~1 HEAD` is the previous round's commit when this round
+        # committed nothing: an unlanded fix would pass on a stale file.
+        step3 = _section(self.text, "3. Address change requests")
+        self.assertRegex(step3, r"BASE=\$\(git rev-parse HEAD\)")
+        check = self.step6[self.step6.index("1. **"):
+                           self.step6.index("Not in the diff")]
+        self.assertIn('git diff --name-only "$BASE" HEAD', check)
+        self.assertNotIn("HEAD~1", self.step6)
+
+    def test_step_5_survives_a_round_with_nothing_to_commit(self):
+        # A round that only answered questions changes no file: a bare
+        # `git commit` exits non-zero and the `&& git push` chain stops.
+        step = _section(self.text, "5. Commit and push")
+        self.assertRegex(step, r'if \[ -n "\$\(git status --porcelain\)" \]; '
+                               r'then\n\s+git add -A && git commit [^\n]*\nfi\n')
+        # The push still runs: an earlier round's commit may be unpushed.
+        self.assertRegex(step, r"(?m)^git push$")
+        self.assertRegex(step, r"SHA=\$\(git rev-parse --short HEAD\)")
+
+
+    def test_step_8_does_not_claim_pushed_fixes(self):
+        step = _section(self.text, "8. Re-request review + move back to review lane")
+        self.assertNotRegex(step, r"[Ff]ixes pushed|Pushed fixes")
+
+
+class MirrorAnsweredQuestions(unittest.TestCase):
+    """TKT-67: every condensed mirror resolves an answered thread."""
+
+    def test_condensed_mirrors_resolve_answered_questions(self):
+        for rel in CONDENSED_MIRRORS:
+            with self.subTest(path=rel):
+                text = (ROOT / rel).read_text(encoding="utf-8")
+                lines = [ln for ln in text.splitlines()
+                         if re.search(r"\bresolve", ln, re.IGNORECASE)
+                         and "answered" in ln]
+                self.assertEqual(len(lines), 1, lines)
+                line = lines[0]
+                # The fix needs the diff check; the answer must not get it.
+                self.assertIn("pushed diff", line)
+                self.assertIn("no diff check", line)
+                # A partial fix's file is in the diff too.
+                self.assertIn("whole fix", line)
+                self.assertRegex(line, r"never a partial")
+                # gh has no resolve command; name the GraphQL mutation.
+                self.assertIn("resolveReviewThread", line)
+
+    def test_condensed_mirrors_skip_an_empty_commit(self):
+        for rel in CONDENSED_MIRRORS:
+            with self.subTest(path=rel):
+                text = (ROOT / rel).read_text(encoding="utf-8")
+                self.assertIn("skip the commit when nothing changed", text)
+                # `git commit ... && git push` never pushes on an empty round.
+                self.assertNotRegex(text, r"git commit [^\n`]*&& git push")
+
+
+class MirrorInputs(unittest.TestCase):
+    """TKT-69: a mirror that uses `$PR` says where it comes from."""
+
+    INPUT = re.compile(r"^\W*Input:.*`\$PR`.*`\$KEY`", re.MULTILINE)
+
+    def test_condensed_mirrors_declare_pr_and_key(self):
+        for rel in CONDENSED_MIRRORS:
+            with self.subTest(path=rel):
+                text = (ROOT / rel).read_text(encoding="utf-8")
+                if "$PR" not in text:
+                    continue
+                m = self.INPUT.search(text)
+                self.assertIsNotNone(m, "no Input line declaring $PR and $KEY")
+                # Before the first command that uses it.
+                self.assertGreaterEqual(text.index("$PR"), m.start())
+                self.assertIn("gh pr view --json number", m.group(0))
+
+    def test_every_condensed_mirror_uses_pr(self):
+        # Guards the `continue` above: today every mirror uses `$PR`.
+        for rel in CONDENSED_MIRRORS:
+            with self.subTest(path=rel):
+                self.assertIn("$PR", (ROOT / rel).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

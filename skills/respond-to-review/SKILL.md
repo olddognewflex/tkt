@@ -106,6 +106,13 @@ Record the outcome per thread — this decides what gets resolved:
 
 ### 3. Address change requests
 
+Before the first change of this round, record where it starts, so step 6
+checks only what this round committed:
+
+```shell
+BASE=$(git rev-parse HEAD)
+```
+
 For each `addressed` thread: make the code change and verify it builds/tests
 (`tkt cfg build.*`). **Do not reply yet** — fix-summary replies cite the commit
 SHA, which doesn't exist until step 5.
@@ -130,35 +137,47 @@ gh pr comment "$PR" --repo "$REPO" --body "Re: <question> — <answer>"
 ### 5. Commit and push
 
 ```shell
-git add -A && git commit -m "fix(<scope>): address review feedback" && git push
+if [ -n "$(git status --porcelain)" ]; then
+  git add -A && git commit -m "fix(<scope>): address review feedback"
+fi
+git push
 SHA=$(git rev-parse --short HEAD)
 ```
 
+A round that only answered questions changes no file, so there is nothing to
+commit: skip the commit when nothing changed (a bare `git commit` would exit
+non-zero). Push regardless: it also sends any commit made earlier this round,
+and is a no-op when the branch is up to date. With no commit this round,
+`$BASE..HEAD` is empty, so no `addressed` thread passes step 6's diff check.
+
 ### 6. Resolve addressed threads + post fix summaries
 
-For each thread categorized `addressed` or `question`:
+This step covers every thread categorized `addressed` or `question`. Items 1
+and 2 apply to `addressed` threads only. A `question` thread was answered on
+its thread in step 4 and an answer changes no file, so it goes straight to
+item 3 (resolve) and item 4 (log): never run the diff check on it.
 
 1. **For an `addressed` thread, verify the fix is actually in the diff.** A
    thread whose file was never touched must not be marked resolved.
    (Questions skip this check: an answer changes no file.)
 
    ```shell
-   git diff --name-only HEAD~1 HEAD | grep -Fxq "<path>"
+   git diff --name-only "$BASE" HEAD | grep -Fxq "<path>"
    ```
 
    Not in the diff → the fix didn't land: skip it, leave the thread
    unresolved, and redo it next cycle. It is not a `partial`, which is a
    change you deliberately made only part of.
 
-2. **Post a fix-summary reply** on the thread:
+2. **For an `addressed` thread, post a fix-summary reply** on the thread:
 
    ```shell
    gh api "repos/$OWNER/$NAME/pulls/$PR/comments/<comment-id>/replies" \
      -f body="Fixed in \`$SHA\`: updated \`<file>\` — <one-line change summary>"
    ```
 
-   Questions were already answered on their thread in step 4; go straight to
-   resolving.
+   Questions were already answered on their thread in step 4: no fix
+   summary.
 
 3. **Resolve the thread:**
 
@@ -171,7 +190,8 @@ For each thread categorized `addressed` or `question`:
      }' -F threadId="$THREAD_ID"
    ```
 
-4. **Accumulate a resolution log entry** for step 7:
+4. **Accumulate a resolution log entry** for step 7, for an `addressed` and a
+   `question` thread alike (for a question, the summary is the answer):
 
    ```
    • [`<file>:<line>`](https://github.com/$OWNER/$NAME/blob/$SHA/<file>#L<line>): <summary>
@@ -179,10 +199,11 @@ For each thread categorized `addressed` or `question`:
 
 **Never resolve when:** the fix is partial; the comment is ambiguous and needs
 reviewer confirmation; the thread bundles several requests and only some are done;
-it is a human reviewer's comment you won't fix; or the path isn't in the commit
-diff. Leave those threads open **without** a fix-summary reply — a summary on an
-unresolved thread misleads the reviewer. (A won't-fix justification is not a
-fix summary; post it.)
+it is a human reviewer's comment you won't fix; or an `addressed` thread's path
+isn't in the commit diff (an answered `question` is never held by this). Leave
+those threads open **without** a fix-summary reply — a summary on an unresolved
+thread misleads the reviewer. (A won't-fix justification is not a fix summary;
+post it.)
 
 ### 7. Post the consolidated resolution log
 
@@ -213,10 +234,10 @@ for R in $(tkt cfg vcs.reviewers --json | jq -r '.[]'); do
   gh api -X POST "repos/$OWNER/$NAME/pulls/$PR/requested_reviewers" -f "reviewers[]=$R" 2>/dev/null || true
 done
 
-WL=$(tkt worklog "$KEY" --from-role in_progress --note "Revise cycle — fixes pushed, re-review requested" --json)
+WL=$(tkt worklog "$KEY" --from-role in_progress --note "Revise cycle — feedback addressed, re-review requested" --json)
 tkt transition "$KEY" review
 tkt edit "$KEY" --agent-status waiting
-tkt comment "$KEY" "Pushed fixes, re-requested review. Time in In Progress (revise cycle): \
+tkt comment "$KEY" "Addressed review feedback, re-requested review. Time in In Progress (revise cycle): \
 $(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id)). \
 Resolved $RESOLVED_COUNT review thread(s); $OPEN_COUNT left open for the reviewer."
 ```
