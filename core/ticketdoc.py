@@ -157,6 +157,81 @@ def is_list_marker(s: str, bullets: str = "-*") -> bool:
     return bool(s) and s[0] in bullets and (len(s) == 1 or s[1] in " \t")
 
 
+_ACCEPTANCE_HEADINGS = ("## acceptance", "acceptance criteria", "### acceptance")
+_ORDERED_MARKER = re.compile(r"^\d{1,9}[.)](?:[ \t]|$)")
+_ATX_HEADING = re.compile(r"^#{1,6}(?:[ \t]|$)")
+
+
+def _structural(line: str) -> bool:
+    """At most three spaces of indent and no tab: deeper is indented code
+    (or text inside a list item), so not a heading."""
+    lead = indent_of(line)
+    return "\t" not in lead and len(lead) <= 3
+
+
+def _opens_item(s: str) -> bool:
+    """`s` (stripped) opens a list item: a `-`, `*`, `•` or `+` bullet, or
+    an ordered `1.` / `1)` marker, followed by whitespace or nothing."""
+    return is_list_marker(s, "-*•+") or bool(_ORDERED_MARKER.match(s))
+
+
+def _item_text(s: str) -> str | None:
+    """The text of the list item `s` (stripped) opens, or None. Any line
+    starting `-`, `*` or `•` is an item, as it always was here; `+` and
+    ordered markers need the whitespace after them."""
+    if s.startswith(("-", "*", "•")):
+        return s.lstrip("-*• ").strip()
+    if is_list_marker(s, "+"):
+        return s[1:].strip()
+    m = _ORDERED_MARKER.match(s)
+    return s[m.end():].strip() if m else None
+
+
+def extract_acceptance(body: str | None) -> list[str]:
+    """Acceptance items of a free-form issue description, as the github,
+    linear and openkanban backends store one. (The markdown board reads
+    its own layout in `adapters/markdown.py`'s `_read_body`.)
+
+    Every list item under an acceptance heading is one criterion, nested
+    ones included, bulleted (`-`, `*`, `•`, `+`) or ordered (`1.`,
+    `1)`); the marker is dropped. The section ends at the next heading
+    or at unindented prose. An indented line right after an item
+    continues it, joined with one space, unless it opens a list item or
+    is a heading. A blank line or a fence ends the item; an indented
+    line that continues no item (an item's second paragraph) is skipped.
+    Fenced lines are content, never headings or items, and a line
+    indented four or more spaces is never a heading."""
+    out: list[str] = []
+    capture = open_item = False
+    lines = (body or "").splitlines()
+    for line, code in zip(lines, code_mask(lines)):
+        s = line.strip()
+        if code:
+            open_item = False
+            continue
+        heading = _structural(line) and bool(_ATX_HEADING.match(s))
+        if (capture and open_item and s and indent_of(line)
+                and not heading and not _opens_item(s)):
+            out[-1] = f"{out[-1]} {s}".strip()
+            continue
+        if _structural(line) and s.lower().startswith(_ACCEPTANCE_HEADINGS):
+            capture = True
+            open_item = False
+            continue
+        if capture:
+            item = _item_text(s)
+            if item is not None:
+                out.append(item)
+                open_item = True
+            elif heading:
+                break
+            elif not s or indent_of(line):
+                open_item = False
+            else:
+                break
+    return out
+
+
 def _norm_name(text: str) -> str:
     """A heading's name as the format gates compare it: closing `#`s
     dropped, whitespace collapsed, lowercased, a trailing colon dropped."""

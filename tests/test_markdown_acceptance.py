@@ -249,7 +249,7 @@ class OpenKanbanAcceptance(unittest.TestCase):
     def test_blank_line_ends_the_item(self):
         self.assertEqual(
             _extract_acceptance("## Acceptance\n- one\n\n  stray\n- two\n"),
-            ["one"])
+            ["one", "two"])
 
     def test_fenced_heading_is_content(self):
         self.assertEqual(
