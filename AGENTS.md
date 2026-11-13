@@ -32,6 +32,10 @@ separate harness-specific files).
      - `tkt cfg build.typecheck`
      - `tkt cfg deploy.staging_workflow`
      - `tkt cfg deploy.production_workflow`
+     - `tkt cfg route <phase> --json` resolves a phase to `{phase, harness,
+       model, tier, cmd, source}`; exit 4 = nothing configured, proceed on
+       the session default. An empty `cmd` means run it on the current
+       harness with `model`.
      - `tkt schedule --json` for after-hours handling (optional `[schedule]`
        table: `after_hours_label`, `business_hours`, `timezone`, `days`). Never
        compute the window in shell; `in_window` is false and `enabled` false
@@ -97,6 +101,7 @@ separate harness-specific files).
 | `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
 | `tkt schedule [--at ISO]` | is it business hours now, per `[schedule]` (config + clock, no backend) |
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
+| `tkt cfg route PHASE` | resolve a phase to harness + model via `[routes]`/`[harnesses]`/`[models]`/`[run]` (config-only) |
 | `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager; markdown joins a parent dir's shared board, key derived from the dir name) |
 | `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check] [--prune]` | install the pack into a consumer repo as committed copies |
 | `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |

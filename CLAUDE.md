@@ -67,8 +67,9 @@ cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
 (`test_github_scope.py`), `select-ticket` surfacing `tkt` errors instead of
 skipping a tier and never selecting a container or a ticket with open
 children, run against a stub `tkt` under every available shell
-(`test_select_ticket.py`), the after-hours window (`test_schedule.py`), the
-Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
+(`test_select_ticket.py`), the after-hours window (`test_schedule.py`),
+phase routing (`[harnesses]`/`[routes]`, `tkt cfg route`, its validation
+and doctor row; `test_routing.py`), the Jira Markdown→ADF converter (`test_jira_adf.py`), Jira transition verification
 (`test_jira_transition.py`), `tkt activity` on Jira (window bounds,
 timestamp parsing, comment/changelog pagination; `test_jira_activity.py`)
 and its CLI window validation, ordering and output (`test_activity_cli.py`),
@@ -225,6 +226,11 @@ Two layers, connected only by the verb contract and the normalized schema:
     silently disabled hold) and answers "is it business hours now". Skills ask
     it instead of doing clock maths in shell, which behaved differently under
     zsh, bash and dash.
+  - `routing.py` — `[harnesses]` / `[routes]` and `tkt cfg route <phase>`:
+    resolves a phase (skill name) to harness cmd + model, route first, then
+    the skill's `model_tier` (read from tkt's own `skills/`) through
+    `[models]`, then `[run].harness_cmd`. Validated on use, like
+    `[enforcement]`; also the `routing` doctor row (missing harness = warning).
   - `run.py` — the `tkt run` external loop driver, and the only writer of run
     state: phase markers (ticket comment + `marker.json` mirror), the `run.log`
     JSONL, the STOP file, and `heartbeat.json`. The heartbeat runs on a daemon
