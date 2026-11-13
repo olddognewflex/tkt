@@ -131,6 +131,19 @@ cheap    = "claude-haiku-4-5"
 standard = "claude-sonnet-5"
 deep     = "claude-opus-5"
 
+# Phase routing (optional; `tkt cfg route <phase> --json` resolves it). A route
+# sends one phase (skill name) to a named harness with a pinned model or a
+# tier read from [models]. Unrouted phases use the skill's model_tier, then
+# [run].harness_cmd. {model} is filled (shell-quoted); {prompt} is left for
+# the caller. Verify the codex flags against your installed codex CLI.
+# [harnesses.claude]
+# cmd = "claude -p {prompt} --model {model} --permission-mode acceptEdits"
+# [harnesses.codex]
+# cmd = "codex exec --model {model} --sandbox read-only {prompt}"
+# [routes]
+# self-review = { harness = "codex", model = "gpt-5.5" }
+# plan-ticket = { harness = "claude", tier = "deep" }
+
 [timetracking]
 provider = "none"        # GitHub has no time tracking; worklog/lane-time are no-ops
 

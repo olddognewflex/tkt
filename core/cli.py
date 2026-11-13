@@ -337,7 +337,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "time without an offset is read in [schedule].timezone")
 
     sp = add("cfg")
-    sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo")
+    sp.add_argument("key", help="dotted config path, e.g. build.test or vcs.repo; "
+                                "`route` resolves a phase to harness + model")
+    sp.add_argument("phase", nargs="?", default=None,
+                    help="with `route`, the phase/skill name to resolve")
     sp.add_argument("--pkg", default="", help="substitute {pkg} in the value")
     sp.add_argument("--ticket", default="", help="substitute {key}/{key-lower}")
     sp.add_argument("--slug", default="", help="substitute {slug}")
@@ -485,6 +488,15 @@ def main(argv: list[str]) -> int:
             return cmd_schedule(config, args.at, args.json)
 
         if args.verb == "cfg":
+            # `route` is pure config too: [routes]/[harnesses]/[models]/[run].
+            if args.key == "route":
+                if not args.phase:
+                    raise UsageError("cfg route requires a PHASE, e.g. tkt cfg route self-review")
+                from .routing import cmd_route
+                return cmd_route(config, args.phase, args.json)
+            if args.phase is not None:
+                raise UsageError(f"cfg {args.key}: unexpected argument '{args.phase}' "
+                                 f"(only `cfg route` takes a PHASE)")
             # `priorities` is backend-aware (jira maps to its own scheme), so it
             # resolves through the adapter rather than a raw config lookup.
             if args.key == "priorities":
@@ -706,6 +718,10 @@ def main(argv: list[str]) -> int:
             pack_c = doctor_check(config)
             if pack_c is not None:
                 checks = checks + [pack_c]
+            from .routing import doctor_check as routing_check
+            route_c = routing_check(config)
+            if route_c is not None:
+                checks = checks + [route_c]
             from .scaffold import doctor_check as placeholder_check
             ph = placeholder_check(config)
             if ph is not None:

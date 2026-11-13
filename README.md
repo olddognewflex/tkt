@@ -230,6 +230,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample] [--no-detect-build] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/config.toml` (+ optionally link the pack); markdown joins a parent dir's shared board | next-steps summary |
 | `tkt lane ROLE` | resolve ROLE → provider lane name | string (config-only, no backend) |
 | `tkt cfg DOTTED.KEY [--pkg X] [--ticket K] [--slug S]` | read a config value; substitutes `{pkg}`/`{key}`/`{key-lower}`/`{slug}` | string / `--json` |
+| `tkt cfg route PHASE` | resolve a pipeline phase (skill name) to `harness`, `model`, `tier`, `cmd`, `source` via `[routes]`/`[harnesses]`/`[models]`/`[run]` (see [Phase routing](#phase-routing-harnesses--routes)). Config-only; exit 4 when nothing is configured, 2 when a table is invalid. | text / `--json` |
 | `tkt schedule [--at ISO]` | after-hours window from `[schedule]`: `enabled`, `in_window`, `label`, local time and day. Config + clock only; exit 2 on a malformed table. `--at` evaluates another time. | text / `--json` |
 | `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every agent run at once. Filesystem-only — no backend call without `--enrich`; empty board is exit 0. | table / `--json` |
 | `tkt doctor` | validate auth + reachability + board model | checks; exit 1 if any fail |
@@ -812,6 +813,48 @@ harness_cmd = "codex exec {prompt}"
 
 On Windows the same commands work when the harness CLI is on `PATH`; reference
 `.cmd`/`.ps1` wrappers directly if that's how it was installed.
+
+### Phase routing (`[harnesses]` + `[routes]`)
+
+A project can send individual pipeline phases (skill names) to a different
+harness or model, e.g. self-review on Codex while planning stays on Claude:
+
+```toml
+[harnesses.claude]
+cmd = "claude -p {prompt} --model {model} --permission-mode acceptEdits"
+
+[harnesses.codex]
+cmd = "codex exec --model {model} --sandbox read-only {prompt}"
+
+[routes]                       # key = skill / phase name
+self-review = { harness = "codex", model = "gpt-5.5" }
+plan-ticket = { harness = "claude", tier = "deep" }   # tier resolves through [models]
+```
+
+A harness has one key, `cmd`, which must contain `{prompt}` and parse as a
+shell command line. A route takes `harness` (a defined `[harnesses]` name),
+and `model` *or* `tier` (`cheap`/`standard`/`deep`); either alone is fine.
+`tkt cfg route PHASE [--json]` resolves in this order:
+
+1. a `[routes].PHASE` entry (`source: "route"`): its model, or its tier
+   through `[models]` (a tier with no `[models]` entry is an error), or, for a
+   harness-only route, the skill's own `model_tier` through `[models]`. Its
+   `cmd` is the harness's, else `[run].harness_cmd`;
+2. the skill's `model_tier` (from tkt's own `skills/PHASE/SKILL.md`) through
+   `[models]` (`source: "tier"`), with `[run].harness_cmd`;
+3. `[run].harness_cmd` alone (`source: "default"`, empty `model`).
+
+The output fields are `phase`, `harness` (`""` when none), `model`, `tier`,
+`cmd` and `source`. `{model}` in `cmd` is filled, shell-quoted; `{prompt}` is
+left verbatim for the caller. An empty `cmd` (no harness and no
+`[run].harness_cmd`) means run the phase on the current harness with `model`.
+A model may not contain braces. Exit 4 means nothing is configured for the phase
+(run it on the session default); exit 2 means a table is invalid, or `cmd`
+uses `{model}` and no model resolves. Both tables are validated whole on use,
+so a typo anywhere fails every lookup, and `tkt doctor` reports a `routing`
+row that also resolves every route (a routed harness missing from `PATH`,
+or one whose program needs a shell to expand, is a warning, never a failure).
+`tkt run` and the skills do not consume routes yet; that lands in follow-ups.
 
 ### Resume model
 
