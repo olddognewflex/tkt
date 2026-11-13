@@ -34,6 +34,11 @@ Guarantees:
     Symlinks that stay inside the tree (a pack dir linked to a shared dir in
     the same repo) are followed as before, and a path that links to the very
     pack file it would copy is already current, so it is left alone silently.
+    AGENTS.md follows the same rule: resolving outside, its block is neither
+    read nor written and its `AGENTS.md#tkt-pack` record is kept (an in-repo
+    `AGENTS.md -> CLAUDE.md` is followed). The manifest is stricter: one
+    resolving outside (a symlinked `.sdlc`) refuses the whole sync, and
+    `--check`, with a UsageError before anything is read or written.
 
 Base layer: some dirs ship on every sync, whatever harnesses are selected
 (`_BASE_LAYER`): the `.agents/skills` mirror, `.agents/workflows`,
@@ -1106,6 +1111,17 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             "sync-pack installs INTO a separate consumer repo, not over the pack")
 
     manifest_path = target / MANIFEST_REL
+    # A manifest that resolves outside the tree (`.sdlc` linked to a shared
+    # dir, or the manifest itself a dangling outside link) is refused before
+    # anything is read or written. Skipping only it would make every later
+    # run treat all files as pre-existing, and two repos sharing one `.sdlc`
+    # would overwrite each other's record.
+    if not _within(manifest_path, target):
+        raise UsageError(
+            f"{MANIFEST_REL} in {target} resolves outside the repo or cannot "
+            f"be resolved (a symlinked .sdlc or manifest); sync-pack will not "
+            f"read or write it there. Replace the link with a real .sdlc dir "
+            f"or manifest file and re-run")
     old = _load_manifest(manifest_path)
     old_files = old.get("files", {}) if isinstance(old.get("files"), dict) else {}
     old_retired = _str_dict(old.get("retired"))
@@ -1315,11 +1331,28 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     block_sha = _sha_bytes(block.encode("utf-8"))
     new_files[AGENTS_MANIFEST_KEY] = block_sha
     agents_path = target / AGENTS_REL
-    cur_agents = agents_path.read_text(encoding="utf-8") if agents_path.exists() else None
     man_block_sha = old_files.get(AGENTS_MANIFEST_KEY)
+    # Same rule as a pack file: an AGENTS.md resolving outside the tree (a
+    # link into dotfiles, a dangling link) is neither read for splicing nor
+    # written, and its record, if any, is kept. An in-repo link (the common
+    # `AGENTS.md -> CLAUDE.md`) is followed.
+    agents_outside = not _within(agents_path, target)
+    if agents_outside:
+        outside.append(AGENTS_REL)
+        if isinstance(man_block_sha, str):
+            new_files[AGENTS_MANIFEST_KEY] = man_block_sha
+        else:
+            del new_files[AGENTS_MANIFEST_KEY]
+        cur_agents = None
+    else:
+        cur_agents = (agents_path.read_text(encoding="utf-8")
+                      if agents_path.exists() else None)
 
     if check:
-        if cur_agents is None:
+        # An outside AGENTS.md is reported by its skip note, not as missing.
+        if agents_outside:
+            pass
+        elif cur_agents is None:
             missing.append(f"{AGENTS_REL} (tkt-pack block)")
         else:
             region = _extract_block(cur_agents)
@@ -1363,8 +1396,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         if region is not None and man_block_sha is not None \
                 and _sha_bytes(region.encode("utf-8")) != man_block_sha:
             warnings.append((f"{AGENTS_REL} (tkt-pack block)", "modified"))
-    new_agents = _splice_block(cur_agents, block)
-    if new_agents != cur_agents:
+    new_agents = None if agents_outside else _splice_block(cur_agents, block)
+    if new_agents is not None and new_agents != cur_agents:
         agents_path.parent.mkdir(parents=True, exist_ok=True)
         agents_path.write_text(new_agents, encoding="utf-8")
         writes += 1

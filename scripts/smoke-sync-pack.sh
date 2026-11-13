@@ -5,7 +5,8 @@
 # exec bit, the always-on base layer (incl. under a narrow selection), the
 # .pre-sdlc.bak backup of a pre-existing file, --prune of a dropped harness,
 # mirroring a consumer's own .claude/skills into the verbatim skill
-# surfaces, and never writing through a symlink that leaves the repo.
+# surfaces, never writing through a symlink that leaves the repo, and the
+# same for AGENTS.md (skipped) and the manifest (refused).
 # Prints PASS/FAIL per case.
 set -euo pipefail
 
@@ -27,7 +28,7 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}" "${C9:-}" "${C10:-}" "${C11:-}" "${O11:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}" "${C9:-}" "${C10:-}" "${C11:-}" "${O11:-}" "${C12:-}" "${O12:-}" "${C13:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 # Expected counts are derived from the pack, not hardcoded, so adding a skill
@@ -329,6 +330,39 @@ echo "$out14" | grep -q "skipped .kiro/steering/.*: resolves outside the repo" \
   || { ok=0; echo "  --check rc=$crc14: $chk14"; }
 [ "$ok" = "1" ] && pass "case14 symlinks out of the repo skipped; in-repo symlinked dir still synced" \
                 || fail "case14 outside symlinks"
+
+# ---- case 15: AGENTS.md and the manifest are never written out of the repo -
+# An AGENTS.md linked outside is skipped with a note and left byte-identical;
+# --check does not call it missing. A .sdlc linked outside refuses the whole
+# sync with exit 64 before anything is written, --check included.
+C12="$(mktemp -d)"; O12="$(mktemp -d)"
+printf '# dotfiles agents\n' > "$O12/AGENTS.md"
+ln -s "$O12/AGENTS.md" "$C12/AGENTS.md"
+ok=1
+set +e
+out15="$("$TKT" sync-pack --dir "$C12" 2>&1)"; rc15=$?
+chk15="$("$TKT" sync-pack --check --dir "$C12" 2>&1)"; crc15=$?
+set -e
+[ "$rc15" = 0 ] || { ok=0; echo "  sync rc=$rc15: $out15"; }
+[ "$(cat "$O12/AGENTS.md")" = "# dotfiles agents" ] \
+  || { ok=0; echo "  outside AGENTS.md was modified"; }
+echo "$out15" | grep -q "skipped AGENTS.md: resolves outside the repo" \
+  || { ok=0; echo "  no note for AGENTS.md: $out15"; }
+[ "$crc15" = 0 ] && ! echo "$chk15" | grep -q "missing" \
+  || { ok=0; echo "  --check rc=$crc15: $chk15"; }
+C13="$(mktemp -d)"
+mkdir "$O12/sdlc"
+ln -s "$O12/sdlc" "$C13/.sdlc"
+set +e
+out15b="$("$TKT" sync-pack --dir "$C13" 2>&1)"; rc15b=$?
+"$TKT" sync-pack --check --dir "$C13" >/dev/null 2>&1; crc15b=$?
+set -e
+[ "$rc15b" = 64 ] || { ok=0; echo "  .sdlc outside: rc=$rc15b: $out15b"; }
+[ "$crc15b" = 64 ] || { ok=0; echo "  .sdlc outside --check: rc=$crc15b"; }
+[ -z "$(ls -A "$O12/sdlc")" ] || { ok=0; echo "  wrote outside: $(ls -A "$O12/sdlc")"; }
+[ "$(ls -A "$C13")" = ".sdlc" ] || { ok=0; echo "  wrote into consumer: $(ls -A "$C13")"; }
+[ "$ok" = "1" ] && pass "case15 outside AGENTS.md skipped; outside manifest refused" \
+                || fail "case15 AGENTS.md/manifest outside symlinks"
 
 echo
 if [ "$fails" = "0" ]; then
