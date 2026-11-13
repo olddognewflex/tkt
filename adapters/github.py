@@ -29,6 +29,7 @@ import subprocess
 import sys
 from urllib.parse import urlsplit
 
+from core import ticketdoc
 from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
 from core.schema import Check, Ticket, Worklog
 
@@ -787,21 +788,6 @@ def _sub_issue_repo(sub: dict) -> str:
     return "/".join(parts[3:5]) if len(parts) > 4 else ""
 
 
-def _extract_acceptance(body: str) -> list[str]:
-    out, capture = [], False
-    for line in (body or "").splitlines():
-        low = line.strip().lower()
-        if low.startswith(("## acceptance", "acceptance criteria", "### acceptance")):
-            capture = True
-            continue
-        if capture:
-            s = line.strip()
-            if s.startswith(("-", "*", "•")):
-                out.append(s.lstrip("-*• ").strip())
-            elif s.startswith("#"):
-                break
-            elif not s:
-                continue
-            else:
-                break
-    return out
+# One parser for every backend that stores acceptance in a free-form
+# description (github, linear, openkanban).
+_extract_acceptance = ticketdoc.extract_acceptance

@@ -157,6 +157,48 @@ def is_list_marker(s: str, bullets: str = "-*") -> bool:
     return bool(s) and s[0] in bullets and (len(s) == 1 or s[1] in " \t")
 
 
+_ACCEPTANCE_HEADINGS = ("## acceptance", "acceptance criteria", "### acceptance")
+
+
+def extract_acceptance(body: str | None) -> list[str]:
+    """Acceptance items of a free-form issue description, as the github,
+    linear and openkanban backends store one. (The markdown board reads
+    its own layout in `adapters/markdown.py`'s `_read_body`.)
+
+    List items under an acceptance heading, up to the next heading or
+    prose. An indented line right after an item continues it, joined
+    with one space, unless it opens a list item of its own; a blank line
+    or a fence ends the item. Fenced lines are content, never headings
+    or items."""
+    out: list[str] = []
+    capture = open_item = False
+    lines = (body or "").splitlines()
+    for line, code in zip(lines, code_mask(lines)):
+        s = line.strip()
+        if code:
+            open_item = False
+            continue
+        if (capture and open_item and s and indent_of(line)
+                and not is_list_marker(s, "-*•")):
+            out[-1] = f"{out[-1]} {s}".strip()
+            continue
+        if s.lower().startswith(_ACCEPTANCE_HEADINGS):
+            capture = True
+            open_item = False
+            continue
+        if capture:
+            if s.startswith(("-", "*", "•")):
+                out.append(s.lstrip("-*• ").strip())
+                open_item = True
+            elif s.startswith("#"):
+                break
+            elif not s:
+                open_item = False
+            else:
+                break
+    return out
+
+
 def _norm_name(text: str) -> str:
     """A heading's name as the format gates compare it: closing `#`s
     dropped, whitespace collapsed, lowercased, a trailing colon dropped."""
