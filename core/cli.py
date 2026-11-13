@@ -272,6 +272,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-detect-build", action="store_false", dest="detect_build",
                     help="keep the example's [build] commands instead of seeding "
                          "them from the project's package manager")
+    sp.add_argument("--no-detect-repo", action="store_false", dest="detect_repo",
+                    help="keep the example's [vcs].repo instead of reading it "
+                         "from the git origin remote")
     sp.add_argument("--project", default=None, metavar="KEY",
                     help="markdown/jira: [ticketing].project (markdown default: "
                          "derived from the dir name); linear: [linear].team_key; "
@@ -447,7 +450,8 @@ def main(argv: list[str]) -> int:
                                  args.link_skills, args.sample, interactive=True,
                                  detect_build=args.detect_build,
                                  project=args.project, board_dir=args.board_dir,
-                                 inherit=args.inherit)
+                                 inherit=args.inherit,
+                                 detect_repo=args.detect_repo)
 
         # `sync-pack` installs pack files into a consumer tree; it needs no
         # config and may run before `tkt init`.

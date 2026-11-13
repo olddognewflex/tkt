@@ -136,7 +136,8 @@ leading thematic break), both shipped presets, the stderr/`--json` output and
 exit codes 0/1/2, and rules-file validation.
 `tkt init` is covered by `test_scaffold_init.py` (shared-board inheritance,
 key derivation, `--project`/`--board-dir`/`--no-inherit`, the collision
-warning, `--sample`, prompts, the placeholder doctor row) and
+warning, `--sample`, prompts, the placeholder doctor row, `[vcs].repo`
+from the git origin remote) and
 `test_toolchain.py` (Makefile merge, `apply_to_config`, `tomledit`).
 Use `discover -s tests`; a bare `discover` from the root finds nothing (no
 `tests/__init__.py`). Adapter coverage is limited to those stubbed paths:
