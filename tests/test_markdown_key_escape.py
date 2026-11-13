@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from adapters.markdown import MarkdownAdapter  # noqa: E402
+from adapters.markdown import MarkdownAdapter, _check_key, _key_ok  # noqa: E402
 from core.config import Config  # noqa: E402
 from core.errors import UsageError  # noqa: E402
 
@@ -37,6 +37,8 @@ BAD_KEYS = [
     "sub/TKT-1",            # a separator alone, even pointing inward
     "/tmp/secret",          # absolute
     "C:secret",             # Windows drive-relative
+    "TKT-1:secret",         # NTFS alternate data stream on TKT-1.md
+    "a:b",
     "TKT-1\0",              # NUL byte
     "..",
     "",
@@ -94,6 +96,25 @@ class _Base(unittest.TestCase):
         with self.assertRaises(UsageError):
             fn(*args, **kwargs)
         self.assertEqual(tree(self.tmp), before)
+
+
+class Validator(unittest.TestCase):
+
+    def test_colon_anywhere_is_refused(self):
+        # `<board>/TKT-1:secret.md` is a hidden NTFS stream on TKT-1, not a
+        # ticket file; `PureWindowsPath(...).drive` alone misses it.
+        for key in ("TKT-1:secret", "a:b", "TKT-1:", ":x", "C:x"):
+            with self.subTest(key=key):
+                self.assertFalse(_key_ok(key))
+                with self.assertRaises(UsageError) as cm:
+                    _check_key(key)
+                self.assertIn("':'", str(cm.exception))
+
+    def test_plain_keys_pass(self):
+        for key in ("TKT-1", "ODNF-3", "A.B-1", "my_proj-2", "CON-1"):
+            with self.subTest(key=key):
+                self.assertTrue(_key_ok(key))
+                self.assertEqual(_check_key(key), key)
 
 
 class LinkEscape(_Base):
@@ -273,13 +294,16 @@ class KeyEscapeCli(unittest.TestCase):
             ("comment", "../secret", "hi"),
             ("transition", "../secret", "in_progress"),
             ("lane-time", "../secret", "--role", "todo"),
+            ("comment", "TKT-1:secret", "hi"),
+            ("link", "TKT-1", "--to", "TKT-1:secret", "--type", "blocks"),
         ]
         for args in cases:
             with self.subTest(args=args):
                 before = tree(self.tmp)
                 r = self.tkt(*args)
                 self.assertEqual(r.returncode, 64, r.stderr)
-                self.assertIn("../secret", r.stderr)
+                self.assertIn(args[1] if args[0] != "link" else args[3],
+                              r.stderr)
                 self.assertEqual(tree(self.tmp), before)
 
 

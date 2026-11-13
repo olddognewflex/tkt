@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 from core import ticketdoc
 from core.gates import cut_managed_tail
@@ -97,15 +97,17 @@ def _key_ok(key) -> bool:
 
     A key becomes the file name `<key>.md` (and `<key>.history.jsonl` in
     state_dir), so a separator (`/`, or `\\` on Windows), `..`, a NUL
-    byte, a Windows drive (`C:x`) or an empty key could name a file
-    elsewhere or none at all. `..` is refused anywhere in the key, not only
+    byte, a colon or an empty key could name a file elsewhere or none at
+    all. A colon is refused anywhere: on Windows `C:x` is a drive and
+    `TKT-1:x.md` an NTFS alternate data stream on `TKT-1`, hidden from
+    directory listings. `..` is refused anywhere in the key, not only
     as a whole path part: no real key carries it, and the rule stays one
     line that cannot miss a spelling. A Windows device name (`CON`,
     `nul.x`) is refused on every OS, so a board behaves the same wherever
     it is checked out."""
     k = str(key)
     return bool(k) and not ("/" in k or "\\" in k or ".." in k or "\0" in k
-                            or PureWindowsPath(k).drive
+                            or ":" in k
                             or k.split(".", 1)[0].upper() in _RESERVED)
 
 
@@ -116,7 +118,7 @@ def _check_key(key) -> str:
     if not _key_ok(key):
         raise UsageError(f"invalid ticket key {str(key)!r}: a key cannot be "
                          f"empty, a Windows device name, or contain '/', "
-                         f"'\\', '..', a NUL byte or a drive")
+                         f"'\\', '..', ':' or a NUL byte")
     return str(key)
 
 
