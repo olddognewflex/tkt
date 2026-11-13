@@ -134,6 +134,16 @@ Makefile also fills whatever the language probe leaves out (a Go repo with a
 `lint:` target gets `lint = "make lint"`). Keys the project doesn't declare
 keep the example's value.
 
+`init` also fills a placeholder `[vcs].repo` (when `[vcs].provider` is
+`github`) from `git remote get-url origin`. It reads SSH remotes
+(`git@github.com:owner/repo.git`, including `~/.ssh/config` host aliases such
+as `git@github-work:owner/repo.git`, and `ssh://`) and HTTPS remotes
+(`https://github.com/owner/repo.git`, credentials and port ignored). This is
+advisory: with no git, no `origin`, or a remote that isn't a two-segment
+`owner/repo` path, the placeholder stays and `init` prints a note (never the
+URL, which may carry a token). `[github].repo`, the issue repo for
+`--provider github`, is not touched.
+
 Manual equivalent, if you prefer:
 
 ```sh

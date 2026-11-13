@@ -102,7 +102,7 @@ separate harness-specific files).
 | `tkt schedule [--at ISO]` | is it business hours now, per `[schedule]` (config + clock, no backend) |
 | `tkt cfg priorities` | backend-aware priority list, highest-first |
 | `tkt cfg route PHASE` | resolve a phase to harness + model via `[routes]`/`[harnesses]`/`[models]`/`[run]` (config-only) |
-| `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager; markdown joins a parent dir's shared board, key derived from the dir name) |
+| `tkt init --provider P [--dir D] [--link-skills] [--sample] [--force] [--no-detect-build] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/` (seeds `[build]` from the project's package manager and `[vcs].repo` from the git origin remote; markdown joins a parent dir's shared board, key derived from the dir name) |
 | `tkt sync-pack [HARNESS...] [--dir D] [--all-harnesses] [--list-harnesses] [--check] [--prune]` | install the pack into a consumer repo as committed copies |
 | `tkt run [KEY] [--status] [--stop] [--max-iterations N] [--dry-run]` | external loop driver: one pipeline phase per harness invocation |
 | `tkt agents [--stale-after N] [--dir D] [--enrich] [--all]` | state of every run at once (local read; no backend without `--enrich`) |

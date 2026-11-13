@@ -7,10 +7,12 @@ import contextlib
 import os
 import re
 import stat
+import subprocess
 import sys
 import tempfile
 import tomllib
 from pathlib import Path, PurePath
+from urllib.parse import urlsplit
 
 from . import config as config_mod
 from . import tomledit, toolchain
@@ -231,6 +233,7 @@ def init(provider: str | None, target_dir: str, force: bool,
     build_notes = []
     if detect_build:
         text, build_notes = _seed_build(text, target)
+    text, repo_notes, repo = _seed_repo(text, target)
 
     # Re-parse what we built; a mismatch means the text surgery went wrong.
     retry = "; re-run with --no-inherit" if parent else ""
@@ -255,6 +258,9 @@ def init(provider: str | None, target_dir: str, force: bool,
         else:
             exp = (_resolve(target, ".sdlc/board"), _resolve(target, ".sdlc/state"))
         got, want = got + [board, state], want + list(exp)
+    if repo is not None:
+        got = (got or []) + [_tbl(data, "vcs").get("repo")]
+        want = (want or []) + [repo]
     if got != want:
         raise ConfigError(f"generated config resolves to {got}, expected {want}; "
                           f"{cfg} left untouched{retry}")
@@ -274,7 +280,7 @@ def init(provider: str | None, target_dir: str, force: bool,
     _write_atomic(cfg, text)
     origin = f"inherits {pcfg}" if parent else f"from examples/config.{provider}.toml"
     print(f"wrote {cfg}  ({origin})")
-    for line in build_notes:
+    for line in build_notes + repo_notes:
         print(line)
 
     if sample and markdown:
@@ -354,6 +360,83 @@ def _seed_build(text: str, target: Path) -> tuple[str, list[str]]:
     if missing:
         notes.append(f"  not declared by the project (left as-is): {', '.join(missing)}")
     return toolchain.apply_to_config(text, found), notes
+
+
+_SEG_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+# scp-like `[user@]host:path`; git reads it as a URL only when no `/`
+# comes before the first `:`
+_SCP_RE = re.compile(r"^(?:(?P<user>[^@/\s]+)@)?(?P<host>[^@:/\s]+):(?P<path>\S*)$")
+_URL_SCHEMES = {"https", "http", "ssh", "git", "git+ssh", "ssh+git"}
+# variables a git hook exports that would point `git -C <target>` elsewhere
+_GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+
+
+def parse_remote(url: str) -> str | None:
+    """`owner/repo` from a GitHub-style remote URL: scp-like SSH (any host,
+    so `~/.ssh/config` aliases such as `git@github-work:o/r.git` work),
+    `ssh://`, `git://` or HTTP(S). None for anything else, including local
+    paths and paths that are not exactly two segments."""
+    url = url.strip()
+    if "://" in url:
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname
+        except ValueError:          # e.g. an unclosed `[` IPv6 host
+            return None
+        if parts.scheme.lower() not in _URL_SCHEMES or not host:
+            return None
+        path = parts.path
+    else:
+        m = _SCP_RE.match(url)
+        # a one-letter host with no user is a Windows drive (`C:/src/x`)
+        if not m or (len(m.group("host")) == 1 and not m.group("user")):
+            return None
+        path = m.group("path")
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-len(".git")]
+    segs = path.split("/")
+    if len(segs) != 2 or not all(_SEG_RE.match(s) and s not in (".", "..")
+                                 for s in segs):
+        return None
+    return path
+
+
+def _origin_url(target: Path) -> str | None:
+    """`git remote get-url origin` for the repo holding `target`; None when
+    git is missing, `target` is not in a repo, or there is no origin."""
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_ENV}
+    try:
+        r = subprocess.run(["git", "-C", str(target), "remote", "get-url", "origin"],
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=10, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def _seed_repo(text: str, target: Path) -> tuple[str, list[str], str | None]:
+    """Fill a placeholder GitHub `[vcs].repo` from the origin remote.
+    Returns the new text, the lines to report, and the repo written (None
+    when nothing changed). Advisory: a missing or unrecognised remote
+    leaves the text as it was."""
+    try:
+        vcs = _tbl(tomllib.loads(text), "vcs")
+    except tomllib.TOMLDecodeError:
+        return text, [], None       # the caller's re-parse reports it
+    cur = vcs.get("repo")
+    if vcs.get("provider") != "github" or not isinstance(cur, str) \
+            or cur not in _REPO_PLACEHOLDERS:
+        return text, [], None
+    url = _origin_url(target)
+    repo = parse_remote(url) if url else None
+    if repo is None:
+        # never echo the URL: an HTTPS remote can carry a token
+        why = ("no git origin remote" if not url
+               else "git origin remote is not an owner/repo URL")
+        return text, [f'  {why}; [vcs].repo left as "{cur}" (edit by hand)'], None
+    return (tomledit.set_keys(text, "vcs", {"repo": repo}),
+            [f"  detected [vcs].repo = {repo} (from the git origin remote)"], repo)
 
 
 def _link_pack(target: Path) -> None:
