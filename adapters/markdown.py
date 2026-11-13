@@ -85,6 +85,13 @@ _BLOCKS_LINKS = ("blocks",)
 _BLOCKED_BY_LINKS = ("is blocked by", "depends on")
 
 
+# Windows device names: `CON.md` (any case, any extension) opens the
+# console rather than a file, `NUL.md` discards what is written to it.
+_RESERVED = frozenset({"CON", "PRN", "AUX", "NUL",
+                       *(f"COM{i}" for i in range(1, 10)),
+                       *(f"LPT{i}" for i in range(1, 10))})
+
+
 def _key_ok(key) -> bool:
     """Whether `key` names a file directly inside the board dir.
 
@@ -93,10 +100,13 @@ def _key_ok(key) -> bool:
     byte, a Windows drive (`C:x`) or an empty key could name a file
     elsewhere or none at all. `..` is refused anywhere in the key, not only
     as a whole path part: no real key carries it, and the rule stays one
-    line that cannot miss a spelling."""
+    line that cannot miss a spelling. A Windows device name (`CON`,
+    `nul.x`) is refused on every OS, so a board behaves the same wherever
+    it is checked out."""
     k = str(key)
     return bool(k) and not ("/" in k or "\\" in k or ".." in k or "\0" in k
-                            or PureWindowsPath(k).drive)
+                            or PureWindowsPath(k).drive
+                            or k.split(".", 1)[0].upper() in _RESERVED)
 
 
 def _check_key(key) -> str:
@@ -105,8 +115,8 @@ def _check_key(key) -> str:
     so every verb refuses such a key before any read or write."""
     if not _key_ok(key):
         raise UsageError(f"invalid ticket key {str(key)!r}: a key cannot be "
-                         f"empty or contain '/', '\\', '..', a NUL byte or "
-                         f"a drive")
+                         f"empty, a Windows device name, or contain '/', "
+                         f"'\\', '..', a NUL byte or a drive")
     return str(key)
 
 
@@ -506,11 +516,18 @@ class MarkdownAdapter(Adapter):
                 suffix = stem[len(prefix) + 1:]
                 if suffix.isdigit():
                     n = max(n, int(suffix))
-        return f"{prefix}-{n + 1}"
+        key = f"{prefix}-{n + 1}"
+        if not _key_ok(key):
+            # Named as the caller spelled it (`--project` or the config),
+            # not as the minted key.
+            raise UsageError(f"invalid project {prefix!r}: it would mint the "
+                             f"ticket key {key!r}, which cannot name a file "
+                             f"inside the board")
+        return key
 
     def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
+        key = self._next_key(project)  # refuses a bad project before mkdir
         self.board_dir.mkdir(parents=True, exist_ok=True)
-        key = self._next_key(project)
         todo_lane = self.config.roles.get("todo") or self.config.roles.get("backlog", "To Do")
         fm = {
             "type": issue_type,
@@ -541,8 +558,8 @@ class MarkdownAdapter(Adapter):
             issue_type = str(fm_in.get("type", "")).strip()
             if not issue_type:
                 raise ProviderError("apply --new: frontmatter must set 'type'")
+            new_key = self._next_key(self.config.project)  # before mkdir
             self.board_dir.mkdir(parents=True, exist_ok=True)
-            new_key = self._next_key(self.config.project)
             todo_lane = (self.config.roles.get("todo")
                          or self.config.roles.get("backlog", "To Do"))
             fm = {

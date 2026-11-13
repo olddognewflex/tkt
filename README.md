@@ -546,10 +546,12 @@ Zero-dependency local board. One `<KEY>.md` per ticket under `[markdown].board_d
 status transitions + worklogs recorded in JSONL sidecars under `[markdown].state_dir`
 (machine-local, derived — the markdown stays human-canonical).
 
-- **A key must name a file inside the board.** A key that is empty or contains
+- **A key must name a file inside the board.** A key that is empty, a Windows
+  device name (`CON`, `NUL`, `COM1`, ..., refused on every OS), or contains
   `/`, `\`, `..`, a NUL byte or a Windows drive (`C:`) is refused with exit 64
   before any read or write, by every verb — so `tkt link TKT-1 --to ../x`
-  cannot write outside `board_dir`. Such a key left in a ticket's frontmatter
+  cannot write outside `board_dir`. `create` names the offending project when
+  the key it would mint is one of these. Such a key left in a ticket's frontmatter
   by a hand edit is data, not an error: a `blocked_by` entry reads as an
   unresolved blocker, and `list` skips a board file whose name is not a key.
 - **A ticket is visible to `list` only if its filename starts with

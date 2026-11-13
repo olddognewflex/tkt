@@ -40,6 +40,10 @@ BAD_KEYS = [
     "TKT-1\0",              # NUL byte
     "..",
     "",
+    "CON",                  # Windows device names: CON.md opens the console
+    "nul",
+    "COM1",
+    "LPT9.v2",
 ]
 
 
@@ -55,9 +59,12 @@ def adapter(tmp, project="TKT"):
 
 
 def tree(root):
-    """Every file under `root`, relative path -> bytes."""
+    """Every file under `root`, relative path -> bytes, and every directory,
+    relative path -> None (so a stray mkdir shows up too)."""
     out = {}
-    for dirpath, _, names in os.walk(root):
+    for dirpath, dirs, names in os.walk(root):
+        for d in dirs:
+            out[str((Path(dirpath) / d).relative_to(root)) + "/"] = None
         for name in names:
             p = Path(dirpath) / name
             out[str(p.relative_to(root))] = p.read_bytes()
@@ -116,6 +123,8 @@ class EveryVerbRejects(_Base):
             "apply": lambda k: self.a.apply("---\ntype: Story\n---\n# x\n", key=k),
             "worklog": lambda k: self.a.worklog(k, "todo"),
             "lane_time": lambda k: self.a.lane_time(k, "todo"),
+            # What `tkt lane-time` actually calls, even for one key.
+            "lane_time_batch": lambda k: self.a.lane_time_batch([(k, "todo")]),
             "artifact_body": lambda k: self.a.artifact_body(
                 SimpleNamespace(key=k)),
         }
@@ -141,6 +150,31 @@ class EveryVerbRejects(_Base):
         # `create --project` mints `<project>-<n>` as the key.
         self.assertRejected(self.a.create, "Story", "x", project="../evil")
         self.assertFalse((Path(self.tmp) / "evil-1.md").exists())
+
+    def test_create_error_names_the_project_as_typed(self):
+        with self.assertRaises(UsageError) as cm:
+            self.a.create("Story", "x", project="../evil")
+        self.assertIn("'../evil'", str(cm.exception))
+
+    def test_create_makes_no_board_dir_when_rejected(self):
+        # A board that does not exist yet: the rejected create must not
+        # leave an empty board dir behind.
+        shutil.rmtree(self.a.board_dir)
+        self.assertRejected(self.a.create, "Story", "x", project="../evil")
+        self.assertFalse(self.a.board_dir.exists())
+
+    def test_apply_new_makes_no_board_dir_when_rejected(self):
+        shutil.rmtree(self.a.board_dir)
+        a = adapter(self.tmp, project="../evil")
+        self.assertRejected(a.apply, "---\ntype: Story\n---\n# x\n")
+        self.assertFalse(a.board_dir.exists())
+
+    def test_device_like_names_inside_a_key_still_work(self):
+        # Only the whole name before the first dot is reserved.
+        for key in ("CON-1", "NULL-2", "COM10-3", "AUXX-4"):
+            with self.subTest(key=key):
+                self.write(key)
+                self.assertEqual(self.a.view(key).key, key)
 
     def test_apply_new_with_escaping_configured_project(self):
         a = adapter(self.tmp, project="../evil")
@@ -238,6 +272,7 @@ class KeyEscapeCli(unittest.TestCase):
             ("edit", "../secret", "--priority", "High"),
             ("comment", "../secret", "hi"),
             ("transition", "../secret", "in_progress"),
+            ("lane-time", "../secret", "--role", "todo"),
         ]
         for args in cases:
             with self.subTest(args=args):
