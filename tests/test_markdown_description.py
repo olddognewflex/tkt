@@ -79,6 +79,15 @@ class DescriptionFallback(unittest.TestCase):
         self.a.comment(key, "a note")
         self.assertEqual(self.a.view(key).description, "The point.")
 
+    def test_empty_first_summary_does_not_fall_through(self):
+        t = self.view("## Summary\n\n## Summary\n\nSecond section.")
+        self.assertEqual(t.description, "")
+
+    def test_summary_heading_inside_comment_ignored(self):
+        key = self.a.create("Story", "S", body="## Problem\n\nBroken.").key
+        self.a.comment(key, "note\n## Summary\nnot the ticket's")
+        self.assertEqual(self.a.view(key).description, "")
+
 
 if __name__ == "__main__":
     unittest.main()
