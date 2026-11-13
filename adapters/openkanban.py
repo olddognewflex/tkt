@@ -45,6 +45,11 @@ from core.schema import Check, Ticket, Worklog
 
 from .base import Adapter
 
+# Ticket text fields `_to_ticket` never fills, so `ORDER BY` on them is an
+# error rather than a silent no-op (core/query.py).
+_UNSUPPLIED = ("assignee", "due", "scheduled", "completed", "agent_status",
+               "agent_status_at")
+
 _PRI_LABEL = {1: "Highest", 2: "High", 3: "Medium", 4: "Low", 5: "Lowest"}
 _PRI_INT = {v.lower(): k for k, v in _PRI_LABEL.items()}
 _DONE_STATUSES = {"done", "archived"}
@@ -207,7 +212,8 @@ class OpenKanbanAdapter(Adapter):
         q = self.config.query(tier=tier, name=query)
         store = self._load_store()
         tickets = [self._to_ticket(r) for r in store["tickets"].values()]
-        return JqlSubset(q, self.me, self.priorities()).run(tickets)
+        return JqlSubset(q, self.me, self.priorities(),
+                         unsupplied=_UNSUPPLIED).run(tickets)
 
     def view(self, key, *, hierarchy: bool = True):
         # `hierarchy` is ignored: parent and children are in `meta`, read

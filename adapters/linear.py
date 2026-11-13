@@ -33,6 +33,10 @@ from core.schema import Check, Ticket, Worklog
 
 from .base import Adapter
 
+# Ticket text fields `_to_ticket` never fills, so `ORDER BY` on them is an
+# error rather than a silent no-op (core/query.py).
+_UNSUPPLIED = ("due", "scheduled", "completed", "agent_status", "agent_status_at")
+
 _ENDPOINT = "https://api.linear.app/graphql"
 # Linear numeric priority -> label (matches priorityLabel).
 _PRIORITY_LABEL = {0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}
@@ -235,7 +239,8 @@ class LinearAdapter(Adapter):
             + _ISSUE_FIELDS + " } } }",
             {"k": self.team_key, "n": self.list_limit})
         tickets = [self._to_ticket(i) for i in data["issues"]["nodes"]]
-        return JqlSubset(q, self.whoami(), self.priorities()).run(tickets)
+        return JqlSubset(q, self.whoami(), self.priorities(),
+                         unsupplied=_UNSUPPLIED).run(tickets)
 
     def view(self, key, *, hierarchy: bool = True):
         # `hierarchy` is ignored: parent and sub-issues come with the issue

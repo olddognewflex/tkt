@@ -590,7 +590,11 @@ Queries use a tiny JQL subset (`field = "v" [AND ...] [ORDER BY field DIR]`,
 `currentUser()`, `is EMPTY`) so the same `[queries]` strings read like Jira's.
 `ORDER BY priority` ranks by the priority order (`tkt cfg priorities`), not by
 name, with `DESC` highest first; case is ignored, and a priority that isn't in the
-list, or an empty one, sorts last.
+list, or an empty one, sorts last. `ORDER BY key` sorts by number (TKT-9
+before TKT-10); any other empty value also sorts last. A query may be only an
+`ORDER BY`. Sorting on a field the backend never fills (`created`,
+`reporter`, ...; Linear and openkanban also lack the dates), an unknown name
+or an unknown direction fails with exit 2, never a no-op.
 
 ## Skill pack
 
