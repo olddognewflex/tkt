@@ -97,7 +97,12 @@ Record the outcome per thread — this decides what gets resolved:
 - `addressed` — change fully implemented (**will** resolve)
 - `question` — answered (**will** resolve after reply)
 - `partial` — change only partly implemented (will **not** resolve)
-- `skipped` — out of scope, won't-fix, or ambiguous (will **not** resolve)
+- `bot-wontfix` — an automated reviewer repeating a nit you won't fix (step 9);
+  justify on its thread (**will** resolve: a bot can't reply, so its open
+  thread would block step 9's exit forever)
+- `skipped` — out of scope, ambiguous, or a won't-fix on a human reviewer's
+  comment or on a bot nit not yet repeated; justify on its thread, or ask if
+  ambiguous (will **not** resolve: the reviewer decides)
 
 ### 3. Address change requests
 
@@ -171,8 +176,10 @@ For each thread categorized `addressed` or `question`:
 
 **Never resolve when:** the fix is partial; the comment is ambiguous and needs
 reviewer confirmation; the thread bundles several requests and only some are done;
-or the path isn't in the commit diff. Leave those threads open **without** a
-fix-summary reply — a summary on an unresolved thread misleads the reviewer.
+it is a human reviewer's comment you won't fix; or the path isn't in the commit
+diff. Leave those threads open **without** a fix-summary reply — a summary on an
+unresolved thread misleads the reviewer. (A won't-fix justification is not a
+fix summary; post it.)
 
 ### 7. Post the consolidated resolution log
 
@@ -219,9 +226,13 @@ Re-fetch after each push. Exit only when **all** hold:
 - `reviewDecision == APPROVED` (a pending/`REVIEW_REQUIRED` state is NOT enough)
 - No new comments in the last poll
 
-Cap at **5** cycles. If a bot repeats the same nit after 2 attempts, reply on its
-thread (`pulls/$PR/comments/<comment-id>/replies`, as in step 4) with a one-line
-"won't fix" justification and resolve the thread.
+Cap at **5** cycles. If a bot repeats the same nit after 2 attempts, categorize
+it `bot-wontfix`: reply on its thread (`pulls/$PR/comments/<comment-id>/replies`,
+as in step 4) with a one-line "won't fix" justification and resolve the thread
+(the `resolveReviewThread` call in step 6, without the diff check: nothing
+changed). Only an automated reviewer's thread is resolved this way. A human
+reviewer's comment you won't fix stays `skipped`: justify on its thread and
+leave it open for them.
 
 ### 10. If stuck after 5 cycles
 

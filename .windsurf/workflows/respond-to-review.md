@@ -10,7 +10,7 @@ Read PR review comments, address each with code changes or replies, push fixes, 
 4. Commit and push: `git add -A && git commit -m "fix(<scope>): address review feedback" && git push`.
 5. Re-request reviewers from `tkt cfg vcs.reviewers --json`.
 6. Move ticket `revise → in_progress → review`, annotating lane time with `tkt worklog`.
-7. Loop until `reviewDecision == APPROVED` and no unresolved comments. Max 5 cycles.
+7. Loop until `reviewDecision == APPROVED` and no unresolved bot comments. Max 5 cycles.
 
 ## Output
 
@@ -21,5 +21,6 @@ Read PR review comments, address each with code changes or replies, push fixes, 
 ## Rules
 
 - `tkt worklog` is a no-op when time tracking is disabled.
-- Never argue with repeated bot nits; justify "won't fix" and resolve.
+- Never argue with repeated bot nits; justify "won't fix" on the thread and resolve it.
+- A human reviewer's comment you won't fix: justify on the thread, leave it open.
 - All ticketing access goes through `tkt`.
