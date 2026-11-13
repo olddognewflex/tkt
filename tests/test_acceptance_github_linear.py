@@ -108,7 +108,39 @@ class _Cases:
                    ["pass the -v flag", "emphasise *this* word"])
 
     def test_blank_line_ends_the_item(self):
-        self.check("## Acceptance\n- one\n\n  stray\n- two\n", ["one"])
+        # An item's second paragraph is not part of its criterion, and the
+        # items after it are kept.
+        self.check("## Acceptance\n- one\n\n  stray\n- two\n", ["one", "two"])
+
+    def test_nested_ordered_and_plus_items_are_their_own_items(self):
+        self.check("## Acceptance\n- parent\n  1. a\n  2) b\n  + c\n- next\n",
+                   ["parent", "a", "b", "c", "next"])
+
+    def test_ordered_items_are_items(self):
+        self.check("## Acceptance\n1. [ ] first\n   wrapped\n2. second\n",
+                   ["[ ] first wrapped", "second"])
+
+    def test_number_or_plus_without_a_space_continues(self):
+        self.check("## Acceptance\n- fix it by\n  2026.11 release\n- add\n"
+                   "  +1 reaction\n", ["fix it by 2026.11 release",
+                                       "add +1 reaction"])
+
+    def test_indented_heading_ends_the_section(self):
+        # One to three spaces of indent still make an ATX heading.
+        self.check("## Acceptance\n- one\n  ## Notes\n- not acceptance\n",
+                   ["one"])
+
+    def test_hash_text_after_an_item_continues(self):
+        self.check("## Acceptance\n- closes\n  #123 too\n- next\n",
+                   ["closes #123 too", "next"])
+
+    def test_heading_indented_as_code_does_not_open_the_section(self):
+        self.check("Example:\n\n    ## Acceptance\n    - sample\n", [])
+
+    def test_unindented_wrap_still_ends_the_section(self):
+        # A lazy continuation line (wrapped with no indent) reads as prose:
+        # a known limit, kept from the old reader.
+        self.check("## Acceptance\n- one\ntwo\n- three\n", ["one"])
 
     def test_heading_ends_the_section(self):
         self.check("## Acceptance\n- one\n  wrapped\n## Notes\n- not acceptance\n",
@@ -127,10 +159,10 @@ class _Cases:
                    ["one", "two"])
 
     def test_fence_ends_an_open_item(self):
-        # The indented line after the fence continues nothing, so it reads
-        # as prose and ends the section.
+        # The indented line after the fence continues nothing, so it is
+        # skipped rather than joined onto `one`.
         self.check("## Acceptance\n- one\n```\ncode\n```\n  stray\n- two\n",
-                   ["one"])
+                   ["one", "two"])
 
     def test_single_line_items_and_checkboxes_unchanged(self):
         self.check("Intro\n## Acceptance\n- [ ] a\n* [x] b\n• c\n"

@@ -295,11 +295,15 @@ and `updated` are filled by jira only; other backends leave them `""` / `null`.
 `created` / `updated` are canonical UTC (`YYYY-MM-DDTHH:MM:SS.mmmZ`).
 
 On github, linear and openkanban, `acceptance` comes from the description:
-one entry per list item under a `## Acceptance…`, `### Acceptance` or
-`Acceptance criteria` line, up to the next heading or prose. An indented line
-right after an item continues it, joined with a space, unless it opens a list
-item of its own; fenced code is never a heading or an item. The markdown
-board's rules are under [markdown](#markdown).
+one entry per list item, nested ones included, bulleted (`-`, `*`, `•`, `+`)
+or ordered (`1.`, `1)`), under a `## Acceptance…`, `### Acceptance` or
+`Acceptance criteria` line, up to the next heading or unindented prose. An
+indented line right after an item continues it, joined with a space, unless
+it opens a list item or is a heading; an item's second paragraph (after a
+blank line) is dropped. A line that wraps with no indent ends the section,
+so wrap with an indent. Fenced code, and a line indented four or more
+spaces, is never a heading. The markdown board's rules are under
+[markdown](#markdown).
 
 ### Activity report (`tkt activity --json`)
 

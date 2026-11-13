@@ -93,8 +93,10 @@ and being accepted by every adapter (`test_list_all_projects.py`),
 markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
 markdown description and wrapped acceptance items, with fenced or
 indented headings ignored (`test_markdown_description.py`,
-`test_markdown_acceptance.py`), the same for the github and linear
-readers, which share `ticketdoc.extract_acceptance` with openkanban
+`test_markdown_acceptance.py`), wrapped and nested (ordered, `+`)
+acceptance items on github and linear, which share
+`ticketdoc.extract_acceptance` with openkanban; fenced lines and 4-space
+indented headings never open or end its section
 (`test_acceptance_github_linear.py`),
 `sync-pack`'s exec-bit handling (`test_pack_exec.py`), its
 `.pre-sdlc.bak` backup of a pre-existing consumer file
