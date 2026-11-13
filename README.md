@@ -854,7 +854,32 @@ uses `{model}` and no model resolves. Both tables are validated whole on use,
 so a typo anywhere fails every lookup, and `tkt doctor` reports a `routing`
 row that also resolves every route (a routed harness missing from `PATH`,
 or one whose program needs a shell to expand, is a warning, never a failure).
-`tkt run` and the skills do not consume routes yet; that lands in follow-ups.
+
+`tkt run` honours routes per phase. Each pipeline phase looks up its route
+key; a phase with a `[routes]` entry runs that entry's resolved `cmd`
+(`{model}` filled), and every other phase runs `[run].harness_cmd`
+verbatim, exactly as before routes existed (no `{model}` fill, no tier),
+so `[run].harness_cmd` stays required:
+
+| Phase | Route key | Phase | Route key |
+|---|---|---|---|
+| P0 | `select-ticket` | P5 | `open-pr` |
+| P1 | `triage-ticket` | P6 | `ci-fix` |
+| P1.5 | `type-route` | P7 | `respond-to-review` |
+| P2 | `plan-ticket` | P8 | `deploy-preview` |
+| P3 | `implement` | P9 | `qa-ready` |
+| P4 | `self-review` | P10 | `deploy-ready` |
+
+The driver resolves every phase's command once, before the first
+invocation (also on `--dry-run`, which prints the starting phase's
+command), so a bad table is exit 2 before any harness runs and a run never
+changes commands midway. A `[routes]` key that is not in this table is not
+resolved by `tkt run`, since the table is shared with interactive skills,
+but it must still be valid. `implement` and `type-route` have no skill, so
+a harness-only route for them gets no `model_tier` fallback; `qa-ready` is
+never invoked (P9 always stops for human QA) but is still validated. Each
+`run.log` entry records the phase's `harness` (`""` when the phase runs
+`[run].harness_cmd`). The skills themselves do not consume routes yet.
 
 ### Resume model
 
@@ -956,8 +981,15 @@ Each invocation's prompt instructs the agent to write
 ```
 
 Valid outcomes: `advance` (move on), `retry` (same phase again), `blocked`
-(unrecoverable), `gate` (human gate reached). A missing or invalid result file
-counts as a failed attempt.
+(unrecoverable), `gate` (human gate reached).
+
+A harness that cannot write files (a read-only reviewer) can hand the result
+back on stdout instead: the last stdout line that, stripped, starts with
+`TKT-RESULT: ` followed by the same JSON object. `result.json` wins when it is
+valid; the line is read only when the file is missing or invalid, and only
+the last such line counts, even if it is the invalid one. stderr is never
+scanned. With neither a valid file nor a valid line, the invocation counts as
+a failed attempt.
 
 ### Security note
 
