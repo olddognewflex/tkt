@@ -61,6 +61,9 @@ class Adapter(ABC):
         nor `Ticket.parent`: an adapter that needs an extra backend call to
         find either (jira children, github both) skips it and leaves that
         field empty. Whatever arrives with the ticket itself is still filled.
+        github also skips its native dependency edges there, so its
+        `blocked_by`/`blocks` hold body-text links only: read blockers
+        through `blockers()`, never from such a view.
         """
 
     @abstractmethod

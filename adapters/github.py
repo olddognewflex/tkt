@@ -109,11 +109,17 @@ class GithubAdapter(Adapter):
                 return lab[len(self.status_label_prefix):].strip()
         return ""
 
-    def _parse_links(self, body: str, check_resolved: bool):
+    def _parse_links(self, body: str, check_resolved: bool, native=None):
+        """`blocked_by` / `blocks` from the body text, after the native
+        dependency edges `native` = (blocked_by, blocks) when given. A key
+        the native edges already carry is not looked up again."""
         body = body or ""
-        blocked = [{"key": n, "resolved": self._is_closed(n) if check_resolved else False}
-                   for n in dict.fromkeys(_BLOCKED_RE.findall(body))]
-        blocks = list(dict.fromkeys(_BLOCKS_RE.findall(body)))
+        native_blocked, native_blocks = native or ([], [])
+        seen = {b["key"] for b in native_blocked}
+        blocked = list(native_blocked) + [
+            {"key": n, "resolved": self._is_closed(n) if check_resolved else False}
+            for n in dict.fromkeys(_numbers(_BLOCKED_RE, body)) if n not in seen]
+        blocks = list(dict.fromkeys([*native_blocks, *_numbers(_BLOCKS_RE, body)]))
         return blocked, blocks
 
     def _is_closed(self, number: str) -> bool:
@@ -128,13 +134,13 @@ class GithubAdapter(Adapter):
     def _issue_to_ticket(self, issue: dict, status: str | None = None,
                          check_resolved: bool = False, transitions=None,
                          children: list[str] | None = None,
-                         parent: str = "") -> Ticket:
+                         parent: str = "", native_links=None) -> Ticket:
         labels = self._label_names(issue.get("labels"))
         body = issue.get("body", "") or ""
         if status is None:
             status = self._status_from_labels(labels) if self.board == "labels" else ""
         issue_type = self._type_from_labels(labels)
-        blocked_by, blocks = self._parse_links(body, check_resolved)
+        blocked_by, blocks = self._parse_links(body, check_resolved, native_links)
         number = str(issue.get("number", ""))
         return Ticket(
             key=number,
@@ -315,20 +321,28 @@ class GithubAdapter(Adapter):
         return [self._issue_to_ticket(i, transitions=lanes) for i in issues]
 
     def view(self, key, *, hierarchy: bool = True):
-        # `hierarchy=False` is for internal callers that only need labels or
-        # links (`transition`, `blockers`, `create`): it skips both extra
-        # calls (sub-issues and parent).
+        # `hierarchy=False` is for internal callers that read neither the
+        # hierarchy nor the links (`transition`, `create`, the format gates,
+        # `tkt agents --enrich`): it skips every extra call (sub-issues,
+        # parent and native dependencies). `blockers` asks for links only.
+        return self._view(key, hierarchy=hierarchy, links=hierarchy)
+
+    def _view(self, key, *, hierarchy: bool, links: bool):
         issue = self._gh_json("issue", "view", key, "--repo", self.repo,
                               "--json", self._ISSUE_FIELDS)
-        children, parent = None, ""
-        if hierarchy:
+        children, parent, native = None, "", None
+        if hierarchy or links:
             host, nwo = _issue_url_repo(issue.get("url"))
             if not nwo:
                 # No usable issue URL: fall back to what the config names.
                 host, nwo = _repo_host(self.repo), self._repo_name
             number = str(issue.get("number") or key)
-            children = self._children(number, host, nwo)
-            parent = self._parent(number, host, nwo)
+            if hierarchy:
+                children = self._children(number, host, nwo)
+                parent = self._parent(number, host, nwo)
+            if links:
+                # `blockers` (links without hierarchy) reads blocked_by only.
+                native = self._native_links(number, host, nwo, blocking=hierarchy)
         if self.board == "projectv2":
             status = ""
             for item in self._repo_items():
@@ -337,10 +351,49 @@ class GithubAdapter(Adapter):
                     break
             return self._issue_to_ticket(issue, status=status, check_resolved=True,
                                          transitions=self._project()["option_names"],
-                                         children=children, parent=parent)
+                                         children=children, parent=parent,
+                                         native_links=native)
         return self._issue_to_ticket(issue, check_resolved=True,
                                      transitions=sorted(self.config.roles.values()),
-                                     children=children, parent=parent)
+                                     children=children, parent=parent,
+                                     native_links=native)
+
+    def _dependencies(self, number: str, host: str, nwo: str,
+                      which: str) -> list[dict] | None:
+        """The raw issue objects of issue `number`'s native dependencies:
+        `which` = "blocked_by" (its blockers) or "blocking" (what it
+        blocks). None on a 404: the issue exists, so the host has no
+        dependencies API (older GHES). Any other failure raises, so
+        `blockers` never reports "none" when it could not look."""
+        args = ["api", f"repos/{nwo}/issues/{number}/dependencies/{which}?per_page=100",
+                "--paginate"]
+        if host:
+            args += ["--hostname", host]
+        try:
+            out = self._gh(*args)
+        except ProviderError as e:
+            if "HTTP 404" in str(e):
+                return None
+            raise
+        return [i for i in _json_pages(out, " ".join(args)) if isinstance(i, dict)]
+
+    def _native_links(self, number: str, host: str, nwo: str, blocking=True):
+        """(blocked_by, blocks) from the native dependencies, keyed like
+        children; `resolved` = the blocker is closed, which the response
+        already carries. ([], []) where the API is missing; `blocks` stays
+        [] without `blocking` (one call fewer)."""
+        blocked_by, blocks = [], []
+        for issue in self._dependencies(number, host, nwo, "blocked_by") or []:
+            k = _related_key(issue, nwo)
+            if k and k != number and k not in {b["key"] for b in blocked_by}:
+                blocked_by.append({"key": k,
+                                   "resolved": str(issue.get("state")).lower() == "closed"})
+        for issue in (self._dependencies(number, host, nwo, "blocking")
+                      if blocking else None) or []:
+            k = _related_key(issue, nwo)
+            if k and k != number:
+                blocks.append(k)
+        return blocked_by, list(dict.fromkeys(blocks))
 
     def _children(self, number: str, host: str, nwo: str) -> list[str]:
         """Keys of the issue's sub-issues: "12" for one in this repo,
@@ -491,7 +544,7 @@ class GithubAdapter(Adapter):
         self._gh("issue", "comment", key, "--repo", self.repo, "--body", body)
 
     def blockers(self, key):
-        return self.view(key, hierarchy=False).unresolved_blockers()
+        return self._view(key, hierarchy=False, links=True).unresolved_blockers()
 
     def create(self, issue_type, summary, priority="", assignee="", body="", project=""):
         args = ["issue", "create", "--repo", self.repo, "--title", summary,
@@ -519,15 +572,69 @@ class GithubAdapter(Adapter):
 
     def link(self, key, to, link_type):
         lt = link_type.strip().lower()
-        ref = to if to.startswith("#") else f"#{to}"
         if lt in ("is blocked by", "blocks", "depends on"):
-            verb = "Blocks" if lt == "blocks" else "Blocked by"
-            issue = self._gh_json("issue", "view", key, "--repo", self.repo, "--json", "body")
-            body = (issue.get("body", "") or "").rstrip()
-            self._gh("issue", "edit", key, "--repo", self.repo,
-                     "--body", f"{body}\n\n{verb} {ref}".strip())
+            a, b = _issue_number(key), _issue_number(to)
+            if a == b:
+                raise UsageError(f"issue #{a} cannot block itself")
+            blocker, blocked = (a, b) if lt == "blocks" else (b, a)
+            self._link_blocker(blocker, blocked)
         else:
+            ref = to if to.startswith("#") else f"#{to}"
             self.comment(key, f"{link_type} {ref}")
+
+    def _link_blocker(self, blocker: str, blocked: str):
+        """Record "`blocker` blocks `blocked`" so both issues read it back.
+
+        Native issue dependencies first (the web UI shows them too): one
+        POST on the blocked issue, skipped when the link is already there.
+        Where that API 404s, append `Blocked by #A` to the blocked issue's
+        body and `Blocks #B` to the blocker's, each only if missing. Both
+        issues are fetched before anything is written, so a missing one
+        fails with nothing changed."""
+        host, nwo = _repo_host(self.repo), self._repo_name
+        issues = {n: self._rest_issue(n, host, nwo) for n in (blocker, blocked)}
+        deps = self._dependencies(blocked, host, nwo, "blocked_by")
+        if deps is not None:
+            # By database id, not key: after a rename or transfer the API
+            # names the new repo, which a configured name would miss.
+            if any(d.get("id") == issues[blocker]["id"] for d in deps):
+                return
+            args = ["api", "-X", "POST",
+                    f"repos/{nwo}/issues/{blocked}/dependencies/blocked_by",
+                    "-F", f"issue_id={issues[blocker]['id']}"]
+            if host:
+                args += ["--hostname", host]
+            self._gh(*args)
+            return
+        self._append_link(blocked, issues[blocked], "Blocked by", blocker, _BLOCKED_RE)
+        self._append_link(blocker, issues[blocker], "Blocks", blocked, _BLOCKS_RE)
+
+    def _append_link(self, number: str, issue: dict, verb: str, other: str, pattern):
+        body = (issue.get("body") or "").rstrip()
+        if other in _numbers(pattern, body):
+            return
+        self._gh("issue", "edit", number, "--repo", self.repo,
+                 "--body", f"{body}\n\n{verb} #{other}".strip())
+
+    def _rest_issue(self, number: str, host: str, nwo: str) -> dict:
+        """Issue `number` as the REST API returns it (carries the database
+        `id` the dependencies API takes); NotFound on a 404."""
+        args = ["api", f"repos/{nwo}/issues/{number}"]
+        if host:
+            args += ["--hostname", host]
+        try:
+            out = self._gh(*args)
+        except ProviderError as e:
+            if "HTTP 404" in str(e):
+                raise NotFoundError(f"no issue #{number} in {self.repo}") from e
+            raise
+        try:
+            issue = json.loads(out)
+        except json.JSONDecodeError as e:
+            raise ProviderError(f"gh returned non-JSON for {' '.join(args)}: {e}") from e
+        if not isinstance(issue, dict) or "id" not in issue:
+            raise ProviderError(f"gh returned no issue id for {' '.join(args)}")
+        return issue
 
     def worklog(self, key, from_role, note="", billable=False):
         # GitHub has no time tracking.
@@ -636,6 +743,21 @@ def _json_pages(out: str, what: str) -> list:
             items += page
         else:
             raise ProviderError(f"gh returned a non-array page for {what}")
+
+
+def _numbers(pattern, body: str) -> list[str]:
+    """Issue numbers `pattern` captures in `body`, canonical (`#05` -> "5")."""
+    return [str(int(n)) for n in pattern.findall(body)]
+
+
+def _issue_number(key) -> str:
+    """An issue number in `[github].repo` from `12` or `#12`; anything else
+    (a cross-repo `owner/repo#12`, a typo) is a UsageError."""
+    s = str(key).strip()
+    s = s[1:] if s.startswith("#") else s
+    if not (s.isascii() and s.isdigit()):
+        raise UsageError(f"blocker links take issue numbers in this repo, got {key!r}")
+    return str(int(s))
 
 
 def _related_key(issue, nwo: str) -> str:

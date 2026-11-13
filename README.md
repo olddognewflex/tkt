@@ -437,10 +437,22 @@ scope — run `gh auth refresh -s project,read:project` to enable projectv2 mode
 
 - **Key** = issue number. **type**/**priority** from label conventions
   (`type_label_prefix` / `priority_label_prefix`, or labels matching `[issue_types]`).
-- **blocked_by/blocks** parsed from the body (`Blocked by #N` / `Blocks #N`);
-  `resolved` = referenced issue closed. `tkt link` writes that line into the
-  source issue's body only, so after `tkt link 1 --to 2 --type blocks`
-  issue 2 reports no blockers (TKT-80).
+- **blocked_by/blocks** come from GitHub's native **issue dependencies**
+  (`.../dependencies/blocked_by` and `/blocking`; `resolved` = the blocker is
+  closed) merged with body text (`Blocked by #N` / `Depends on #N` /
+  `Blocks #N`, `resolved` = referenced issue closed). Full `view` reads both
+  native edges (two calls), `blockers` reads `blocked_by` only; `list` and
+  `view(hierarchy=False)` see body text only (so `list` shows no `[BLOCKED]`
+  for a native link). A native blocker in another
+  repo is keyed `owner/repo#n`. Where the dependencies API 404s (older GHES)
+  only the body is read.
+- **`tkt link A --to B --type blocks`** (or `B --to A --type "is blocked by"`
+  / `"depends on"`) adds a native dependency, so both issues and the web UI
+  show it; where that API 404s it appends `Blocks #B` to A's body and
+  `Blocked by #A` to B's instead. Both issues are fetched first (a missing one
+  fails with nothing written), re-running is a no-op, and re-running a link
+  written one-sided by an older `tkt` completes it. Blocker links take issue
+  numbers in `[github].repo`; other link types are posted as a comment.
 - **Queries are GitHub-native**, not JQL: projectv2 → Projects filter syntax
   (`gh project item-list --query`); labels → issue search (`gh issue list --search`).
 - **`list` is scoped to `[github].repo`.** Labels mode searches that repo only.
