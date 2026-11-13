@@ -599,6 +599,13 @@ class RunDriver:
         self.attempt: int = 1
         self.iteration: int = 0
         self.state_dir: Path | None = None
+        # A keyless run's P0 dir (`_select`) until the P0 handoff moves the
+        # run into its key's dir; None otherwise.
+        self._select_dir: Path | None = None
+        # A STOP aimed at this run that could not be moved at the P0
+        # handoff: the loop still honours it, and run() removes it where
+        # it lies.
+        self._stranded_stop: Path | None = None
         self.run_started: str = _now_iso()
         self.phase_started: str = self.run_started
         self.hb: Heartbeat | None = None
@@ -632,11 +639,23 @@ class RunDriver:
             # halted marker that failed to write), the STOP must survive so
             # the next run still honours it. A dry run is a preview, not the
             # run the STOP was aimed at, so it leaves the file alone.
-            if (self.state_dir is not None and not self.dry_run
-                    and not clear_stop_file(self.state_dir)):
-                self._log(f"could not remove {self.state_dir / 'STOP'}; "
-                          f"delete it by hand or the next run halts at once.")
+            if self.state_dir is not None and not self.dry_run:
+                dirs = [self.state_dir]
+                if self._stranded_stop is not None:
+                    dirs.append(self._stranded_stop.parent)
+                for d in dirs:
+                    if not clear_stop_file(d):
+                        self._log(f"could not remove {d / 'STOP'}; delete it "
+                                  f"by hand or the next run halts at once.")
             return rc
+        except BaseException:
+            # P0 picked a key, then the run died before the next loop top
+            # carried the P0 STOP over (say the advance marker failed). Left
+            # in _select/ it would halt the next, unrelated keyless run; moved,
+            # it survives (as above) for this key's next run instead.
+            if self._handoff_pending():
+                self._adopt_select_stop()
+            raise
         finally:
             # _loop returns from a dozen places; a stale beat file would leave
             # the run looking alive forever, so clean up in one guarded spot.
@@ -645,9 +664,23 @@ class RunDriver:
                 self.hb = None      # a stopped Heartbeat never beats again
 
     def _init_state(self) -> None:
-        """Initialize state dir for the current key."""
+        """Initialize state dir for the current key.
+
+        A dry run only resolves it: a preview creates no run state, not even
+        an empty dir for `tkt agents --all` to list.
+        """
         assert self.key is not None
-        self.state_dir = ensure_state_dir(self.config, self.key)
+        self.state_dir = self._resolve_state_dir(self.key)
+
+    def _resolve_state_dir(self, key: str) -> Path:
+        if self.dry_run:
+            return _state_dir(self.config, key)
+        return ensure_state_dir(self.config, key)
+
+    def _handoff_pending(self) -> bool:
+        """P0 picked a key, but the run has not left _select/ yet."""
+        return (self._select_dir is not None
+                and self.state_dir != self._select_dir)
 
     def _resume_from_marker(self) -> None:
         """Resume from the ticket's last marker, if any."""
@@ -691,40 +724,54 @@ class RunDriver:
             # For keyless start, we need a temp state dir for P0.
             if self.key is None and self.state_dir is None:
                 # Use a temporary placeholder dir for P0.
-                self.state_dir = ensure_state_dir(self.config, "_select")
+                self.state_dir = self._resolve_state_dir("_select")
+                self._select_dir = self.state_dir
 
             assert self.state_dir is not None
 
-            if self.hb is None:
+            # A dry run is a preview: no beat, which would also overwrite and
+            # then delete the beat of a live run on the same key.
+            if self.hb is None and not self.dry_run:
                 self.hb = Heartbeat(self.state_dir, self.key or "_select",
                                     self.run_config.heartbeat_interval,
                                     self.run_started)
                 self.hb.start()
-            elif self.hb.state_dir != self.state_dir:
+
+            if self.hb is not None and self.hb.state_dir != self.state_dir:
                 # P0 picked a key, so the run moved out of the _select dir.
                 self.hb.rebind(self.state_dir, self.key or "_select")
+            if self._handoff_pending():
+                self._adopt_select_stop()
 
             # The only place phase duration is stamped, so no phase mutation
             # site can forget to reset it.
             if self.phase != self._stamped_phase:
                 self.phase_started = _now_iso()
                 self._stamped_phase = self.phase
-            self.hb.update(phase=self.phase, attempt=self.attempt,
-                           iteration=self.iteration,
-                           phase_started=self.phase_started)
+            if self.hb is not None:
+                self.hb.update(phase=self.phase, attempt=self.attempt,
+                               iteration=self.iteration,
+                               phase_started=self.phase_started)
+
+            # Every halt below writes to the ticket or run state; a dry run
+            # only reports it (`_halt_marker` and the blocked branch skip the
+            # write) and keeps the real run's exit code.
 
             # Check STOP file.
-            if check_stop_file(self.state_dir):
+            if (self._stranded_stop is not None
+                    or check_stop_file(self.state_dir)):
+                if self.dry_run:
+                    self._log("STOP pending — dry run leaves it and the "
+                              "marker untouched.")
+                    return 0
                 self._log("STOP file found — halting.")
-                if self.key:
-                    self._write_marker("stopped by operator")
+                self._halt_marker("stopped by operator")
                 return 0    # run() consumes the STOP once _loop returns
 
             # Check iteration cap.
             if self.iteration >= self.max_iterations:
                 self._log(f"max iterations ({self.max_iterations}) reached — halting.")
-                if self.key:
-                    self._write_marker("max iterations reached")
+                self._halt_marker("max iterations reached")
                 return 1
 
             # Check per-phase attempt cap.
@@ -732,23 +779,23 @@ class RunDriver:
                 self._log(
                     f"phase {self.phase} failed {self.max_phase_attempts} attempts "
                     f"— transitioning to blocked."
+                    + (" (dry run: not transitioned)" if self.dry_run else "")
                 )
-                if self.key:
+                if self.key and not self.dry_run:
                     self._transition_blocked()
                 return 1
 
             # Gate checks BEFORE invocation.
             if is_gate_phase(self.phase):
                 self._log(f"phase {self.phase} is a human QA gate — halting.")
-                if self.key:
-                    self._write_marker("gate: human QA")
+                self._halt_marker("gate: human QA")
                 return 0
 
             if self.key and is_production_phase(self.phase, self.config):
                 self._log(
                     f"phase {self.phase} (deploy) is not agent-owned — halting."
                 )
-                self._write_marker("gate: production deploy not agent-owned")
+                self._halt_marker("gate: production deploy not agent-owned")
                 return 0
 
             # Check human-owned transitions if we'd be performing one.
@@ -761,7 +808,7 @@ class RunDriver:
                     self._log(
                         f"transition {from_role}->{to_role} is human-owned — halting."
                     )
-                    self._write_marker(f"gate: {from_role}->{to_role} is human-owned")
+                    self._halt_marker(f"gate: {from_role}->{to_role} is human-owned")
                     return 0
 
             # --- Invoke harness ---
@@ -769,7 +816,8 @@ class RunDriver:
             started = _now_iso()
             # Re-stamp after the increment: the pre-flight beat above still
             # carried the previous iteration's number.
-            self.hb.update(iteration=self.iteration)
+            if self.hb is not None:
+                self.hb.update(iteration=self.iteration)
             self._log(
                 f"iteration {self.iteration}/{self.max_iterations}, "
                 f"phase {self.phase}, attempt {self.attempt}"
@@ -869,6 +917,36 @@ class RunDriver:
                 if self.key:
                     self._write_marker(f"gate: {reason}")
                 return 0
+
+    def _adopt_select_stop(self) -> None:
+        """Carry a STOP sent to this keyless run during P0 into its key dir.
+
+        Until the handoff, `_select/` is this run's dir, so a STOP there was
+        aimed at it. Moved, the next loop check honours it and run()'s TKT-53
+        cleanup consumes it; left behind, it would be ignored here and halt
+        the next keyless run at once (TKT-106). A STOP landing in `_select/`
+        after this point is for whichever run lives there next.
+        """
+        assert self._select_dir is not None and self.state_dir is not None
+        src = self._select_dir / "STOP"
+        self._select_dir = None
+        if not src.is_file():
+            return
+        try:
+            os.replace(src, self.state_dir / "STOP")
+        except OSError as e:
+            # FileNotFoundError is also a missing destination dir; only a
+            # STOP that is really gone was withdrawn.
+            if isinstance(e, FileNotFoundError) and not src.exists():
+                return
+            self._log(f"could not move {src} into {self.state_dir} ({e}); "
+                      f"honouring it where it is.")
+            self._stranded_stop = src
+
+    def _halt_marker(self, reason: str) -> None:
+        """Record a halt on the ticket — unless keyless or a dry run."""
+        if self.key and not self.dry_run:
+            self._write_marker(reason)
 
     def _phase_transition_roles(self, phase: str) -> tuple[str, str]:
         """Return (from_role, to_role) for a phase's expected transition.
