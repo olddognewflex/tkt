@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import routing
 from .config import Config
 from .errors import ConfigError, TktError
 from .registry import get_adapter
@@ -57,6 +58,23 @@ PHASE_NAMES = {
     "P10": "deploy-ready",
 }
 
+# Phase -> its `[routes]` key (the skill name where a skill exists). Kept
+# apart from PHASE_NAMES, which is marker text resumes already parse.
+PHASE_ROUTES = {
+    "P0": "select-ticket",
+    "P1": "triage-ticket",
+    "P1.5": "type-route",
+    "P2": "plan-ticket",
+    "P3": "implement",
+    "P4": "self-review",
+    "P5": "open-pr",
+    "P6": "ci-fix",
+    "P7": "respond-to-review",
+    "P8": "deploy-preview",
+    "P9": "qa-ready",
+    "P10": "deploy-ready",
+}
+
 # Valid outcomes from the harness result file.
 VALID_OUTCOMES = ("advance", "retry", "blocked", "gate")
 
@@ -66,6 +84,10 @@ MARKER_SUFFIX = " -->"
 MARKER_RE = re.compile(
     r"<!-- tkt-run: (\{.*?\}) -->", re.DOTALL
 )
+
+# Stdout fallback for a harness that cannot write result.json (a read-only
+# reviewer): the last line carrying this prefix.
+RESULT_LINE_PREFIX = "TKT-RESULT: "
 
 # Default config values.
 DEFAULT_MAX_ITERATIONS = 30
@@ -364,16 +386,8 @@ class Heartbeat:
             clear_heartbeat(self.state_dir)
 
 
-def read_result_file(state_dir: Path) -> dict[str, Any] | None:
-    """Read and validate result.json; return None if missing/invalid."""
-    path = state_dir / "result.json"
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-    # Validate schema.
+def _valid_result(data: Any) -> dict[str, Any] | None:
+    """The result schema, shared by result.json and the stdout line."""
     if not isinstance(data, dict):
         return None
     if data.get("outcome") not in VALID_OUTCOMES:
@@ -381,6 +395,40 @@ def read_result_file(state_dir: Path) -> dict[str, Any] | None:
     if "phase" not in data:
         return None
     return data
+
+
+def read_result_file(state_dir: Path) -> dict[str, Any] | None:
+    """Read and validate result.json; return None if missing/invalid."""
+    path = state_dir / "result.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (ValueError, RecursionError, OSError):
+        return None
+    return _valid_result(data)
+
+
+def read_result_line(stdout: str, phase: str | None = None) -> dict[str, Any] | None:
+    """The last `TKT-RESULT: {...}` line of the harness stdout, validated.
+
+    Only the last such line counts, even if it is invalid: an earlier one is
+    a result the agent went on to supersede. Stdout can carry tool output
+    the agent printed, so a result for another `phase` is not one.
+    """
+    # Newlines only: str.splitlines() also breaks on U+2028 and friends,
+    # which may sit inside a JSON string printed with ensure_ascii=False.
+    for line in reversed(stdout.split("\n")):
+        line = line.strip()
+        if line.startswith(RESULT_LINE_PREFIX):
+            try:
+                data = _valid_result(json.loads(line[len(RESULT_LINE_PREFIX):]))
+            except (ValueError, RecursionError):
+                return None
+            if data is not None and phase is not None and data["phase"] != phase:
+                return None
+            return data
+    return None
 
 
 def delete_result_file(state_dir: Path) -> None:
@@ -425,11 +473,41 @@ def build_phase_prompt(
         f"  blocked — unrecoverable blocker, ticket should be blocked\n"
         f"  gate    — human gate reached, stop the run\n"
         f"\n"
+        f"If you cannot write files, print the same JSON on one line as the last\n"
+        f"line of your output, prefixed `{RESULT_LINE_PREFIX}`.\n"
+        f"\n"
         f"After writing result.json, exit. Do not proceed to the next phase.\n"
     )
 
 
 # ---- Harness invocation ------------------------------------------------------
+
+class HarnessOutput(str):
+    """Combined stdout+stderr, as before, with stdout kept apart so a
+    `TKT-RESULT:` line on stderr never counts as a result."""
+    stdout = ""
+
+
+def phase_command(config: Config, run_config: RunConfig,
+                  phase: str) -> tuple[str, str]:
+    """(cmd, harness) for a phase: its `[routes]` entry resolved, else
+    `[run].harness_cmd` verbatim so an unrouted phase runs as it always did
+    (no `{model}` fill, no tier)."""
+    key = PHASE_ROUTES.get(phase)
+    if key and key in routing.routes(config):
+        r = routing.resolve(config, key)
+        return r["cmd"], r["harness"]
+    return run_config.harness_cmd, ""
+
+
+def check_routes(config: Config,
+                 run_config: RunConfig) -> dict[str, tuple[str, str]]:
+    """Every phase's (cmd, harness), resolved once up front: a bad table
+    fails before any harness runs, and nothing a phase edits mid-run (a
+    skill's model_tier) can change a later phase's command. Other
+    `[routes]` keys are for interactive skills."""
+    return {p: phase_command(config, run_config, p) for p in PHASE_ROUTES}
+
 
 def invoke_harness(
     harness_cmd: str,
@@ -461,7 +539,8 @@ def invoke_harness(
             timeout=timeout if timeout > 0 else None,
             cwd=os.getcwd(),
         )
-        output = result.stdout + result.stderr
+        output = HarnessOutput(result.stdout + result.stderr)
+        output.stdout = result.stdout
         return result.returncode, output
     except subprocess.TimeoutExpired:
         return 1, f"[timeout] harness exceeded {timeout}s"
@@ -524,9 +603,12 @@ class RunDriver:
         self.phase_started: str = self.run_started
         self.hb: Heartbeat | None = None
         self._stamped_phase: str = ""
+        # phase -> (cmd, harness); resolved by run() before any state exists.
+        self._commands: dict[str, tuple[str, str]] | None = None
 
     def run(self) -> int:
         """Execute the driver loop. Returns exit code."""
+        self._commands = check_routes(self.config, self.run_config)
         # If no key, first phase is P0 (select-ticket) which picks one.
         if self.key:
             self._init_state()
@@ -700,8 +782,12 @@ class RunDriver:
                 state_dir=self.state_dir,
             )
 
+            if self._commands is None:
+                self._commands = check_routes(self.config, self.run_config)
+            cmd, harness = self._commands.get(
+                self.phase, (self.run_config.harness_cmd, ""))
             rc, output = invoke_harness(
-                self.run_config.harness_cmd,
+                cmd,
                 prompt,
                 self.timeout,
                 self.state_dir,
@@ -716,6 +802,12 @@ class RunDriver:
 
             # --- Process result ---
             result = read_result_file(self.state_dir)
+            if result is None:
+                result = read_result_line(getattr(output, "stdout", ""),
+                                          self.phase)
+                if result is not None:
+                    self._log(f"result taken from the {RESULT_LINE_PREFIX.strip()} "
+                              f"line of the harness output.")
 
             if result is None:
                 # Missing/invalid result → treat as retry.
@@ -753,6 +845,7 @@ class RunDriver:
                 "started": started,
                 "ended": ended,
                 "rc": rc,
+                "harness": harness,
             }
             append_run_log(self.state_dir, log_entry)
 

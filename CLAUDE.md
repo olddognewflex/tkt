@@ -61,7 +61,8 @@ driver; and the exec-bit check covers *this repo's index only*. The mode bits
 executable, so they don't depend on what the real pack ships (today only
 the base layer's enforcement checker). `tests/` is a stdlib
 `unittest` suite covering the run
-driver's state machine (`test_run.py`), the `tkt agents` readers and their edge
+driver's state machine (`test_run.py`) and its per-phase routing and
+`TKT-RESULT:` stdout hand-back (`test_run_routing.py`), the `tkt agents` readers and their edge
 cases (`test_agents.py`, `test_agents_edges.py`), the GitHub close/reopen sync
 (`test_github_close.py`), GitHub projectv2 repo scoping
 (`test_github_scope.py`), `select-ticket` surfacing `tkt` errors instead of
@@ -238,7 +239,12 @@ Two layers, connected only by the verb contract and the normalized schema:
     a beat written only at loop boundaries could be an hour stale and could not
     distinguish "working" from "crashed". `run_root()` resolves where all of it
     lives, honouring `[run].state_dir` so repos sharing a board can share a
-    run-state root.
+    run-state root. Each phase's command comes from `phase_command`: its
+    `PHASE_ROUTES` key resolved through `core/routing.py` when routed (all
+    routed phases are resolved up front by `check_routes`), else
+    `[run].harness_cmd` verbatim. A missing or invalid `result.json` falls
+    back to the last `TKT-RESULT: {...}` line of the harness's stdout
+    (`read_result_line`, same validation as the file).
   - `agents.py` — the read side: `tkt agents`, plus the row `tkt run --status`
     prints. Imports from `run.py`, never the reverse. Contract: for `tkt agents`,
     **no adapter is constructed and no backend call is made** unless the caller
