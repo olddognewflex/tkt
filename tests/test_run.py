@@ -722,14 +722,62 @@ class TestDriverLoop(unittest.TestCase):
 
     def test_keyless_stop_still_halts_when_handoff_move_fails(self):
         """If _select/STOP cannot be moved into the key dir at the P0
-        handoff, the run still halts, and says where the STOP was left."""
+        handoff, the run still halts and then removes the STOP where it
+        lies. A FileNotFoundError while the STOP still exists (missing
+        destination dir) is a failed move, not a withdrawn STOP."""
         from unittest import mock
         import core.run as run_mod
+        import io
+        from contextlib import redirect_stderr
+        real_replace = os.replace
+        for exc in (PermissionError("read-only"),
+                    FileNotFoundError("no such dir")):
+            with self.subTest(type(exc).__name__):
+                results = [
+                    {"phase": "P0", "outcome": "advance", "next": "P1",
+                     "reason": "picked", "ticket_key": "TKT-1"},
+                    {"phase": "P1", "outcome": "gate", "next": "P1.5",
+                     "reason": "must not be reached"},
+                ]
+                config = self._setup_env(results)
+                real_invoke = run_mod.invoke_harness
+
+                def invoke_then_stop(*a, **kw):
+                    out = real_invoke(*a, **kw)
+                    create_stop_file(config, "_select")
+                    return out
+
+                def replace(src, dst, *a, _exc=exc, **kw):
+                    if Path(dst).name == "STOP":
+                        raise _exc
+                    return real_replace(src, dst, *a, **kw)
+
+                driver = RunDriver(config, RunConfig(config))
+                with mock.patch.object(run_mod, "invoke_harness",
+                                       side_effect=invoke_then_stop), \
+                        mock.patch.object(run_mod.os, "replace",
+                                          side_effect=replace), \
+                        redirect_stderr(io.StringIO()):
+                    self.assertEqual(driver.run(), 0)
+                self.assertEqual(driver.iteration, 1)
+                marker = read_ticket_marker(get_adapter(config), "TKT-1",
+                                            driver.state_dir)
+                self.assertEqual(marker["reason"], "stopped by operator")
+                self.assertFalse(check_stop_file(
+                    ensure_state_dir(config, "_select")))
+                self.tearDown()
+
+    def test_keyless_stop_survives_crash_after_p0_pick_in_key_dir(self):
+        """A STOP sent during P0 must not stay in _select/ when the run
+        dies right after P0 picked a key (here the advance marker fails):
+        it moves to the key dir, where TKT-53 keeps it for that key's
+        next run, instead of halting the next keyless run (TKT-106)."""
+        from unittest import mock
+        import core.run as run_mod
+        from core.errors import ProviderError
         results = [
             {"phase": "P0", "outcome": "advance", "next": "P1",
              "reason": "picked", "ticket_key": "TKT-1"},
-            {"phase": "P1", "outcome": "gate", "next": "P1.5",
-             "reason": "must not be reached"},
         ]
         config = self._setup_env(results)
         real_invoke = run_mod.invoke_harness
@@ -740,21 +788,14 @@ class TestDriverLoop(unittest.TestCase):
             return out
 
         driver = RunDriver(config, RunConfig(config))
-        import io
-        from contextlib import redirect_stderr
-        err = io.StringIO()
         with mock.patch.object(run_mod, "invoke_harness",
                                side_effect=invoke_then_stop), \
-                mock.patch.object(run_mod.os, "replace",
-                                  side_effect=PermissionError("read-only")), \
-                redirect_stderr(err):
-            self.assertEqual(driver.run(), 0)
-        self.assertEqual(driver.iteration, 1)
-        marker = read_ticket_marker(get_adapter(config), "TKT-1",
-                                    driver.state_dir)
-        self.assertEqual(marker["reason"], "stopped by operator")
-        self.assertIn(str(ensure_state_dir(config, "_select") / "STOP"),
-                      err.getvalue())
+                mock.patch.object(run_mod, "write_ticket_marker",
+                                  side_effect=ProviderError("backend down")):
+            with self.assertRaises(ProviderError):
+                driver.run()
+        self.assertFalse(check_stop_file(ensure_state_dir(config, "_select")))
+        self.assertTrue(check_stop_file(ensure_state_dir(config, "TKT-1")))
 
     def _snapshot(self, config, key="TKT-1"):
         """Everything a dry run must leave alone: the ticket file (marker
@@ -797,10 +838,13 @@ class TestDriverLoop(unittest.TestCase):
             "attempt cap": ({}, "P3", 4, 1),
             "qa gate": ({}, "P9", 1, 0),
             "production gate": ({}, "P10", 1, 0),
+            "human-owned transition": ({}, "P1", 1, 0),
         }
         for name, (attrs, phase, attempt, want_rc) in cases.items():
             with self.subTest(name):
                 config = self._setup_env([])
+                if name == "human-owned transition":
+                    config.ownership["todo->in_progress"] = "human"
                 before = self._snapshot(config)
                 driver = RunDriver(config, RunConfig(config), key="TKT-1",
                                    dry_run=True)
@@ -815,6 +859,22 @@ class TestDriverLoop(unittest.TestCase):
                 self.assertEqual(get_adapter(config).view("TKT-1").status,
                                  "In Progress")
                 self.tearDown()
+
+    def test_dry_run_creates_no_state_dir(self):
+        """A dry run, keyed or keyless, leaves the run root as it found it:
+        not even an empty state dir for `tkt agents --all` to list."""
+        import io
+        from contextlib import redirect_stderr
+        from core.run import run_root
+        config = self._setup_env([])
+        for key in ("TKT-1", None):
+            with self.subTest(key=key):
+                driver = RunDriver(config, RunConfig(config), key=key,
+                                   dry_run=True)
+                with redirect_stderr(io.StringIO()):
+                    self.assertEqual(driver.run(), 0)
+                self.assertFalse(run_root(config).exists()
+                                 and any(run_root(config).iterdir()))
 
     def test_dry_run_leaves_live_heartbeat(self):
         """A dry run must not overwrite, then delete, the heartbeat of a

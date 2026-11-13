@@ -602,9 +602,10 @@ class RunDriver:
         # A keyless run's P0 dir (`_select`) until the P0 handoff moves the
         # run into its key's dir; None otherwise.
         self._select_dir: Path | None = None
-        # Set when a STOP aimed at this run could not be moved at the P0
-        # handoff: the loop must still honour it.
-        self._stop_pending: bool = False
+        # A STOP aimed at this run that could not be moved at the P0
+        # handoff: the loop still honours it, and run() removes it where
+        # it lies.
+        self._stranded_stop: Path | None = None
         self.run_started: str = _now_iso()
         self.phase_started: str = self.run_started
         self.hb: Heartbeat | None = None
@@ -638,11 +639,23 @@ class RunDriver:
             # halted marker that failed to write), the STOP must survive so
             # the next run still honours it. A dry run is a preview, not the
             # run the STOP was aimed at, so it leaves the file alone.
-            if (self.state_dir is not None and not self.dry_run
-                    and not clear_stop_file(self.state_dir)):
-                self._log(f"could not remove {self.state_dir / 'STOP'}; "
-                          f"delete it by hand or the next run halts at once.")
+            if self.state_dir is not None and not self.dry_run:
+                dirs = [self.state_dir]
+                if self._stranded_stop is not None:
+                    dirs.append(self._stranded_stop.parent)
+                for d in dirs:
+                    if not clear_stop_file(d):
+                        self._log(f"could not remove {d / 'STOP'}; delete it "
+                                  f"by hand or the next run halts at once.")
             return rc
+        except BaseException:
+            # P0 picked a key, then the run died before the next loop top
+            # carried the P0 STOP over (say the advance marker failed). Left
+            # in _select/ it would halt the next, unrelated keyless run; moved,
+            # it survives (as above) for this key's next run instead.
+            if self._handoff_pending():
+                self._adopt_select_stop()
+            raise
         finally:
             # _loop returns from a dozen places; a stale beat file would leave
             # the run looking alive forever, so clean up in one guarded spot.
@@ -651,9 +664,23 @@ class RunDriver:
                 self.hb = None      # a stopped Heartbeat never beats again
 
     def _init_state(self) -> None:
-        """Initialize state dir for the current key."""
+        """Initialize state dir for the current key.
+
+        A dry run only resolves it: a preview creates no run state, not even
+        an empty dir for `tkt agents --all` to list.
+        """
         assert self.key is not None
-        self.state_dir = ensure_state_dir(self.config, self.key)
+        self.state_dir = self._resolve_state_dir(self.key)
+
+    def _resolve_state_dir(self, key: str) -> Path:
+        if self.dry_run:
+            return _state_dir(self.config, key)
+        return ensure_state_dir(self.config, key)
+
+    def _handoff_pending(self) -> bool:
+        """P0 picked a key, but the run has not left _select/ yet."""
+        return (self._select_dir is not None
+                and self.state_dir != self._select_dir)
 
     def _resume_from_marker(self) -> None:
         """Resume from the ticket's last marker, if any."""
@@ -697,7 +724,7 @@ class RunDriver:
             # For keyless start, we need a temp state dir for P0.
             if self.key is None and self.state_dir is None:
                 # Use a temporary placeholder dir for P0.
-                self.state_dir = ensure_state_dir(self.config, "_select")
+                self.state_dir = self._resolve_state_dir("_select")
                 self._select_dir = self.state_dir
 
             assert self.state_dir is not None
@@ -710,11 +737,10 @@ class RunDriver:
                                     self.run_started)
                 self.hb.start()
 
-            if (self._select_dir is not None
-                    and self.state_dir != self._select_dir):
+            if self.hb is not None and self.hb.state_dir != self.state_dir:
                 # P0 picked a key, so the run moved out of the _select dir.
-                if self.hb is not None:
-                    self.hb.rebind(self.state_dir, self.key or "_select")
+                self.hb.rebind(self.state_dir, self.key or "_select")
+            if self._handoff_pending():
                 self._adopt_select_stop()
 
             # The only place phase duration is stamped, so no phase mutation
@@ -732,7 +758,8 @@ class RunDriver:
             # write) and keeps the real run's exit code.
 
             # Check STOP file.
-            if self._stop_pending or check_stop_file(self.state_dir):
+            if (self._stranded_stop is not None
+                    or check_stop_file(self.state_dir)):
                 if self.dry_run:
                     self._log("STOP pending — dry run leaves it and the "
                               "marker untouched.")
@@ -907,13 +934,14 @@ class RunDriver:
             return
         try:
             os.replace(src, self.state_dir / "STOP")
-        except FileNotFoundError:
-            pass    # withdrawn before we got to it
-        except OSError:
-            self._log(f"could not move {src} into {self.state_dir}; halting "
-                      f"anyway. Delete it by hand or the next keyless run "
-                      f"halts at once.")
-            self._stop_pending = True
+        except OSError as e:
+            # FileNotFoundError is also a missing destination dir; only a
+            # STOP that is really gone was withdrawn.
+            if isinstance(e, FileNotFoundError) and not src.exists():
+                return
+            self._log(f"could not move {src} into {self.state_dir} ({e}); "
+                      f"honouring it where it is.")
+            self._stranded_stop = src
 
     def _halt_marker(self, reason: str) -> None:
         """Record a halt on the ticket — unless keyless or a dry run."""

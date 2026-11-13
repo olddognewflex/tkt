@@ -938,7 +938,7 @@ is markdown-only** — elsewhere, a run resumed from a fresh worktree starts ove
 - **Dry run:** `--dry-run` writes nothing to the ticket or run state. It
   reports a pending STOP, cap or gate (with the real run's exit code) instead
   of posting a marker or moving the ticket to `blocked`, leaves the STOP in
-  place, and writes no heartbeat.
+  place, writes no heartbeat and creates no state dir.
 - **Iteration cap:** `max_iterations` (default 30) bounds runaway loops.
 - **Per-phase attempt cap:** 3 failed attempts on one phase transitions the ticket
   to `blocked` with log context.
