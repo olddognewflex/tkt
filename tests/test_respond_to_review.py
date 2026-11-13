@@ -334,17 +334,35 @@ class AnsweredQuestions(unittest.TestCase):
                       rule)
 
     def test_resolution_log_includes_answered_questions(self):
-        item = self.step6[self.step6.index("4. **"):]
+        item = self.step6[self.step6.index("4. **"):
+                          self.step6.index("**Never resolve when:**")]
         self.assertRegex(item, r"`question`")
+        self.assertIn("the summary is the answer", item)
+
+    def test_diff_check_covers_only_this_round(self):
+        # `HEAD~1 HEAD` is the previous round's commit when this round
+        # committed nothing: an unlanded fix would pass on a stale file.
+        step3 = _section(self.text, "3. Address change requests")
+        self.assertRegex(step3, r"BASE=\$\(git rev-parse HEAD\)")
+        check = self.step6[self.step6.index("1. **"):
+                           self.step6.index("Not in the diff")]
+        self.assertIn('git diff --name-only "$BASE" HEAD', check)
+        self.assertNotIn("HEAD~1", self.step6)
 
     def test_step_5_survives_a_round_with_nothing_to_commit(self):
         # A round that only answered questions changes no file: a bare
         # `git commit` exits non-zero and the `&& git push` chain stops.
         step = _section(self.text, "5. Commit and push")
-        self.assertIn("git status --porcelain", step)
+        self.assertRegex(step, r'if \[ -n "\$\(git status --porcelain\)" \]; '
+                               r'then\n\s+git add -A && git commit [^\n]*\nfi\n')
         # The push still runs: an earlier round's commit may be unpushed.
         self.assertRegex(step, r"(?m)^git push$")
         self.assertRegex(step, r"SHA=\$\(git rev-parse --short HEAD\)")
+
+
+    def test_step_8_does_not_claim_pushed_fixes(self):
+        step = _section(self.text, "8. Re-request review + move back to review lane")
+        self.assertNotRegex(step, r"[Ff]ixes pushed|Pushed fixes")
 
 
 class MirrorAnsweredQuestions(unittest.TestCase):
@@ -362,12 +380,19 @@ class MirrorAnsweredQuestions(unittest.TestCase):
                 # The fix needs the diff check; the answer must not get it.
                 self.assertIn("pushed diff", line)
                 self.assertIn("no diff check", line)
+                # A partial fix's file is in the diff too.
+                self.assertIn("whole fix", line)
+                self.assertRegex(line, r"never a partial")
+                # gh has no resolve command; name the GraphQL mutation.
+                self.assertIn("resolveReviewThread", line)
 
     def test_condensed_mirrors_skip_an_empty_commit(self):
         for rel in CONDENSED_MIRRORS:
             with self.subTest(path=rel):
                 text = (ROOT / rel).read_text(encoding="utf-8")
                 self.assertIn("skip the commit when nothing changed", text)
+                # `git commit ... && git push` never pushes on an empty round.
+                self.assertNotRegex(text, r"git commit [^\n`]*&& git push")
 
 
 class MirrorInputs(unittest.TestCase):
@@ -384,7 +409,7 @@ class MirrorInputs(unittest.TestCase):
                 m = self.INPUT.search(text)
                 self.assertIsNotNone(m, "no Input line declaring $PR and $KEY")
                 # Before the first command that uses it.
-                self.assertLess(m.start(), text.index("$PR", m.end()))
+                self.assertGreaterEqual(text.index("$PR"), m.start())
                 self.assertIn("gh pr view --json number", m.group(0))
 
     def test_every_condensed_mirror_uses_pr(self):

@@ -106,6 +106,13 @@ Record the outcome per thread — this decides what gets resolved:
 
 ### 3. Address change requests
 
+Before the first change of this round, record where it starts, so step 6
+checks only what this round committed:
+
+```shell
+BASE=$(git rev-parse HEAD)
+```
+
 For each `addressed` thread: make the code change and verify it builds/tests
 (`tkt cfg build.*`). **Do not reply yet** — fix-summary replies cite the commit
 SHA, which doesn't exist until step 5.
@@ -139,8 +146,9 @@ SHA=$(git rev-parse --short HEAD)
 
 A round that only answered questions changes no file, so there is nothing to
 commit: skip the commit when nothing changed (a bare `git commit` would exit
-non-zero). Push regardless; it is a no-op when the branch is up to date.
-`SHA` is then the pushed head, which step 7's links still point at.
+non-zero). Push regardless: it also sends any commit made earlier this round,
+and is a no-op when the branch is up to date. With no commit this round,
+`$BASE..HEAD` is empty, so no `addressed` thread passes step 6's diff check.
 
 ### 6. Resolve addressed threads + post fix summaries
 
@@ -154,7 +162,7 @@ item 3 (resolve) and item 4 (log): never run the diff check on it.
    (Questions skip this check: an answer changes no file.)
 
    ```shell
-   git diff --name-only HEAD~1 HEAD | grep -Fxq "<path>"
+   git diff --name-only "$BASE" HEAD | grep -Fxq "<path>"
    ```
 
    Not in the diff → the fix didn't land: skip it, leave the thread
@@ -226,10 +234,10 @@ for R in $(tkt cfg vcs.reviewers --json | jq -r '.[]'); do
   gh api -X POST "repos/$OWNER/$NAME/pulls/$PR/requested_reviewers" -f "reviewers[]=$R" 2>/dev/null || true
 done
 
-WL=$(tkt worklog "$KEY" --from-role in_progress --note "Revise cycle — fixes pushed, re-review requested" --json)
+WL=$(tkt worklog "$KEY" --from-role in_progress --note "Revise cycle — feedback addressed, re-review requested" --json)
 tkt transition "$KEY" review
 tkt edit "$KEY" --agent-status waiting
-tkt comment "$KEY" "Pushed fixes, re-requested review. Time in In Progress (revise cycle): \
+tkt comment "$KEY" "Addressed review feedback, re-requested review. Time in In Progress (revise cycle): \
 $(printf '%s\n' "$WL" | jq -r .human) (worklog $(printf '%s\n' "$WL" | jq -r .worklog_id)). \
 Resolved $RESOLVED_COUNT review thread(s); $OPEN_COUNT left open for the reviewer."
 ```

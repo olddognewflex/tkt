@@ -18,7 +18,7 @@ Input: PR number (`$PR`, e.g. from `gh pr view --json number --jq .number`) and 
 3. Make changes. Post answers and fix summaries on the comment's own thread: `gh api "repos/$OWNER/$NAME/pulls/$PR/comments/<root-comment-id>/replies" -f body=...` (`gh pr comment` only for a question with no thread).
 4. Commit and push (skip the commit when nothing changed, e.g. a round that only answered questions, and just push):
    ```shell
-   git add -A && git commit -m "fix(<scope>): address review feedback" && git push
+   git add -A && git commit -m "fix(<scope>): address review feedback"; git push
    ```
 5. Re-request reviewers from `tkt cfg vcs.reviewers --json`.
 6. Move ticket `revise → in_progress → review`, annotating lane time with `tkt worklog`.
@@ -33,7 +33,7 @@ Input: PR number (`$PR`, e.g. from `gh pr view --json number --jq .number`) and 
 ## Rules
 
 - `tkt worklog` is a no-op when time tracking is disabled.
-- Resolve a thread once its fix is in the pushed diff, or once you have answered its question on the thread (an answer changes no file: no diff check).
+- Resolve a thread (GraphQL `resolveReviewThread` with its thread id) once its whole fix is in the pushed diff (never a partial or bundled-and-partly-done one), or once you have answered its question on the thread (an answer changes no file: no diff check).
 - Never argue with repeated bot nits; justify "won't fix" on the thread and resolve it.
 - A human reviewer's comment you won't fix: justify on the thread, leave it open.
 - A change you only partly made: say on the thread what remains (a note, not a fix summary), leave it open.
