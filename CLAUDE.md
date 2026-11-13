@@ -99,7 +99,8 @@ and manifest: `test_pack_outside_meta.py`), its always-on base
 layer and derived skill mirrors (`test_pack_base.py`), `--prune` and its
 safety guards (`test_pack_prune.py`), mirroring a consumer's own
 `.claude/skills` into the verbatim skill surfaces (`test_pack_local.py`), `respond-to-review`
-replying in-thread across the skill and every mirror
+replying in-thread and resolving only a bot's won't-fix, across the
+skill and every mirror
 (`test_respond_to_review.py`), `Ticket.children` normalization in every
 adapter and its `view` rendering (`test_children_jira.py`,
 `test_children_github.py`, `test_children_linear.py`,
