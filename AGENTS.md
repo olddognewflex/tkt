@@ -266,7 +266,11 @@ symlinked directory above it) is skipped with a
 `skipped <path>: resolves outside the repo` note, its manifest record kept,
 and the sync still exits 0. A link to the very pack file it would copy (the
 `--link-skills` case, run from that checkout) is already current and left
-alone silently. Symlinks that stay inside the repo are followed.
+alone silently. Symlinks that stay inside the repo are followed. The same
+note covers an `AGENTS.md` that resolves outside the repo (not read or
+written; `AGENTS.md -> CLAUDE.md` still works), and a
+`.sdlc/pack-manifest.json` that resolves outside (a symlinked `.sdlc`)
+refuses the whole sync, `--check` included, with exit 64 before any write.
 
 In a consumer repo it also maintains a generated block inside that repo's
 `AGENTS.md`, delimited by markers — content outside the markers is preserved

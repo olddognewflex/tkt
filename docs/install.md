@@ -216,6 +216,16 @@ to `docs/steering` in the same repo installs the files there. A path that
 is a link to the very pack file it would copy is already current and is
 left alone without a note.
 
+The same holds for `AGENTS.md`: one that resolves outside the repo (linked
+into a dotfiles checkout, or a dangling link) gets the same note and is
+neither read nor written; an in-repo link such as `AGENTS.md -> CLAUDE.md`
+still gets the block. The manifest is stricter: if
+`.sdlc/pack-manifest.json` resolves outside the repo (`.sdlc` linked to a
+shared dir, say), `sync-pack` and `--check` refuse up front with exit 64
+and write nothing, since a sync without its own manifest would treat every
+file as pre-existing. Replace the link with a real `.sdlc` dir or
+manifest file.
+
 `sync-pack` only ever writes the paths recorded in `.sdlc/pack-manifest.json`,
 and deletes nothing unless you pass `--prune`. A re-run against an unchanged pack
 makes zero changes on disk (the manifest included), so `git status` stays clean.

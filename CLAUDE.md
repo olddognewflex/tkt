@@ -94,7 +94,8 @@ markdown `edit --body` replacing the whole body (`test_markdown_edit.py`),
 `sync-pack`'s exec-bit handling (`test_pack_exec.py`), its
 `.pre-sdlc.bak` backup of a pre-existing consumer file
 (`test_pack_backup.py`), never writing through a symlink that resolves
-outside the consumer tree (`test_pack_outside.py`), its always-on base
+outside the consumer tree (`test_pack_outside.py`; the AGENTS.md block
+and manifest: `test_pack_outside_meta.py`), its always-on base
 layer and derived skill mirrors (`test_pack_base.py`), `--prune` and its
 safety guards (`test_pack_prune.py`), mirroring a consumer's own
 `.claude/skills` into the verbatim skill surfaces (`test_pack_local.py`), `respond-to-review`
@@ -173,7 +174,8 @@ Two layers, connected only by the verb contract and the normalized schema:
     `<name>.pre-sdlc.bak` copy `_backup` makes before overwriting a file the pack
     never wrote, never writes a pack file whose path resolves outside the
     consumer tree (`_within`, checked before every plan write; skipped with a
-    note, record kept; the AGENTS.md block and the manifest are not covered),
+    note, record kept; an outside AGENTS.md is skipped the same way, and an
+    outside manifest refuses the whole sync up front with a `UsageError`),
     and is idempotent. `_HARNESSES` is the registry of
     named harnesses → (pack source, consumer dest) dirs; the installed set is
     additive and persisted in the manifest's `harnesses` list, so a bare re-run

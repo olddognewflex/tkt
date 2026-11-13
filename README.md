@@ -194,7 +194,8 @@ the full guide.
   a pack dir linked elsewhere, a `--link-skills` dir pointing at another
   checkout) is skipped with a note, never written through. A link to the very
   pack file it would copy is already current. Symlinks that stay inside the
-  repo keep working.
+  repo keep working. An `AGENTS.md` resolving outside is skipped the same
+  way; a `.sdlc` (manifest) resolving outside refuses the sync (exit 64).
 - Removing: files the selection no longer ships (a dropped harness, a retired
   skill) are kept and recorded until you run `tkt sync-pack --prune`, which
   deletes only unmodified files the previous sync recorded inside the pack's
