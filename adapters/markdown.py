@@ -98,6 +98,24 @@ def _coerce_parent(value, key: str = "") -> str:
     return "" if out == key else out
 
 
+def _first_summary_section(body: str) -> list[str]:
+    """Non-blank lines of the first `## Summary` section, stripped. The
+    section ends at the next `## ` heading; an empty first Summary yields
+    [] rather than falling through to a later one."""
+    lines: list[str] = []
+    inside = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if inside:
+                break
+            inside = stripped.lower() == "## summary"
+            continue
+        if inside and stripped:
+            lines.append(stripped)
+    return lines
+
+
 def _as_list(value) -> list:
     """A frontmatter list key, tolerating a bare scalar (`children: X`)."""
     value = value or []
@@ -269,6 +287,13 @@ class MarkdownAdapter(Adapter):
                 acceptance.append(stripped[1:].strip())
             elif section is None and stripped:
                 description_lines.append(stripped)
+        # A body that goes straight into `## Summary` has no preamble, so the
+        # first Summary section stands in as the description. A preamble,
+        # when present, always wins. Comments are cut first: a comment is
+        # inserted verbatim, so a `## Summary` line in one is not the ticket's.
+        if not description_lines:
+            description_lines = _first_summary_section(
+                cut_managed_tail(body, "comments"))
 
         status = str(fm.get("status", ""))
         issue_type = str(fm.get("type", ""))
