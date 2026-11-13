@@ -203,6 +203,90 @@ class Mirrors(unittest.TestCase):
                 self.assertNotIn("no unresolved comments", text)
                 self.assertIn("no unresolved bot comments", text)
 
+    def test_condensed_mirrors_block_exit_on_ordinary_human_threads(self):
+        # PR #114 review: "no unresolved bot comments" alone lets the loop
+        # exit with a human's ordinary change request still open (approval
+        # can stay in place after a later inline comment). Only a human
+        # thread deliberately left open is exempt.
+        for rel in CONDENSED_MIRRORS:
+            with self.subTest(path=rel):
+                line = _exit_line((ROOT / rel).read_text(encoding="utf-8"))
+                self.assertRegex(
+                    line,
+                    r"no unresolved human thread except one left open on purpose")
+                self.assertIn("partial", line)
+                self.assertRegex(line, WONT_FIX)
+                # A reviewer reply on an exempt thread is new feedback.
+                self.assertRegex(line, r"hasn't replied to since")
+
+    def test_condensed_mirrors_define_a_partial_fix(self):
+        # The exit line exempts "a partial fix"; a mirror-only agent needs to
+        # know that means stating what remains, not a way out of the change.
+        for rel in CONDENSED_MIRRORS:
+            with self.subTest(path=rel):
+                text = (ROOT / rel).read_text(encoding="utf-8")
+                self.assertRegex(text, r"partly made: say on the thread what remains "
+                                       r"\(a note, not a fix summary\), leave it open")
+
+
+def _exit_line(text: str) -> str:
+    """The condensed mirror's loop-exit step."""
+    lines = [ln for ln in text.splitlines() if "Loop until" in ln]
+    if len(lines) != 1:
+        raise AssertionError(f"expected one 'Loop until' line, got {lines}")
+    return lines[0]
+
+
+class LoopExit(unittest.TestCase):
+    """PR #114 review: step 9 exempts only human threads left open on purpose."""
+
+    def setUp(self):
+        step = _section(CANONICAL.read_text(encoding="utf-8"),
+                        "9. Loop until clean")
+        self.criteria = step[:step.index("Cap at")]
+
+        self.text = " ".join(self.criteria.split())
+
+    def test_ordinary_human_thread_blocks_exit(self):
+        self.assertRegex(self.text,
+                         r"Every unresolved human thread is one you recorded")
+        self.assertRegex(self.text,
+                         r"[Aa]ny other unresolved human thread.*?step 2")
+
+    def test_only_partial_and_skipped_human_threads_are_exempt(self):
+        self.assertIn("`partial`", self.text)
+        self.assertIn("`skipped`", self.text)
+
+    def test_reviewer_reply_ends_the_exemption(self):
+        # Otherwise a reviewer's "no, please fix this" on a skipped thread
+        # holds the loop for one poll, then it exits with the thread open.
+        self.assertRegex(self.text, r"hasn't replied on it since")
+        self.assertRegex(self.text, r"reviewer reply on a thread you left "
+                                    r"open.*?step 2")
+
+
+class MissingFix(unittest.TestCase):
+    """A fix that never landed is redone, not exempted as `partial`."""
+
+    def test_step_6_redoes_a_fix_missing_from_the_diff(self):
+        step = " ".join(_section(
+            CANONICAL.read_text(encoding="utf-8"),
+            "6. Resolve addressed threads + post fix summaries").split())
+        rule = step[step.index("Not in the diff"):]
+        rule = rule[:rule.index("2. **Post")]
+        self.assertNotIn("re-categorize as `partial`", rule)
+        self.assertIn("redo it next cycle", rule)
+
+    def test_step_6_diff_check_skips_questions(self):
+        # An answered question touches no file; running the diff check on it
+        # would "redo" it every cycle and block exit until the cap.
+        step = " ".join(_section(
+            CANONICAL.read_text(encoding="utf-8"),
+            "6. Resolve addressed threads + post fix summaries").split())
+        check = step[step.index("1. **"):step.index("Not in the diff")]
+        self.assertRegex(check, r"For an `addressed` thread")
+        self.assertRegex(check, r"[Qq]uestions skip this check")
+
 
 if __name__ == "__main__":
     unittest.main()

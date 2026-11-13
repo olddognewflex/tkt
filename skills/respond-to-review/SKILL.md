@@ -138,14 +138,17 @@ SHA=$(git rev-parse --short HEAD)
 
 For each thread categorized `addressed` or `question`:
 
-1. **Verify the fix is actually in the diff.** A thread whose file was never
-   touched must not be marked resolved:
+1. **For an `addressed` thread, verify the fix is actually in the diff.** A
+   thread whose file was never touched must not be marked resolved.
+   (Questions skip this check: an answer changes no file.)
 
    ```shell
    git diff --name-only HEAD~1 HEAD | grep -Fxq "<path>"
    ```
 
-   Not in the diff → re-categorize as `partial` and skip.
+   Not in the diff → the fix didn't land: skip it, leave the thread
+   unresolved, and redo it next cycle. It is not a `partial`, which is a
+   change you deliberately made only part of.
 
 2. **Post a fix-summary reply** on the thread:
 
@@ -223,6 +226,12 @@ Resolved $RESOLVED_COUNT review thread(s); $OPEN_COUNT left open for the reviewe
 Re-fetch after each push. Exit only when **all** hold:
 
 - No automated-reviewer comments on unresolved threads
+- Every unresolved human thread is one you recorded `partial` (what remains
+  listed in step 7's left-open log) or `skipped` (justified, or asked about,
+  on its thread), and the reviewer hasn't replied on it since. Any other
+  unresolved human thread, even one posted after approval, and any reviewer
+  reply on a thread you left open, is new feedback: take it back through
+  step 2
 - `reviewDecision == APPROVED` (a pending/`REVIEW_REQUIRED` state is NOT enough)
 - No new comments in the last poll
 
