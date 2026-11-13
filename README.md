@@ -811,7 +811,7 @@ tkt run TKT-1                   # run/resume TKT-1's pipeline
 tkt run                         # P0 select-ticket first, then proceed
 tkt run --status TKT-1          # print this run's state (local first; needs no adapter)
 tkt run --stop TKT-1            # halt at the next iteration boundary
-tkt run --dry-run TKT-1         # print the prompt without invoking
+tkt run --dry-run TKT-1         # print the prompt; writes nothing
 tkt run --max-iterations 5 TKT-1
 ```
 
@@ -931,7 +931,14 @@ is markdown-only** — elsewhere, a run resumed from a fresh worktree starts ove
   driver exits normally (not a crash), whether halted by the STOP or by a gate
   or blocked outcome from the invocation in flight, it deletes the file, so
   `tkt agents` stops flagging it and a later `tkt run KEY` resumes normally.
-  A `--dry-run` leaves it in place.
+  A keyless `tkt run` lives in `.sdlc/state/run/_select/` until P0 picks a
+  ticket (`tkt run --stop _select`); a STOP sent there during P0 moves with
+  the run into the picked key's dir, halts it with a marker on that ticket,
+  and is consumed like any other.
+- **Dry run:** `--dry-run` writes nothing to the ticket or run state. It
+  reports a pending STOP, cap or gate (with the real run's exit code) instead
+  of posting a marker or moving the ticket to `blocked`, leaves the STOP in
+  place, and writes no heartbeat.
 - **Iteration cap:** `max_iterations` (default 30) bounds runaway loops.
 - **Per-phase attempt cap:** 3 failed attempts on one phase transitions the ticket
   to `blocked` with log context.
