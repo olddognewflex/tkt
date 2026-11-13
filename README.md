@@ -190,6 +190,11 @@ the full guide.
   wrote is copied to `<name>.pre-sdlc.bak` first (path printed; never
   tracked or pruned). Executable bits are carried and a lost one is repaired
   (only ever added, never stripped); see `docs/install.md`.
+- Symlinks: a pack path that resolves outside the repo (a dangling symlink,
+  a pack dir linked elsewhere, a `--link-skills` dir pointing at another
+  checkout) is skipped with a note, never written through. A link to the very
+  pack file it would copy is already current. Symlinks that stay inside the
+  repo keep working.
 - Removing: files the selection no longer ships (a dropped harness, a retired
   skill) are kept and recorded until you run `tkt sync-pack --prune`, which
   deletes only unmodified files the previous sync recorded inside the pack's

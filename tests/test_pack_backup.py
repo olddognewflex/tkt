@@ -6,9 +6,11 @@ pre-existing file and a locally modified pack file are not backed up; an
 existing backup is never overwritten (identical one reused, otherwise the
 next numbered name, and a hard link to the file itself is not a backup);
 a symlink planted at the backup path is not followed;
-a failed backup, an unreadable file or one resolving outside the consumer
-tree (a leaf symlink or a symlinked dir) leaves the file untouched, out of the manifest,
-and exits 1, and a failure is retried by the next sync; backups are never in
+a failed backup or an unreadable file leaves the file untouched, out of
+the manifest, and exits 1, and a failure is retried by the next sync; one
+resolving outside the consumer tree (a leaf symlink or a symlinked dir) is
+skipped before any backup (TKT-108: a note, exit 0, nothing written on
+either side of the link, out of the manifest); backups are never in
 the manifest, never shipped from a pack tree, and survive `--prune`;
 `--check` writes none.
 
@@ -194,11 +196,12 @@ class Backup(TempPack):
         link_dir = self.consumer / ".claude/skills/demo"
         link_dir.parent.mkdir(parents=True)
         link_dir.symlink_to(other, target_is_directory=True)
-        rc, _, err = self.sync()
-        self.assertEqual(rc, 1)
-        self.assertIn("resolves outside the consumer tree", err)
+        rc, out, _ = self.sync()
+        self.assertEqual(rc, 0)
+        self.assertIn(f"skipped {REL}: resolves outside the repo", out)
         self.assertEqual((other / "SKILL.md").read_text(), "OTHER CHECKOUT\n")
         self.assertEqual([p.name for p in other.iterdir()], ["SKILL.md"])
+        self.assertNotIn(REL, self.manifest()["files"])
 
     def test_leaf_symlink_outside_tree_is_left_alone(self):
         outside = self.tmp / "outside.md"
@@ -206,10 +209,9 @@ class Backup(TempPack):
         dst = self.consumer / REL
         dst.parent.mkdir(parents=True)
         dst.symlink_to(outside)
-        rc, _, err = self.sync()
-        self.assertEqual(rc, 1)
-        self.assertIn(f"could not back up pre-existing {REL} "
-                      "(it resolves outside the consumer tree)", err)
+        rc, out, _ = self.sync()
+        self.assertEqual(rc, 0)
+        self.assertIn(f"skipped {REL}: resolves outside the repo", out)
         self.assertEqual(outside.read_text(), "OUTSIDE\n")
         self.assertTrue(dst.is_symlink())
         self.assertFalse(os.path.lexists(self.consumer / BAK))

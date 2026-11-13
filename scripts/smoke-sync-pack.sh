@@ -4,8 +4,8 @@
 # AGENTS.md custom-content preservation, named/sticky harness selection, the
 # exec bit, the always-on base layer (incl. under a narrow selection), the
 # .pre-sdlc.bak backup of a pre-existing file, --prune of a dropped harness,
-# and mirroring a consumer's own .claude/skills into the verbatim skill
-# surfaces.
+# mirroring a consumer's own .claude/skills into the verbatim skill
+# surfaces, and never writing through a symlink that leaves the repo.
 # Prints PASS/FAIL per case.
 set -euo pipefail
 
@@ -27,7 +27,7 @@ git_init() {
 }
 
 C="$(mktemp -d)"
-trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}" "${C9:-}" "${C10:-}"' EXIT
+trap 'rm -rf "$C" "${C2:-}" "${C3:-}" "${C4:-}" "${C5:-}" "${C6:-}" "${P7:-}" "${C7:-}" "${C8:-}" "${C9:-}" "${C10:-}" "${C11:-}" "${O11:-}"' EXIT
 
 # ---- case 1: fresh install --------------------------------------------------
 # Expected counts are derived from the pack, not hardcoded, so adding a skill
@@ -301,6 +301,34 @@ out13="$("$TKT" sync-pack --check --dir "$C10" 2>&1)" \
   || { ok=0; echo "  --check not clean after sync: $out13"; }
 [ "$ok" = "1" ] && pass "case13 local skill mirrored to verbatim surfaces only" \
                 || fail "case13 local skill mirror"
+
+# ---- case 14: no pack file is written through a symlink out of the repo ----
+# A dangling leaf symlink (its target must not be created) and a dest dir
+# symlinked outside (nothing lands in it) are skipped with a note, the sync
+# still succeeds, and --check does not call them missing. A dest dir linked
+# to another dir *inside* the repo keeps working.
+C11="$(mktemp -d)"; O11="$(mktemp -d)"
+mkdir -p "$C11/.claude/skills/triage-ticket" "$C11/.kiro" "$C11/.agents" "$C11/in-repo/workflows"
+ln -s "$O11/leaked.md" "$C11/.claude/skills/triage-ticket/SKILL.md"
+ln -s "$O11" "$C11/.kiro/steering"
+ln -s ../in-repo/workflows "$C11/.agents/workflows"
+ok=1
+set +e
+out14="$("$TKT" sync-pack --dir "$C11" 2>&1)"; rc14=$?
+chk14="$("$TKT" sync-pack --check --dir "$C11" 2>&1)"; crc14=$?
+set -e
+[ "$rc14" = 0 ] || { ok=0; echo "  sync rc=$rc14: $out14"; }
+[ ! -e "$O11/leaked.md" ] || { ok=0; echo "  dangling leaf target created"; }
+[ -z "$(ls -A "$O11")" ] || { ok=0; echo "  wrote outside: $(ls -A "$O11")"; }
+echo "$out14" | grep -q "skipped .claude/skills/triage-ticket/SKILL.md: resolves outside the repo" \
+  || { ok=0; echo "  no note for the dangling leaf: $out14"; }
+echo "$out14" | grep -q "skipped .kiro/steering/.*: resolves outside the repo" \
+  || { ok=0; echo "  no note for the symlinked dir: $out14"; }
+[ -n "$(ls -A "$C11/in-repo/workflows")" ] || { ok=0; echo "  in-repo linked dir got nothing"; }
+[ "$crc14" = 0 ] && ! echo "$chk14" | grep -q "missing" \
+  || { ok=0; echo "  --check rc=$crc14: $chk14"; }
+[ "$ok" = "1" ] && pass "case14 symlinks out of the repo skipped; in-repo symlinked dir still synced" \
+                || fail "case14 outside symlinks"
 
 echo
 if [ "$fails" = "0" ]; then

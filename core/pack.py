@@ -25,6 +25,15 @@ Guarantees:
     only ever added, a destination that resolves outside the consumer tree
     (a symlinked file or parent directory) is left alone, and a file that
     cannot be chmod'ed is a warning rather than an aborted sync.
+  * Never writes through a symlink out of the repo. A pack path whose
+    resolved location, leaf or any parent dir, is outside the consumer tree
+    (a dangling leaf symlink, a dest dir linked elsewhere, a skill dir
+    `tkt init --link-skills` pointed at another checkout) is skipped with a
+    note: not written, backed up or chmod'ed, and `--check` does not call it
+    missing. Its manifest record, if any, is kept so it is not retired.
+    Symlinks that stay inside the tree (a pack dir linked to a shared dir in
+    the same repo) are followed as before, and a path that links to the very
+    pack file it would copy is already current, so it is left alone silently.
 
 Base layer: some dirs ship on every sync, whatever harnesses are selected
 (`_BASE_LAYER`): the `.agents/skills` mirror, `.agents/workflows`,
@@ -58,6 +67,7 @@ Runs BEFORE config exists (a consumer may sync before `tkt init`), so it never
 calls Config.load(). Stdlib only.
 """
 import contextlib
+import errno
 import fnmatch
 import hashlib
 import json
@@ -196,8 +206,30 @@ def _grant_exec(dst: Path) -> bool:
 def _within(dst: Path, target: Path) -> bool:
     """True when `dst`, with every symlink in its path resolved, is inside
     `target` (already resolved). Works for a not-yet-created leaf: resolve
-    is non-strict, so its existing parents are still followed."""
-    return dst.resolve().is_relative_to(target)
+    is non-strict, so its existing parents are still followed, and so is a
+    dangling leaf symlink. A path that cannot be resolved (a symlink loop)
+    is not inside: nothing can be written through it anyway."""
+    try:
+        resolved = dst.resolve()
+    except (OSError, RuntimeError):    # RuntimeError: loop, Python < 3.13
+        return False
+    # Newer Pythons hand back a looping path unresolved instead of raising;
+    # only a stat of it shows the loop.
+    try:
+        os.stat(resolved)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            return False
+    return resolved.is_relative_to(target)
+
+
+def _is_source(dst: Path, src: Path) -> bool:
+    """True when `dst` already is `src` through a symlink, at the leaf or a
+    parent. False for anything that cannot be resolved."""
+    try:
+        return dst.exists() and dst.resolve() == src.resolve()
+    except (OSError, RuntimeError):
+        return False
 
 
 def _try_grant_exec(dst: Path, rel: str, failed: list) -> int:
@@ -1167,6 +1199,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     # (relpath, error) for pre-existing files that could not be backed up,
     # and so were left untouched.
     backup_failed: list[tuple[str, str]] = []
+    # Plan paths left alone because they resolve outside the consumer tree.
+    outside: list[str] = []
     writes = 0
 
     for src, rel in plan:
@@ -1174,24 +1208,27 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         new_sha = _sha_bytes(content)
         dst = target / rel
         new_files[rel] = new_sha
-        if rel in local_rels and not _within(dst, target):
-            # A dangling or outside symlink at the leaf or a parent inside
-            # the copy dir: `exists()` is False and a write would follow it
-            # out of the tree. Leave it; keep any record so it is not retired.
-            local_notes.append(f"skipped {rel}: resolves outside the repo")
-            if isinstance(old_files.get(rel), str):
-                new_files[rel] = old_files[rel]
+        if _is_source(dst, src):
+            # A link to the very file it would copy (`tkt init --link-skills`
+            # into this pack, or a local skill linked to itself): already
+            # current, and writing would only rewrite the source in place.
+            continue
+        if not _within(dst, target):
+            # The leaf or any parent resolves outside the consumer tree: a
+            # dangling leaf symlink (`exists()` is False, so a write would
+            # create its target), a symlinked dest dir, or a skill dir
+            # `--link-skills` pointed at another checkout. Never write, back
+            # up or chmod through it. Keep any record so the path is not
+            # retired; with none, leave it out so a later sync, once the link
+            # is gone, still treats a file there as pre-existing.
+            outside.append(rel)
+            man_sha = last_sha(rel)
+            if man_sha is not None:
+                new_files[rel] = man_sha
             else:
                 del new_files[rel]
             continue
-        if rel in local_rels and dst.exists() and dst.resolve() == src.resolve():
-            continue                   # a link to the source: nothing to copy
-        # Only change modes on files that really live in the consumer tree.
-        # Checking `dst.is_symlink()` is not enough: `tkt init --link-skills`
-        # symlinks whole skill *directories*, so a leaf that is a plain file
-        # can still resolve through a symlinked parent to a file outside the
-        # tree, and chmod would follow it there.
-        want_exec = _is_exec(src.stat().st_mode) and _within(dst, target)
+        want_exec = _is_exec(src.stat().st_mode)
 
         if check:
             if not dst.exists():
@@ -1229,15 +1266,6 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
                 # own content). Don't clobber it silently: keep a copy first.
                 if cur_sha != new_sha:
                     try:
-                        # A symlinked file, or one reached through a
-                        # symlinked dir (`tkt init --link-skills`), belongs
-                        # to another tree, perhaps another pack checkout that
-                        # would ship the backup on. Resolving `dst` itself
-                        # catches both: it is not ours to back up or to
-                        # overwrite.
-                        if not _within(dst, target):
-                            raise OSError("it resolves outside the "
-                                          "consumer tree")
                         bak = _backup(dst, cur)
                     except OSError as e:
                         # No copy, no overwrite. Left out of the manifest so
@@ -1307,6 +1335,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
         print(f"base layer: {', '.join(_BASE_DESTS)}")
         if local_names:
             print(f"local skills: {', '.join(local_names)} -> {', '.join(surfaces)}")
+        for rel in outside:
+            print(f"skipped {rel}: resolves outside the repo")
         for note in local_notes:
             print(note)
         _report_check(missing, locally_mod, outdated, not_exec)
@@ -1401,6 +1431,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
     for rel, err in chmod_failed:
         print(f"warning: could not make {rel} executable ({err}) — git will not "
               f"run it; fix its ownership and re-run sync-pack", file=sys.stderr)
+    for rel in outside:
+        print(f"skipped {rel}: resolves outside the repo")
     for note in local_notes:
         print(note)
 
@@ -1445,7 +1477,7 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
               f"re-run with --prune to remove them")
     if (writes == 0 and modes == 0 and not warnings and not wrote_manifest
             and not chmod_failed and not pruned and not prune_failed
-            and not backup_failed):
+            and not backup_failed and not outside):
         print(f"sync-pack: up to date ({len(new_files)} entries) at {target}")
     else:
         summary = f"sync-pack: {writes} file(s) written to {target}"
@@ -1463,6 +1495,8 @@ def sync_pack(target_dir: str, all_harnesses: bool, check: bool,
             summary += f", {len(backups)} backed up"
         if backup_failed:
             summary += f", {len(backup_failed)} NOT written (backup failed)"
+        if outside:
+            summary += f", {len(outside)} skipped (outside the repo)"
         print(summary)
         if wrote_manifest:
             print(f"  manifest: {manifest_path}")
