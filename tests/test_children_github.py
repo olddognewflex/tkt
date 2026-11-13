@@ -94,6 +94,8 @@ class StubGithub(GithubAdapter):
                 # (tests/test_parent_github.py covers that call).
                 raise ProviderError(f"gh {' '.join(args)} failed: "
                                     "gh: Not Found (HTTP 404)")
+            if "/dependencies/" in args[1]:
+                return "[]\n"   # TKT-80: native blocker links; none here
             return "".join(json.dumps(list(p)) for p in self.pages) + "\n"
         return ""
 

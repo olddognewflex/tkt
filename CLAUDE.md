@@ -111,7 +111,8 @@ adapter and its `view` rendering (`test_children_jira.py`,
 `test_parent_markdown.py`, `test_parent_openkanban.py`,
 `test_parent_cli.py`), the two-sided `link --type blocks|"is blocked by"`
 on the local boards (`test_blocks_markdown.py`,
-`test_blocks_openkanban.py`), `tkt --version` (`test_version.py`), shipped shell snippets
+`test_blocks_openkanban.py`) and on GitHub via native issue
+dependencies or both bodies (`test_blocks_github.py`), `tkt --version` (`test_version.py`), shipped shell snippets
 piping JSON into `jq` with `printf`, never `echo`
 (`test_no_echo_jq.py`), the `container` type class and its precedence
 (`test_issue_types.py`), `child_states` per adapter (`test_child_states.py`),
@@ -284,9 +285,10 @@ the date fields `due` / `scheduled` / `completed`, and `agent_status` (board age
 the adapter, never passed in, so re-asserting the same state doesn't reset it),
 and the hierarchy edges `children` (direct child keys) and `parent` (one key or
 `""`). Edges that cost an extra backend call — jira and github children, github
-parent — are filled on `view` only. Every adapter's `view` takes
+parent, github native blocker links — are filled on `view` only
+(`blockers` asks github for the links alone). Every adapter's `view` takes
 `hierarchy=False` to skip those calls (the rest ignore it); internal callers that
-read neither edge — `blockers`, `create`, `tkt agents --enrich` — pass it. On
+read none of them — `create`, `tkt agents --enrich` — pass it. On
 the local boards (markdown, openkanban) `tkt link --type child|parent` writes
 both edges so they cannot drift. `rollup` (children closed / total, open keys,
 `ready_to_close`) is filled by `cli.py` on `view` of a container only, through

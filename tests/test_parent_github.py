@@ -97,6 +97,8 @@ class StubGithub(GithubAdapter):
         self.calls.append(args)
         if args[0] == "api" and "/sub_issues" in args[1]:
             return "[]\n"
+        if args[0] == "api" and "/dependencies/" in args[1]:
+            return "[]\n"   # TKT-80: native blocker links; none here
         if args[0] == "api" and args[1].endswith("/parent"):
             if self.parent_status:
                 raise http_error(args, self.parent_status)
