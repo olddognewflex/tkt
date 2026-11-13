@@ -35,6 +35,8 @@ ignore them, so they are deliberately not in the shared `TEMPLATE`.
 """
 from __future__ import annotations
 
+import re
+
 # Body section headings `apply` must not overwrite — the backend manages them
 # (e.g. the timestamped comment log appended by `tkt comment`). Compared
 # case-insensitively against each `## ` heading.
@@ -104,26 +106,81 @@ def body_without_summary(body: str) -> str:
     return "\n".join(out).strip()
 
 
+# Fences as CommonMark (and enforcement/check-artifact-format.mjs) read them:
+# up to three spaces of indent, three or more backticks or tildes; a backtick
+# fence's info string holds no backtick; the close uses the same character,
+# is at least as long, and has no info string. An unclosed fence runs to EOF.
+_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+
+
+def code_mask(lines: list[str]) -> list[bool]:
+    """For each line, True when it is a fence line or inside a fenced code
+    block, so it is content and never structure."""
+    out: list[bool] = []
+    fence = ""
+    for line in lines:
+        if fence:
+            m = _FENCE_CLOSE.match(line)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = ""
+            out.append(True)
+            continue
+        m = _FENCE_OPEN.match(line)
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
+            out.append(True)
+            continue
+        out.append(False)
+    return out
+
+
+def indent_of(line: str) -> str:
+    """The line's leading spaces and tabs."""
+    return line[:len(line) - len(line.lstrip(" \t"))]
+
+
+def h2_text(line: str) -> str | None:
+    """The text of a `## ` heading line, or None. Four or more columns of
+    indent (a tab counts as four) make the line indented code, not a
+    heading. Callers skip fenced lines first (`code_mask`)."""
+    lead = indent_of(line)
+    if "\t" in lead or len(lead) > 3:
+        return None
+    s = line.strip()
+    return s[3:].strip() if s.startswith("## ") else None
+
+
+def is_list_marker(s: str, bullets: str = "-*") -> bool:
+    """`s` (a stripped line) opens a list item: a bullet followed by
+    whitespace or nothing. `-flag` or `*word*` is text, not an item."""
+    return bool(s) and s[0] in bullets and (len(s) == 1 or s[1] in " \t")
+
+
+def _norm_name(text: str) -> str:
+    """A heading's name as the format gates compare it: closing `#`s
+    dropped, whitespace collapsed, lowercased, a trailing colon dropped."""
+    text = re.sub(r"(^|[ \t]+)#+$", "", text)
+    return " ".join(text.split()).lower().rstrip(":").rstrip()
+
+
 def section_bounds(body: str, name_lower: str) -> tuple[int, int] | None:
     """(start, end) line indices for the `## <name>` section — end exclusive,
-    bounded by the next `## ` heading or EOF — or None if absent. A `## `
-    line inside a ``` or ~~~ fence is content, not a heading."""
+    bounded by the next `## ` heading or EOF — or None if absent. The name
+    must match exactly (case and spacing aside), as `gates.cut_managed_tail`
+    matches it, so `## Comments from review` is not the log. A `## ` line
+    inside a ``` or ~~~ fence, or indented as code, is content, not a
+    heading."""
     lines = body.splitlines()
     start = None
-    fence = ""
-    for i, line in enumerate(lines):
-        s = line.strip()
-        if fence:
-            if s.startswith(fence):
-                fence = ""
-            continue
-        if s.startswith(("```", "~~~")):
-            fence = s[:3]
+    for i, (line, code) in enumerate(zip(lines, code_mask(lines))):
+        heading = None if code else h2_text(line)
+        if heading is None:
             continue
         if start is None:
-            if s.startswith("## ") and s[3:].strip().lower().startswith(name_lower):
+            if _norm_name(heading) == name_lower:
                 start = i
-        elif s.startswith("## "):
+        else:
             return (start, i)
     if start is None:
         return None

@@ -98,22 +98,61 @@ def _coerce_parent(value, key: str = "") -> str:
     return "" if out == key else out
 
 
-def _first_summary_section(body: str) -> list[str]:
-    """Non-blank lines of the first `## Summary` section, stripped. The
-    section ends at the next `## ` heading; an empty first Summary yields
-    [] rather than falling through to a later one."""
-    lines: list[str] = []
-    inside = False
-    for line in body.splitlines():
+def _read_body(body: str) -> tuple[str, list[str], list[str]]:
+    """(summary, description lines, acceptance items) of a ticket body.
+
+    The summary is the first `# ` line, found as `_split_body` finds it;
+    text above it is dropped, as `edit` drops it. Sections start at `## `
+    headings outside fenced code and not indented as code; the scan stops
+    at the `## Comments` log, whose stamps are inserted verbatim, so a
+    heading quoted in a comment is not the ticket's. The description is
+    the preamble before the first section, or, when there is none, every
+    section's text except Acceptance, headings kept. Both are non-blank
+    lines, stripped.
+
+    In an Acceptance section each list item is one criterion. An indented
+    line right after an item continues it, joined with one space, unless
+    it opens a list item of its own; a blank line, unindented prose, a
+    fence or a heading ends the item."""
+    lines = cut_managed_tail(body, "comments").splitlines()
+    summary = ""
+    preamble: list[str] = []
+    sections: list[str] = []
+    acceptance: list[str] = []
+    section = None          # None = preamble, "acceptance", "other"
+    open_item = False
+    for line, code in zip(lines, ticketdoc.code_mask(lines)):
         stripped = line.strip()
-        if stripped.startswith("## "):
-            if inside:
-                break
-            inside = stripped.lower() == "## summary"
+        if stripped.startswith("# ") and not summary:
+            # `_split_body` keeps only what follows the summary, so text
+            # above it is neither description nor acceptance.
+            summary = stripped[2:].strip()
+            preamble, sections, acceptance = [], [], []
+            section, open_item = None, False
             continue
-        if inside and stripped:
-            lines.append(stripped)
-    return lines
+        heading = None if code else ticketdoc.h2_text(line)
+        if heading is not None:
+            open_item = False
+            if heading.lower().startswith("acceptance"):
+                section = "acceptance"
+            else:
+                section = "other"
+                sections.append(stripped)
+            continue
+        if section == "acceptance":
+            if code or not stripped:
+                open_item = False
+            elif (open_item and ticketdoc.indent_of(line)
+                  and not ticketdoc.is_list_marker(stripped)):
+                acceptance[-1] = f"{acceptance[-1]} {stripped}".strip()
+            elif stripped.startswith(("-", "*")):
+                acceptance.append(stripped[1:].strip())
+                open_item = True
+            else:
+                open_item = False
+        elif stripped:
+            (preamble if section is None else sections).append(stripped)
+    return summary, preamble or sections, acceptance
 
 
 def _as_list(value) -> list:
@@ -264,36 +303,7 @@ class MarkdownAdapter(Adapter):
         return parent, [k for k in children if not ids.same(str(k), key)]
 
     def _to_ticket(self, key: str, fm: dict, body: str) -> Ticket:
-        summary = ""
-        description_lines: list[str] = []
-        acceptance: list[str] = []
-        section = None
-        for line in body.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("# ") and not summary:
-                summary = stripped[2:].strip()
-                continue
-            if stripped.lower().startswith("## acceptance"):
-                section = "acceptance"
-                continue
-            if stripped.startswith("## "):
-                # Any other section (Comments, etc.) — mark it distinctly, not
-                # None, so its body isn't folded into the description. None is
-                # reserved for the preamble between the summary and the first
-                # `## ` heading, which is the actual description.
-                section = "other"
-                continue
-            if section == "acceptance" and stripped.startswith(("-", "*")):
-                acceptance.append(stripped[1:].strip())
-            elif section is None and stripped:
-                description_lines.append(stripped)
-        # A body that goes straight into `## Summary` has no preamble, so the
-        # first Summary section stands in as the description. A preamble,
-        # when present, always wins. Comments are cut first: a comment is
-        # inserted verbatim, so a `## Summary` line in one is not the ticket's.
-        if not description_lines:
-            description_lines = _first_summary_section(
-                cut_managed_tail(body, "comments"))
+        summary, description_lines, acceptance = _read_body(body)
 
         status = str(fm.get("status", ""))
         issue_type = str(fm.get("type", ""))
@@ -406,12 +416,13 @@ class MarkdownAdapter(Adapter):
 
     def artifact_body(self, ticket):
         # The body after frontmatter, up to `## Comments`. Ticket.description
-        # is only the preamble before the first `##`, so section rules can't
-        # use it. Comments are cut, not left for the checker to ignore: a
-        # comment is inserted verbatim, so a `## Findings` line in one would
-        # end the section and be judged as the ticket's. Every tkt writer
-        # keeps Comments last (`comment` appends it, `apply`/`edit --body`
-        # move it to the end), so only a hand-placed section after it is lost.
+        # drops blank lines and Acceptance (and every section, when there is
+        # a preamble), so section rules can't use it. Comments are cut, not
+        # left for the checker to ignore: a comment is inserted verbatim, so
+        # a `## Findings` line in one would end the section and be judged as
+        # the ticket's. Every tkt writer keeps Comments last (`comment`
+        # appends it, `apply`/`edit --body` move it to the end), so only a
+        # hand-placed section after it is lost.
         _, body = self._read_raw(ticket.key)
         return cut_managed_tail(body, "comments")
 

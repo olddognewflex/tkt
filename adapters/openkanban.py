@@ -38,6 +38,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import ticketdoc
 from core.errors import ConfigError, NotFoundError, ProviderError, UsageError
 from core.gates import cut_managed_tail, managed_tail_start
 from core.query import JqlSubset
@@ -396,20 +397,35 @@ class OpenKanbanAdapter(Adapter):
 
 
 def _extract_acceptance(body: str) -> list[str]:
-    out, capture = [], False
-    for line in (body or "").splitlines():
-        low = line.strip().lower()
-        if low.startswith(("## acceptance", "acceptance criteria", "### acceptance")):
+    """List items under an acceptance heading, up to the next heading or
+    prose. An indented line right after an item continues it, joined
+    with one space, unless it opens a list item of its own; a blank line
+    or a fence ends the item. Fenced lines are content, never headings
+    or items."""
+    out, capture, open_item = [], False, False
+    lines = (body or "").splitlines()
+    for line, code in zip(lines, ticketdoc.code_mask(lines)):
+        s = line.strip()
+        if code:
+            open_item = False
+            continue
+        if (capture and open_item and s and ticketdoc.indent_of(line)
+                and not ticketdoc.is_list_marker(s, "-*•")):
+            out[-1] = f"{out[-1]} {s}".strip()
+            continue
+        if s.lower().startswith(("## acceptance", "acceptance criteria",
+                                 "### acceptance")):
             capture = True
+            open_item = False
             continue
         if capture:
-            s = line.strip()
             if s.startswith(("-", "*", "•")):
                 out.append(s.lstrip("-*• ").strip())
+                open_item = True
             elif s.startswith("#"):
                 break
             elif not s:
-                continue
+                open_item = False
             else:
                 break
     return out
