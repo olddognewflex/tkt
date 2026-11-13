@@ -248,6 +248,7 @@ class MarkdownAdapter(Adapter):
     def _to_ticket(self, key: str, fm: dict, body: str) -> Ticket:
         summary = ""
         description_lines: list[str] = []
+        summary_lines: list[str] = []
         acceptance: list[str] = []
         section = None
         for line in body.splitlines():
@@ -257,6 +258,9 @@ class MarkdownAdapter(Adapter):
                 continue
             if stripped.lower().startswith("## acceptance"):
                 section = "acceptance"
+                continue
+            if stripped.lower() == "## summary" and not summary_lines:
+                section = "summary"
                 continue
             if stripped.startswith("## "):
                 # Any other section (Comments, etc.) — mark it distinctly, not
@@ -269,6 +273,13 @@ class MarkdownAdapter(Adapter):
                 acceptance.append(stripped[1:].strip())
             elif section is None and stripped:
                 description_lines.append(stripped)
+            elif section == "summary" and stripped:
+                summary_lines.append(stripped)
+        # A body that goes straight into `## Summary` has no preamble, so the
+        # first Summary section stands in as the description. A preamble,
+        # when present, always wins.
+        if not description_lines:
+            description_lines = summary_lines
 
         status = str(fm.get("status", ""))
         issue_type = str(fm.get("type", ""))
