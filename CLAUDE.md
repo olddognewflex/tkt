@@ -122,7 +122,13 @@ adapter and its `view` rendering (`test_children_jira.py`,
 `test_parent_cli.py`), the two-sided `link --type blocks|"is blocked by"`
 on the local boards (`test_blocks_markdown.py`,
 `test_blocks_openkanban.py`) and on GitHub via native issue
-dependencies or both bodies (`test_blocks_github.py`), `tkt --version` (`test_version.py`), shipped shell snippets
+dependencies or both bodies (`test_blocks_github.py`), the markdown
+`branches` / `prs` lists, `tkt edit --add-branch/--add-pr` and their
+validation (`test_vcs_links_markdown.py`), `tkt edit` with them
+exiting 3 on a backend without `edit` and 64 on a bad value before any
+backend call (`test_vcs_links_unsupported.py`), every `open-pr` copy
+recording the branch and PR, and the canonical record step run under
+bash/zsh/dash against a stub `tkt` (`test_open_pr_vcs_record.py`), `tkt --version` (`test_version.py`), shipped shell snippets
 piping JSON into `jq` with `printf`, never `echo`
 (`test_no_echo_jq.py`), the `container` type class and its precedence
 (`test_issue_types.py`), `child_states` per adapter (`test_child_states.py`),
@@ -294,8 +300,10 @@ the date fields `due` / `scheduled` / `completed`, and `agent_status` (board age
 `idle` | `processing` | `waiting` | `done` | `blocked`, or empty) alongside
 `agent_status_at` (when that state last actually changed, ISO-8601 UTC; stamped by
 the adapter, never passed in, so re-asserting the same state doesn't reset it),
-and the hierarchy edges `children` (direct child keys) and `parent` (one key or
-`""`). Edges that cost an extra backend call — jira and github children, github
+the hierarchy edges `children` (direct child keys) and `parent` (one key or
+`""`), and `branches` / `prs` (the code implementing the ticket: a bare
+branch name in `vcs.repo` or `owner/repo@branch`, and PR URLs; markdown
+stores them, set by `tkt edit --add-branch/--add-pr`, everyone else `[]`). Edges that cost an extra backend call — jira and github children, github
 parent, github native blocker links — are filled on `view` only
 (`blockers` asks github for the links alone). Every adapter's `view` takes
 `hierarchy=False` to skip those calls (the rest ignore it); internal callers that

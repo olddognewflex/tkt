@@ -237,11 +237,17 @@ class Adapter(ABC):
         scheduled: str | None = None,
         completed: str | None = None,
         agent_status: str | None = None,
+        add_branches: list[str] | None = None,
+        remove_branches: list[str] | None = None,
+        add_prs: list[str] | None = None,
+        remove_prs: list[str] | None = None,
     ) -> Ticket:
         """Edit a ticket's content/fields in place; return it normalized.
 
         Only the arguments that are not None are changed (an empty string is a
-        valid value, e.g. clearing the assignee or a date). Status is
+        valid value, e.g. clearing the assignee or a date). The `*_branches`
+        / `*_prs` lists add to or remove from `Ticket.branches` / `.prs`;
+        adding a present entry or removing an absent one is a no-op. Status is
         intentionally NOT editable here — lane moves go through `transition` so
         history/worklog stay correct."""
         raise ProviderError(f"edit not supported by provider '{self.config.provider}'")

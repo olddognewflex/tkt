@@ -62,6 +62,13 @@ class Ticket:
     # sits under); "" when none, never this ticket's own key. github needs
     # an extra call for it, so fills it on `view` only.
     parent: str = ""
+    # The git branches and pull requests that implement this ticket, in the
+    # order recorded, de-duplicated. A branch is a bare name (in the
+    # config's `vcs.repo`) or `owner/repo@branch`; a PR is its URL. Set by
+    # `tkt edit --add-branch/--add-pr`; only the markdown backend stores
+    # them today, every other adapter leaves them [].
+    branches: list[str] = field(default_factory=list)
+    prs: list[str] = field(default_factory=list)
     transitions: list[str] = field(default_factory=list)  # available next lanes
     # Child progress, filled by `tkt view` for containers only; None
     # otherwise: {"total", "closed", "open": [keys], "ready_to_close"}.

@@ -95,7 +95,7 @@ separate harness-specific files).
 | `tkt lane-time [KEY] --role ROLE [--keys K1:role,K2:role] [--read-only]` | log time for a closed lane interval; batch via `--keys` |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket (adapter-opt-in) |
 | `tkt apply [KEY] --file PATH` \| `--new --file PATH` \| `--template` | create/update from a full ticket markdown doc (`-` reads stdin) |
-| `tkt edit KEY [--summary/--body/--priority/--assignee/--add-label/--remove-label/--due/--scheduled/--completed/--agent-status]` | field-level update; `--body` replaces the whole body, like `create --body` (comments kept) |
+| `tkt edit KEY [--summary/--body/--priority/--assignee/--add-label/--remove-label/--due/--scheduled/--completed/--agent-status/--add-branch/--remove-branch/--add-pr/--remove-pr]` | field-level update; `--body` replaces the whole body, like `create --body` (comments kept) |
 | `tkt link KEY --to OTHER --type T` | link tickets (adapter-opt-in) |
 | `tkt lane ROLE` | resolve role → provider lane name |
 | `tkt cfg DOTTED.KEY [--pkg/--ticket/--slug]` | read config + template substitution |
@@ -123,6 +123,12 @@ separate harness-specific files).
   can't write a state the board's badge mapping won't recognize. The adapter
   stamps `agent_status_at` whenever the state actually changes; re-asserting
   the same state leaves the stamp alone.
+- `--add-branch` / `--remove-branch` / `--add-pr` / `--remove-pr` maintain
+  the ticket's `branches` / `prs` lists. Each repeats; adding a present entry
+  or removing an absent one is a no-op. A branch is a bare name (in
+  `vcs.repo`, no `@`) or `owner/repo@branch`; a PR is its URL. Added values
+  are validated up front (exit 64). Markdown backend only: elsewhere `edit`
+  exits 3, which `open-pr` treats as "not stored", not a failure.
 
 ### Ticket identity fields
 
