@@ -32,6 +32,8 @@ A backend maps only the keys it can store and ignores the rest. `children:
 only; `tkt link --type child|parent` keeps both sides in step), while
 backends that derive hierarchy from their own links (jira, github, linear)
 ignore them, so they are deliberately not in the shared `TEMPLATE`.
+`branches: [...]` and `prs: [...]` (the git branches and PR URLs that
+implement the ticket) are likewise markdown-only and left out of it.
 """
 from __future__ import annotations
 

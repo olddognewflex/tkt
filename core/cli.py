@@ -39,6 +39,10 @@ def _print_ticket_human(t: Ticket) -> None:
         print(f"  children: {', '.join(t.children)}")
     if t.rollup is not None:
         print(f"  progress: {_rollup_line(t.rollup, t.children)}")
+    if t.branches:
+        print(f"  branches: {', '.join(t.branches)}")
+    if t.prs:
+        print(f"  prs:      {', '.join(t.prs)}")
     if t.transitions:
         print(f"  next:     {', '.join(t.transitions)}")
     if t.url:
@@ -257,6 +261,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--completed", default=None)
     # Agent state: omit = unchanged, "" to clear, else one of AGENT_STATES.
     sp.add_argument("--agent-status", default=None, dest="agent_status")
+    # The git branches / PRs implementing the ticket; each repeatable.
+    sp.add_argument("--add-branch", action="append", default=[], dest="add_branch")
+    sp.add_argument("--remove-branch", action="append", default=[], dest="remove_branch")
+    sp.add_argument("--add-pr", action="append", default=[], dest="add_pr")
+    sp.add_argument("--remove-pr", action="append", default=[], dest="remove_pr")
 
     sp = add("lane")
     sp.add_argument("role")
@@ -403,6 +412,56 @@ def _validate_agent_status(value: str | None) -> str | None:
             f"--agent-status: invalid state '{value}', "
             f"expected one of {', '.join(AGENT_STATES)} (or \"\" to clear)")
     return value
+
+
+# Characters a branch entry may not hold: whitespace would not survive a
+# frontmatter scalar, and `,` `[` `]` would split or end the flow list the
+# markdown board stores it in. `@{` is not a valid git ref anyway, and
+# keeping it out leaves `owner/repo@branch` unambiguous.
+_BRANCH_BAD = (",", "[", "]", "@{")
+# The frontmatter reader strips quotes from each end of a list element, so a
+# value starting or ending with one would be stored changed and could then
+# never be removed by the name it was added under.
+_QUOTES = ("'", '"')
+
+
+def _validate_branches(flag: str, values: list[str]) -> list[str]:
+    """`--add-branch` / `--remove-branch` values: a bare branch name or
+    `owner/repo@branch`, each non-empty."""
+    for v in values:
+        if (not v or any(c.isspace() for c in v)
+                or any(b in v for b in _BRANCH_BAD)
+                or v[0] in _QUOTES or v[-1] in _QUOTES):
+            raise UsageError(
+                f"{flag}: invalid branch {v!r}: expected a branch name or "
+                "owner/repo@branch, with no whitespace, ',', '[', ']' or '@{', "
+                "not starting or ending with a quote")
+        if v.rpartition("@")[2] == "HEAD":
+            raise UsageError(
+                f"{flag}: invalid branch {v!r}: HEAD is not a branch "
+                "(detached checkout?)")
+        if "@" in v:
+            repo, _, branch = v.partition("@")
+            if repo.count("/") != 1 or not all(repo.split("/")) or not branch:
+                raise UsageError(
+                    f"{flag}: invalid branch {v!r}: a repo-qualified branch "
+                    "is owner/repo@branch")
+    return values
+
+
+def _validate_prs(flag: str, values: list[str]) -> list[str]:
+    """`--add-pr` / `--remove-pr` values: an http(s) URL that fits in the
+    markdown board's flow list (no whitespace, ',', '[' or ']')."""
+    for v in values:
+        if (not v.startswith(("https://", "http://"))
+                or len(v.split("://", 1)[1]) == 0
+                or any(c.isspace() for c in v)
+                or any(b in v for b in (",", "[", "]"))
+                or v[-1] in _QUOTES):
+            raise UsageError(
+                f"{flag}: invalid PR {v!r}: expected an http(s) URL with no "
+                "whitespace, ',', '[' or ']', not ending with a quote")
+    return values
 
 
 def _subst(value: str, pkg: str, ticket: str, slug: str) -> str:
@@ -688,6 +747,16 @@ def main(argv: list[str]) -> int:
             print(f"{args.key} {args.link_type} {args.to}")
 
         elif args.verb == "edit":
+            # Passed only when given, so an adapter whose `edit` predates
+            # the VCS lists keeps working for every other flag. Only adds
+            # are validated: a removal must still match an odd entry a
+            # hand edit left behind.
+            vcs = {k: v for k, v in (
+                ("add_branches", _validate_branches("--add-branch", args.add_branch)),
+                ("remove_branches", args.remove_branch),
+                ("add_prs", _validate_prs("--add-pr", args.add_pr)),
+                ("remove_prs", args.remove_pr),
+            ) if v}
             t = adapter.edit(
                 args.key, summary=args.summary, body=args.body,
                 priority=args.priority, assignee=args.assignee,
@@ -696,6 +765,7 @@ def main(argv: list[str]) -> int:
                 scheduled=_validate_date("--scheduled", args.scheduled),
                 completed=_validate_date("--completed", args.completed),
                 agent_status=_validate_agent_status(args.agent_status),
+                **vcs,
             )
             if args.json:
                 print(json.dumps(t.to_dict(), indent=2))

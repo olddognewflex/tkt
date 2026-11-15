@@ -192,6 +192,31 @@ def _read_body(body: str) -> tuple[str, list[str], list[str]]:
     return summary, preamble or sections, acceptance
 
 
+def _vcs_list(value) -> list[str]:
+    """A `branches:` / `prs:` frontmatter value: non-empty strings,
+    de-duplicated, in the order recorded. A bare scalar is one entry."""
+    return [v for v in dict.fromkeys(str(x).strip() for x in _as_list(value)) if v]
+
+
+def _edit_vcs_list(fm: dict, name: str, add, remove) -> None:
+    """Apply `tkt edit --add-*` / `--remove-*` to one VCS list in place.
+    Adding an entry already present, or removing one that is absent, is a
+    no-op; a list left empty drops its key, so a ticket never carries
+    `branches: []` noise."""
+    if not add and not remove:
+        return
+    cur = _vcs_list(fm.get(name))
+    for v in add or []:
+        if v not in cur:
+            cur.append(v)
+    drop = {str(v).strip() for v in remove or []}
+    cur = [v for v in cur if v not in drop]
+    if cur:
+        fm[name] = cur
+    else:
+        fm.pop(name, None)
+
+
 def _as_list(value) -> list:
     """A frontmatter list key, tolerating a bare scalar (`children: X`)."""
     value = value or []
@@ -391,6 +416,8 @@ class MarkdownAdapter(Adapter):
             blocks=list(blocks),
             children=children,
             parent=parent,
+            branches=_vcs_list(fm.get("branches")),
+            prs=_vcs_list(fm.get("prs")),
             transitions=sorted(self.config.roles.values()),
         )
 
@@ -574,12 +601,14 @@ class MarkdownAdapter(Adapter):
             }
             # Optional lists are written only when the doc sets them, so a
             # new ticket carries no empty `labels: []` / `children: []` noise.
-            for name in ("labels", "children"):
+            for name in ("labels", "children", "branches", "prs"):
                 val = fm_in.get(name, []) or []
                 if isinstance(val, str):
                     val = [val]
                 if name == "children":  # a ticket is never its own child
                     val = [k for k in val if str(k) != new_key]
+                if name in ("branches", "prs"):
+                    val = _vcs_list(val)
                 if val:
                     fm[name] = list(val)
             # Likewise `parent`, only when set. apply is single-sided: it
@@ -618,6 +647,15 @@ class MarkdownAdapter(Adapter):
                       "due", "scheduled", "completed"):
             if field in fm_in:
                 fm[field] = fm_in[field]
+        # The VCS lists drop their key when the doc empties them, as `edit`
+        # does, rather than storing `branches: []`.
+        for field in ("branches", "prs"):
+            if field in fm_in:
+                val = _vcs_list(fm_in[field])
+                if val:
+                    fm[field] = val
+                else:
+                    fm.pop(field, None)
         # `parent` is stored as one scalar key; an empty one drops the key.
         # Single-sided, like `children` above: neither the old nor the new
         # parent's file is touched (that is `tkt link`'s job). A reference
@@ -799,8 +837,13 @@ class MarkdownAdapter(Adapter):
 
     def edit(self, key, summary=None, body=None, priority=None, assignee=None,
              add_labels=None, remove_labels=None,
-             due=None, scheduled=None, completed=None, agent_status=None):
+             due=None, scheduled=None, completed=None, agent_status=None,
+             add_branches=None, remove_branches=None,
+             add_prs=None, remove_prs=None):
         fm, doc = self._read_raw(key)
+
+        _edit_vcs_list(fm, "branches", add_branches, remove_branches)
+        _edit_vcs_list(fm, "prs", add_prs, remove_prs)
 
         if priority is not None:
             fm["priority"] = priority

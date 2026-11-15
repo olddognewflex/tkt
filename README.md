@@ -239,7 +239,7 @@ A company copy also shows the upstream commit from its `PACK_VERSION` stamp.
 | `tkt lane-time --keys K1:ROLE[,K2:ROLE,...] [--read-only]` | batch lane-time (one call, N keys) | JSON array of worklogs |
 | `tkt create --type T --summary S [--priority P] [--assignee A] [--body B] [--project P]` | create a ticket | new key / `--json` ticket |
 | `tkt link KEY --to OTHER --type T` | link KEY → OTHER (`T` = outward description: `blocks`, `is blocked by`, `Fixes`, …) | confirmation |
-| `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L] [--due D] [--scheduled D] [--completed D] [--agent-status S]` | edit content/fields in place (only flags passed change; status excluded — use `transition`). `--body` replaces the whole description, as `create --body` sets it (on markdown: everything under the `# summary`, keeping the backend-managed `## Comments` log); `--summary` alone leaves the body untouched. Dates are ISO `YYYY-MM-DD`; pass `""` to clear. `--agent-status` is the agent execution state (`idle`/`processing`/`waiting`/`done`/`blocked`, `""` to clear) a board can surface; markdown backend only. | normalized ticket / `--json` |
+| `tkt edit KEY [--summary S] [--body B] [--priority P] [--assignee A] [--add-label L] [--remove-label L] [--due D] [--scheduled D] [--completed D] [--agent-status S] [--add-branch B] [--remove-branch B] [--add-pr URL] [--remove-pr URL]` | edit content/fields in place (only flags passed change; status excluded — use `transition`). `--body` replaces the whole description, as `create --body` sets it (on markdown: everything under the `# summary`, keeping the backend-managed `## Comments` log); `--summary` alone leaves the body untouched. Dates are ISO `YYYY-MM-DD`; pass `""` to clear. `--agent-status` is the agent execution state (`idle`/`processing`/`waiting`/`done`/`blocked`, `""` to clear) a board can surface; markdown backend only. `--add-branch`/`--add-pr` (and their `--remove-*` pairs, each repeatable) maintain the ticket's `branches` / `prs`; adding twice or removing an absent entry is a no-op, and added values are validated (exit 64); markdown backend only. | normalized ticket / `--json` |
 | `tkt apply --new --file F` / `tkt apply KEY --file F` | create / update a ticket from a full markdown doc (frontmatter + body; `-` = stdin). Owns the doc except `status` (use `transition`) and backend-managed sections (Comments), preserved verbatim. | new/updated key / `--json` ticket |
 | `tkt apply --template` | print the create-document template the editor opens with | markdown doc |
 | `tkt init --provider P [--dir D] [--force] [--link-skills] [--sample] [--no-detect-build] [--no-detect-repo] [--project KEY] [--board-dir PATH] [--no-inherit]` | scaffold `.sdlc/config.toml` (+ optionally link the pack); seeds `[build]` from the project's package manager and `[vcs].repo` from the git origin remote; markdown joins a parent dir's shared board | next-steps summary |
@@ -286,10 +286,17 @@ name, and `tkt transition KEY review` to move.
   "created": "2026-09-27T06:28:36.123Z", "updated": "2026-09-28T09:00:00.000Z",
   "labels": ["..."], "components": ["..."],
   "blocked_by": [{"key": "TKT-2", "resolved": false}],
-  "blocks": [], "children": [], "parent": "", "transitions": ["..."], "url": "...",
+  "blocks": [], "children": [], "parent": "",
+  "branches": ["feature/tkt-1-login"], "prs": ["https://github.com/o/r/pull/7"],
+  "transitions": ["..."], "url": "...",
   "rollup": null
 }
 ```
+
+`branches` (a bare branch name in `vcs.repo`, or `owner/repo@branch`) and
+`prs` (URLs) are the code implementing the ticket, in the order recorded;
+only the markdown backend stores them (`tkt edit --add-branch/--add-pr`),
+every other backend returns `[]`.
 
 `rollup` is filled by `tkt view` for a container only:
 `{"total": 5, "closed": 3, "open": ["TKT-4", "TKT-5"], "ready_to_close": false}`.
@@ -641,6 +648,10 @@ since `tkt blockers` reads only `blocked_by`. Both tickets must exist, and
 re-running a link changes nothing; a hand edit or `tkt apply` writes only
 the file it touches. Any file `link` writes has its frontmatter rewritten in
 canonical form (quotes dropped, lines without a `:` removed).
+**branches** and **prs** come from optional `branches: [...]` / `prs: [...]`
+frontmatter lists (absent = `[]`), maintained by `tkt edit --add-branch/
+--remove-branch/--add-pr/--remove-pr`, which `open-pr` runs on PR open;
+emptying one drops its key. Their live state is not stored.
 Queries use a tiny JQL subset (`field = "v" [AND ...] [ORDER BY field DIR]`,
 `currentUser()`, `is EMPTY`) so the same `[queries]` strings read like Jira's.
 `ORDER BY priority` ranks by the priority order (`tkt cfg priorities`), not by

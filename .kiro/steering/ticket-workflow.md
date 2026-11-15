@@ -38,7 +38,7 @@ Full pipeline:
 3. `plan-ticket` — structured implementation plan
 4. Implement + test (using `tkt cfg build.*` commands)
 5. `self-review` — adversarial pre-PR review loop
-6. `open-pr` — push, open PR, request reviewers, transition `in_progress → review`
+6. `open-pr` — push, open PR, record the branch + PR on the ticket (`tkt edit --add-branch/--add-pr`), request reviewers, transition `in_progress → review`
 7. `ci-fix` — watch CI, fix failures, loop until green
 8. `respond-to-review` — address reviewer comments, loop until approved
 9. `deploy-preview` — confirm preview URL, comment on ticket
