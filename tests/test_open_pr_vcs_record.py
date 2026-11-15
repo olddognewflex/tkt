@@ -60,7 +60,7 @@ SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv"}
 
 # `tkt edit <key> ... --add-pr <var>`, on one line / in one code span.
 RECORD = re.compile(
-    r'tkt edit\s+"?(?:\$\{?KEY\}?|\{\{args\}\})"?[^\n`]*?--add-pr\s+"?\$\{?\w+')
+    r'tkt edit\s+"?(?:\$\{?KEY\}?|\{\{args\}\})"?[^\n`]*?--add-pr\s+"?\$\{?(\w+)')
 
 SHELLS = [s for s in ("bash", "zsh", "dash") if shutil.which(s)]
 HAVE_GIT = shutil.which("git") is not None
@@ -121,6 +121,23 @@ class OpenPrCopies(unittest.TestCase):
                 if review:
                     self.assertLess(m.start(), review.start(),
                                     "record step after the review transition")
+
+    def test_every_copy_assigns_the_pr_variable_from_gh(self):
+        # The variable `--add-pr` reads must be assigned, before the record
+        # step, from `gh pr create` (which prints the new PR's URL) or
+        # `gh pr view`. Merely naming `$PR_URL` passes an empty value when
+        # the instructions are followed literally, and `tkt edit` rejects it.
+        for rel in sorted(self.copies):
+            with self.subTest(path=rel):
+                text = (ROOT / rel).read_text(encoding="utf-8")
+                m = RECORD.search(text)
+                self.assertIsNotNone(m, "no `tkt edit $KEY ... --add-pr` step")
+                var = m.group(1)
+                self.assertRegex(
+                    text[:m.start()],
+                    rf"\b{re.escape(var)}=\$\(gh pr (?:create|view)\b",
+                    f"`${var}` is never assigned from `gh pr create`/`gh pr view` "
+                    "before the record step")
 
     def test_no_copy_takes_the_branch_from_rev_parse(self):
         # `git rev-parse --abbrev-ref HEAD` prints `HEAD` on a detached
