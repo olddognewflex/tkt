@@ -31,6 +31,7 @@ Commit staged changes, push the branch, open a PR, request reviewers, and move t
    REPO=$(tkt cfg vcs.repo)
    gh pr create --repo "$REPO" --title "..." --body "..."
    ```
+   Record the branch and the PR URL (`$PR_URL`, printed by `gh pr create`) on the ticket: `tkt edit "$KEY" --add-branch "$BRANCH" --add-pr "$PR_URL"`, where `BRANCH=$(git symbolic-ref -q --short HEAD)`; on a detached HEAD (`BRANCH` empty) leave out `--add-branch` so the PR is still recorded. Non-fatal: exit 3 means the backend does not store branches/PRs; report any other failure.
 5. Request reviewers from `tkt cfg vcs.reviewers --json`.
 6. If `type_class == full_sdlc`: annotate with `tkt worklog` then `tkt transition "$KEY" review`.
 7. If `deliverable`: comment and stay in `in_progress`.

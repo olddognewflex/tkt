@@ -94,6 +94,33 @@ done
 CLASS=$(tkt view "$KEY" --json | jq -r .type_class)
 PR_URL=$(gh pr view "$PR" --repo "$(tkt cfg vcs.repo)" --json url --jq .url)
 
+# Record the branch and PR on the ticket (adding is idempotent). Exit 3 is
+# a backend that does not store them, which is not a failure; anything else
+# (an empty PR_URL, a missing ticket) is reported, never blamed on the backend.
+# A detached HEAD has no branch name; the PR is still recorded without it.
+# (`--add-branch ""` would fail validation, so the flag is left out
+# explicitly rather than with `${BRANCH:+...}`, which zsh keeps as one word.)
+BRANCH=$(git symbolic-ref -q --short HEAD || true)
+record() {
+  if [ -n "$BRANCH" ]; then
+    tkt edit "$KEY" --add-branch "$BRANCH" --add-pr "$PR_URL" >/dev/null
+  else
+    tkt edit "$KEY" --add-pr "$PR_URL" >/dev/null
+  fi
+}
+if [ -z "$PR_URL" ]; then
+  echo "Warning: no PR URL; branch/PR not recorded on $KEY"
+elif record; then
+  :
+else
+  rc=$?
+  if [ "$rc" -eq 3 ]; then
+    echo "Note: this backend does not store branches/PRs on tickets — skipping"
+  else
+    echo "Warning: could not record branch/PR on $KEY (tkt edit exit $rc)"
+  fi
+fi
+
 if [ "$CLASS" = "full_sdlc" ]; then
   # Annotate time in in_progress, then move to review.
   WL=$(tkt worklog "$KEY" --from-role in_progress --note "PR opened: $PR_URL" --json)
@@ -105,6 +132,9 @@ else
   tkt comment "$KEY" "PR opened: $PR_URL. Review requested. (Deliverable type — staying in In Progress until merge + Done.)"
 fi
 ```
+
+The branch is recorded by its bare name, which `tkt` reads as a branch of
+`vcs.repo`. `tkt view` then lists it under `branches:` and the PR under `prs:`.
 
 `tkt worklog` is a no-op (returns an empty `worklog_id`) when the project's
 `[timetracking].provider = "none"`, so this works unchanged on backends with no
