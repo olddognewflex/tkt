@@ -32,6 +32,90 @@ so it judges the evidence rather than recalling the intent.
 the diff from scratch and argue against it before approving. Pretend it is a
 stranger's PR. Do not rubber-stamp your own code.
 
+**Routed review.** The project may send this pass to another harness or model.
+Resolve it first:
+
+```shell
+R=$(tkt cfg route self-review --json); rc=$?
+```
+
+Exit 4: nothing is configured, so review in-session as above. Any other non-zero
+exit (2 = invalid routing table): stop and report it. On exit 0, send the pass
+out only when `source` is `route`, `harness` is set, and that harness is not the
+one you are running in. Judge that by the program `cmd` runs, not by the
+`harness` key, which is any name the project chose. Otherwise review in-session,
+giving the subagent the resolved `model` when this harness can select one.
+
+A routed reviewer stands in for the read-only `sdlc-reviewer` agent, so its
+`cmd` should be a read-only invocation. The prompt also tells it to modify no
+file, which is the only guard when the project gives this route a write-capable
+`cmd` for `tkt run` (where the route runs the whole phase, fixes included).
+Write the prompt to a file: the reviewer instructions in this step and step 3,
+the diff, the plan/ticket summary, an instruction not to modify any file, and
+the result line it must end with:
+
+```
+TKT-RESULT: {"phase":"self-review","outcome":"advance|retry","reason":"<one-line verdict>","findings":[{"file":"...","line":0,"severity":"blocker|warning|nit","description":"...","fix":"..."}]}
+```
+
+`advance` is PASS (zero blockers, zero warnings); `retry` is anything else. Then
+run the block below **as one shell invocation**; it resolves the route again
+itself, so it does not depend on an earlier call's variables. It blocks for the
+whole review, so give the call the longest timeout available, or run it in the
+background (`[run].invocation_timeout` is how long `tkt run` allows). A call the
+shell tool kills is a failed run, like any other below.
+
+```shell
+(
+CMD=$(tkt cfg route self-review --json | jq -r '.cmd // ""')
+PROMPT_FILE=$(mktemp)
+trap 'rm -f "$PROMPT_FILE"' EXIT
+# ... write the reviewer prompt into "$PROMPT_FILE" ...
+# Keep the shell out of it: append command output directly
+#   git diff <range> >> "$PROMPT_FILE"
+# and literal text (instructions, ticket summary) only through a quoted
+# heredoc (cat >> "$PROMPT_FILE" <<'EOF' ... EOF) or your file-write tool,
+# never inside a double-quoted shell string or an unquoted <<EOF, which run
+# its $(...) and backticks.
+SIZE=$(wc -c < "$PROMPT_FILE" | tr -d ' ')
+if [ -z "$CMD" ]; then
+  echo "self-review: could not read the route's cmd; reviewing in-session" >&2
+  exit 1
+elif [ "$SIZE" -gt 100000 ]; then
+  echo "self-review: prompt too large to route ($SIZE bytes); reviewing in-session" >&2
+  exit 1
+else
+  RUN=$(printf '%s\n' "$CMD" | sed 's/{prompt}/"$(cat "$PROMPT_FILE")"/g')
+  OUT=$(PROMPT_FILE="$PROMPT_FILE" sh -c "$RUN" </dev/null); hrc=$?
+  RESULT=$(printf '%s\n' "$OUT" | LC_ALL=C sed -n 's/^[[:space:]]*TKT-RESULT: //p' | tail -n 1)
+  if [ "$hrc" -eq 0 ] && printf '%s\n' "$RESULT" | jq -se 'length == 1 and (.[0] |
+      type == "object" and .phase == "self-review" and (.outcome == "retry" or
+      (.outcome == "advance" and ([.findings[]? | .severity? | strings |
+      ascii_downcase | select(. == "blocker" or . == "warning")] | length == 0))))' \
+      >/dev/null 2>&1; then
+    printf '%s\n' "$RESULT" | jq .
+  else
+    echo "self-review: routed review did not run (exit $hrc, no valid result); reviewing in-session" >&2
+    exit 1
+  fi
+fi
+)
+```
+
+Once the file is written, the prompt reaches the harness through `cat`, never
+through shell parsing, so quotes, `$` and backticks in the diff arrive intact.
+Writing the file is the one step where the shell could read hostile ticket or
+diff text, hence the rules in the block's comments. That holds because `cmd`
+carries `{prompt}` as a bare shell word; `tkt` rejects a quoted, escaped or
+embedded one. The prompt travels as one argument, so one over 100000 bytes is
+not routed (Linux caps a single argument at 128 KiB). A valid result feeds
+step 3 unchanged; an `advance` that lists blockers or warnings is not valid. A
+failed run (the block exits 1) is not a finding and not a PASS: say in the output that the routed
+review did not run, then review in-session. A pinned `model` stays on every
+pass; it never escalates. Only this pass is routed: the fixes in step 4 stay
+with the author, and the step-5 checks stay in-session because their evidence
+is command output, not judgment.
+
 Hostile-reviewer mindset. Check every changed file for:
 
 | Category | Look for |

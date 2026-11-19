@@ -31,3 +31,4 @@ End-to-end pipeline from "what should I work on?" to "shipped." Orchestrates sub
 - All ticketing via `tkt`.
 - All repo/toolchain values via `tkt cfg`.
 - Lane times annotated with `tkt worklog` (no-op when time tracking disabled).
+- Before each phase, resolve it with `tkt cfg route <phase> --json` (phase = skill name). Exit 4: session default. Any other non-zero exit (2 = invalid routing table): stop and report it. Every phase runs in this session, with the resolved `model` when the harness can select one; a route naming a different harness is for `tkt run`, so say so and run the phase here on the session default. The one exception is the `self-review` review pass, which `self-review` itself routes out to a read-only `cmd`, reading the last `TKT-RESULT: ` stdout line; a failed routed run is reviewed in-session, never read as a PASS. Tier routes escalate on failure; a pinned `model` route never does.

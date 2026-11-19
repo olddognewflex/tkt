@@ -159,6 +159,30 @@ class Validation(unittest.TestCase):
         self.assertConfigError(config({"codex": {"cmd": "codex 'exec {prompt}"}}),
                                "[harnesses.codex].cmd does not parse")
 
+    def test_cmd_quoted_prompt(self):
+        # A quoted placeholder would hand the prompt back to the shell.
+        for bad in ('codex exec "{prompt}"', "codex exec '{prompt}'",
+                    'codex --input="{prompt}"', "x 'a {prompt} b'",
+                    "x \\{prompt}", "x $(echo {prompt})", "x `echo {prompt}`",
+                    "x $(printf %s {prompt} x)", "x a{prompt}", "x {prompt}b",
+                    "x {prompt})"):
+            with self.subTest(cmd=bad):
+                self.assertConfigError(config({"codex": {"cmd": bad}}),
+                                       "must use a bare {prompt}")
+
+    def test_cmd_bare_prompt_next_to_quotes_is_fine(self):
+        for ok in ("codex exec --model 'm' {prompt}", 'x "a b" {prompt} "c"',
+                   "x --input={prompt}", "x {prompt} 'it''s'", "{prompt}",
+                   "x {prompt}; y", "x {prompt} | cat", "x {prompt}&& y",
+                   "x $(pwd) {prompt}", "x `pwd` {prompt}", "x '$(' {prompt}",
+                   "x {prompt}\n", "\nx {prompt}\n", "x \\\n{prompt}",
+                   "x {prompt}\r\n"):
+            with self.subTest(cmd=ok):
+                r = routing.resolve(config({"codex": {"cmd": ok}},
+                                           {"p": {"harness": "codex", "model": "m"}}),
+                                    "p")
+                self.assertIn("{prompt}", r["cmd"])
+
     def test_cmd_empty_or_not_a_string(self):
         for bad in ("", "  ", 3, ["codex", "{prompt}"]):
             with self.assertRaises(ConfigError, msg=repr(bad)):

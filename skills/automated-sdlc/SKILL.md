@@ -14,13 +14,48 @@ shape are declared in `.sdlc/config.toml`.
 
 ## Model routing
 
-Each sub-skill declares a `model_tier` (`cheap` | `standard` | `deep`) in its
-frontmatter. Resolve the tier to a concrete model from project config before
-invoking a phase:
+Before invoking a phase, ask the resolver where it runs. The phase key is the
+skill name (`plan-ticket`, `self-review`, ...):
 
 ```shell
-tkt cfg models.deep         # exit 4 = no [models] table -> skip routing entirely
+R=$(tkt cfg route "<phase>" --json); rc=$?
 ```
+
+| Exit | Meaning | Do |
+|------|---------|----|
+| 0 | resolved | read `source`, `harness`, `model`, `cmd` from `$R` |
+| 4 | nothing configured for the phase | run it on the session default |
+| other | a routing table is invalid (2) or `tkt` failed | stop and report the error; never guess a route |
+
+Every phase runs **in this session**: delegate as usual (subagent, else
+inline), passing the resolved `model` when this harness can select one per
+delegation. A phase's output (a plan, code, ticket transitions) has to land
+here, so the orchestrator never shells a whole phase out to another harness.
+When a phase's route names a different harness (`source` is `route`,
+`harness` is set, and it is not the harness you are running in, judged by the
+program `cmd` runs rather than the `harness` key), that route is for `tkt run`,
+which runs whole phases through it. Say so and run the phase here
+on the session default: its `model` belongs to the other harness.
+
+The one exception is the **`self-review` review pass**. It is read-only and
+reports findings, so `self-review` step 2 resolves its own route and, under that
+same condition, shells out to the routed `cmd` and reads the findings from the
+**last** stdout line starting `TKT-RESULT: ` (the JSON contract `tkt run`
+reads). Invoke `self-review` in-session as usual and let it do the routing. If
+the routed run cannot happen (non-zero exit, no valid result line, a prompt too
+large to pass), step 2 reviews in-session and says the routed review did not run.
+That fallback is never read as a PASS.
+
+A routed invocation gets no more trust than the agent it stands in for: the
+routed review pass stands in for the read-only `sdlc-reviewer` agent, so its
+harness `cmd` should be read-only. The resolver cannot check this; the
+project's `[harnesses]` table owns it. `tkt run` reads the same route for its
+whole self-review phase, fixes included, so a read-only `cmd` there blocks the
+ticket on any finding; see [docs/model-routing.md](../../docs/model-routing.md)
+("Trust") for choosing between the two.
+
+Each sub-skill declares a `model_tier` (`cheap` | `standard` | `deep`) in its
+frontmatter, which the resolver falls back to through `[models]`:
 
 | Tier | Phases |
 |------|--------|
@@ -30,13 +65,26 @@ tkt cfg models.deep         # exit 4 = no [models] table -> skip routing entirel
 
 **Escalate on failure, never start high.** A cheap-tier phase that returns a wrong
 or ambiguous result gets retried once at standard. If `self-review` cycles 3+ times
-without converging, re-plan at deep and resume the review at standard. Escalation
-is per-invocation — subsequent phases resume at their assigned tier.
+without converging, re-plan at deep and resume the review at standard. Look up the
+escalated model with `tkt cfg models.<tier>` (exit 4: stay on the session default).
+Escalation is per-invocation — subsequent phases resume at their assigned tier.
 
-**Never block on routing.** If the harness cannot select a model, or `[models]` is
-unset, proceed on the session default. No phase requires a specific model to
-produce correct output — routing is a cost optimization. Full policy and the
-per-harness support matrix: [docs/model-routing.md](../../docs/model-routing.md).
+Escalation applies only to a phase run in this session on its resolved model
+(not one on the session default because its route names another harness) whose
+resolved `tier` is set: a `tier` route, a harness-only route (its tier comes from the skill), or
+`source` `tier`. **A route with a pinned `model` never escalates** (its resolved
+`tier` is empty): every retry and every review pass stays on that model, and
+when the phase's own limit is spent (for `self-review`, 3 passes) it stops for a
+human as usual. A routed review pass on another harness keeps its resolved
+`cmd` and never escalates either. Pinning one phase does not change the others:
+a pinned review that cycles 3+ times still triggers the deep re-plan when
+`plan-ticket` is tier-routed.
+
+**Never block on a missing route.** If the harness cannot select a model, or
+nothing is configured (exit 4), proceed on the session default. No phase requires
+a specific model to produce correct output — routing is a cost and
+independence choice. Full policy and the per-harness support matrix:
+[docs/model-routing.md](../../docs/model-routing.md).
 
 ## Prerequisites
 

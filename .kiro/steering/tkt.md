@@ -87,5 +87,5 @@ The project's SDLC configuration lives in `.sdlc/config.toml`. This file defines
 - Build/test/lint commands, plus the optional `build.bdd` behavior-spec runner
 - Deploy workflow names
 - Time tracking provider
-- `[models]` — the tier→model mapping skills resolve via `tkt cfg models.<tier>`
+- `[models]` — the tier→model mapping; skills resolve each phase via `tkt cfg route <phase>`, which falls back to it
 - `[run]` — harness command and caps for the `tkt run` loop driver
