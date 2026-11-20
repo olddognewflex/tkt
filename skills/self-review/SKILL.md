@@ -60,14 +60,26 @@ TKT-RESULT: {"phase":"self-review","outcome":"advance|retry","reason":"<one-line
 
 `advance` is PASS (zero blockers, zero warnings); `retry` is anything else. Then
 run the block below **as one shell invocation**; it resolves the route again
-itself, so it does not depend on an earlier call's variables. It blocks for the
+itself, so it does not depend on an earlier call's variables. Its exit code says
+what to do next: 0, the findings are on stdout; 1 or 4, review in-session (stderr
+says why); 2, the resolver failed, so stop and report it, as above. It blocks for the
 whole review, so give the call the longest timeout available, or run it in the
 background (`[run].invocation_timeout` is how long `tkt run` allows). A call the
 shell tool kills is a failed run, like any other below.
 
 ```shell
 (
-CMD=$(tkt cfg route self-review --json | jq -r '.cmd // ""')
+# Capture the resolver's own exit code: piping it straight into jq would
+# hide a config error behind an empty cmd.
+ROUTE=$(tkt cfg route self-review --json); trc=$?
+if [ "$trc" -eq 4 ]; then
+  echo "self-review: no route configured; reviewing in-session" >&2
+  exit 4
+elif [ "$trc" -ne 0 ]; then
+  echo "self-review: tkt cfg route failed (exit $trc); stopping, fix the routing config" >&2
+  exit 2
+fi
+CMD=$(printf '%s\n' "$ROUTE" | jq -r '.cmd // ""')
 PROMPT_FILE=$(mktemp)
 trap 'rm -f "$PROMPT_FILE"' EXIT
 # ... write the reviewer prompt into "$PROMPT_FILE" ...

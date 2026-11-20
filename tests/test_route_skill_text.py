@@ -93,6 +93,9 @@ class SkillText(unittest.TestCase):
                 # reaches the child shell.
                 self.assertIn('PROMPT_FILE="$PROMPT_FILE" sh -c "$RUN" </dev/null',
                               text)
+                # The resolver's exit code must survive: a pipe into jq
+                # would turn a config error into a silent fallback.
+                self.assertNotRegex(text, r"tkt cfg route self-review --json\s*\|")
                 # Model-only routes stay in-session.
                 self.assertRegex(text, r"`harness` is set")
 
@@ -280,15 +283,32 @@ class RoutedSnippet(unittest.TestCase):
                 self.assertEqual(p.returncode, 1)
                 self.assertFalse(argc.exists())
 
-    def test_failing_tkt_inside_the_block_falls_back(self):
+    def test_resolver_error_inside_the_block_stops(self):
+        # Any non-4 resolver exit is a config/tkt failure: stop (exit 2),
+        # never fall back to an in-session review or run the harness.
+        for shell in SHELLS:
+            for trc in ("2", "1", "64"):
+                with self.subTest(shell=shell, tkt_rc=trc):
+                    argc = self.dir / "argc"
+                    argc.unlink(missing_ok=True)
+                    p = self.run_block(shell, f"TKT-RESULT: {json.dumps(FINDINGS)}\n",
+                                       tkt_rc=trc)
+                    self.assertEqual(p.returncode, 2, p.stderr)
+                    self.assertEqual(p.stdout, "")
+                    self.assertIn("stopping", p.stderr)
+                    self.assertNotIn("reviewing in-session", p.stderr)
+                    self.assertFalse(argc.exists(), "the harness was invoked")
+
+    def test_no_route_configured_reviews_in_session(self):
         for shell in SHELLS:
             with self.subTest(shell=shell):
                 argc = self.dir / "argc"
                 argc.unlink(missing_ok=True)
                 p = self.run_block(shell, f"TKT-RESULT: {json.dumps(FINDINGS)}\n",
-                                   route_override="", tkt_rc="2")
+                                   route_override="", tkt_rc="4")
+                self.assertEqual(p.returncode, 4, p.stderr)
                 self.assertEqual(p.stdout, "")
-                self.assertEqual(p.returncode, 1)
+                self.assertIn("reviewing in-session", p.stderr)
                 self.assertFalse(argc.exists())
 
     def test_prompt_file_is_removed(self):
