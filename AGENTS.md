@@ -34,8 +34,12 @@ separate harness-specific files).
      - `tkt cfg deploy.production_workflow`
      - `tkt cfg route <phase> --json` resolves a phase to `{phase, harness,
        model, tier, cmd, source}`; exit 4 = nothing configured, proceed on
-       the session default. An empty `cmd` means run it on the current
-       harness with `model`.
+       the session default; any other non-zero exit (2 = invalid table),
+       stop. Interactive skills run every phase on the current harness, with
+       `model` unless the route names a different harness (then the session
+       default); only the `self-review` review pass shells out to a `cmd` for
+       another harness, reading its last `TKT-RESULT:` stdout line
+       (`docs/model-routing.md`).
      - `tkt schedule --json` for after-hours handling (optional `[schedule]`
        table: `after_hours_label`, `business_hours`, `timezone`, `days`). Never
        compute the window in shell; `in_window` is false and `enabled` false
@@ -417,11 +421,15 @@ hand-maintained.
   | `qa-engineer` | read + write tests + test runner | QA phase (P4.5) |
 
   Every phase that delegates also states an inline fallback, so harnesses without
-  subagent support run the pipeline unchanged.
+  subagent support run the pipeline unchanged. A phase routed to another
+  harness through `[routes]` stands in for the agent above and keeps its
+  trust: the routed `self-review` review pass should use a read-only harness
+  `cmd` (`docs/model-routing.md`, "Trust", has the `tkt run` trade-off).
 - `docs/install.md` — installing `tkt` and the pack.
 - `docs/markdown-ticketing.md` — the markdown provider's on-disk format.
-- `docs/model-routing.md` — the `model_tier` frontmatter key and the `[models]`
-  tier→model mapping skills resolve via `tkt cfg models.<tier>`.
+- `docs/model-routing.md` — the `model_tier` frontmatter key, the `[models]`
+  tier→model mapping, and routing a phase to another harness, all resolved
+  through `tkt cfg route <phase>`.
 - `docs/behavior-specs.md` — the BDD practice behind the optional `build.bdd` key.
 - `docs/qa-suite-design.md` — how the five `qa-*` skills and `qa-engineer` fit
   together, and the Break-It Checklist they share.

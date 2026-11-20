@@ -50,7 +50,52 @@ def harnesses(config) -> dict[str, dict]:
             shlex.split(cmd)
         except ValueError as e:
             raise ConfigError(f"{where}.cmd does not parse: {e}") from e
+        if _prompt_quoted(cmd):
+            raise ConfigError(f"{where}.cmd must use a bare {{prompt}} (its own shell "
+                              f"word, unquoted): the caller quotes the prompt itself")
     return table
+
+
+def _prompt_quoted(cmd: str) -> bool:
+    """True when a `{prompt}` is not a bare shell word: inside quotes,
+    escaped, inside `$(...)` or backticks, or glued to other text (a
+    `--flag={prompt}` suffix is fine). A routed harness gets a self-quoted
+    value (the skills substitute `"$(cat FILE)"`), so any other placement
+    hands the prompt back to the shell: split, globbed, or run as code.
+    It cannot see what the program does with a bare word (`eval`, `sh -c`)
+    or a `{prompt}` after a `#` comment; that stays the config author's.
+    `[run].harness_cmd` is not checked, so existing configs keep working."""
+    quote, depth, tick, i = "", 0, False, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if quote != "'" and c == "\\":
+            if cmd.startswith("{prompt}", i + 1):
+                return True
+            i += 2
+            continue
+        if cmd.startswith("{prompt}", i):
+            if quote or depth or tick:
+                return True
+            before = cmd[i - 1] if i else " "
+            after = cmd[i + len("{prompt}"):i + len("{prompt}") + 1] or " "
+            if before not in " \t\n\r=" or after not in " \t\n\r;|&":
+                return True
+            i += len("{prompt}")
+            continue
+        if quote:
+            if c == quote:
+                quote = ""
+        elif c in "'\"":
+            quote = c
+        elif c == "`":
+            tick = not tick
+        elif cmd.startswith("$(", i):
+            depth += 1
+            i += 1
+        elif c == ")" and depth:
+            depth -= 1
+        i += 1
+    return False
 
 
 def routes(config) -> dict[str, dict]:

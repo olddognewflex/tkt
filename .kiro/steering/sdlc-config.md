@@ -130,7 +130,7 @@ the caller skips cleanly; any other non-zero exit is a real error to surface.
 ## `[models]` (optional)
 
 ```toml
-[models]                       # tier -> model; resolved via `tkt cfg models.<tier>`
+[models]                       # tier -> model; phases resolved via `tkt cfg route <phase>`
 cheap    = "claude-haiku-4-5"
 standard = "claude-sonnet-5"
 deep     = "claude-opus-5"

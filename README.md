@@ -897,12 +897,13 @@ cmd = "claude -p {prompt} --model {model} --permission-mode acceptEdits"
 cmd = "codex exec --model {model} --sandbox read-only {prompt}"
 
 [routes]                       # key = skill / phase name
-self-review = { harness = "codex", model = "gpt-5.5" }
+self-review = { harness = "codex", model = "gpt-5.5" }  # read-only: see note below
 plan-ticket = { harness = "claude", tier = "deep" }   # tier resolves through [models]
 ```
 
-A harness has one key, `cmd`, which must contain `{prompt}` and parse as a
-shell command line. A route takes `harness` (a defined `[harnesses]` name),
+A harness has one key, `cmd`, which must contain `{prompt}` as a bare shell
+word (unquoted, unescaped, not inside `$(...)`; the caller quotes the prompt
+itself) and parse as a shell command line. A route takes `harness` (a defined `[harnesses]` name),
 and `model` *or* `tier` (`cheap`/`standard`/`deep`); either alone is fine.
 `tkt cfg route PHASE [--json]` resolves in this order:
 
@@ -949,7 +950,20 @@ but it must still be valid. `implement` and `type-route` have no skill, so
 a harness-only route for them gets no `model_tier` fallback; `qa-ready` is
 never invoked (P9 always stops for human QA) but is still validated. Each
 `run.log` entry records the phase's `harness` (`""` when the phase runs
-`[run].harness_cmd`). The skills themselves do not consume routes yet.
+`[run].harness_cmd`).
+
+The interactive skills read the same table. `automated-sdlc` resolves each
+phase before delegating and runs it in-session, with the resolved `model`
+where the harness can select one; a route to a different harness is honoured
+by `tkt run` only, except for the `self-review` review pass, which
+`self-review` shells out to the routed `cmd`, reading the findings from the
+last `TKT-RESULT:` stdout line. Note that `tkt run` runs its whole P4 through
+the `self-review` route, fixes included, so the read-only Codex route above
+suits interactive use but makes `tkt run` block the ticket on any review
+finding; the doc's "Trust" section covers the choice.
+See [docs/model-routing.md](docs/model-routing.md#routing-a-phase-to-another-harness)
+for the contract, the trust rule for read-only passes, and why a pinned
+`model` route never escalates.
 
 ### Resume model
 
